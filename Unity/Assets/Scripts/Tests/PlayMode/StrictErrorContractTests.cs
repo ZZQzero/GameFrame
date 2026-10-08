@@ -1,3 +1,5 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -5,13 +7,13 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Threading;
 using Cysharp.Threading.Tasks;
-using Game.Pooling;
-using Game.Timer;
+using GameFrame.Pooling;
+using GameFrame.Timing;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
 
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
     public class StrictErrorContractTests
     {
@@ -535,20 +537,20 @@ namespace UIFrame.Regression
 
         [SetUp] public void Setup()
         {
-            UI.Init();
-            manager = (UIManager)typeof(UI).GetField("_manager", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
+            GameUI.Init();
+            manager = (UIManager)typeof(GameUI).GetField("_manager", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
             panel = new GameObject("popup-contract", typeof(RectTransform)).AddComponent<ContractPopupPanel>();
             panel.Location = "contract/popup";
             UIPanelCatalog.Register<ContractPopupPanel>(panel.Location);
             var cache = (Dictionary<Type, UIPanel>)typeof(UIManager).GetField("_cached", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(manager);
             cache[typeof(ContractPopupPanel)] = panel;
-            result = UI.Popup<ContractPopupPanel, int>();
+            result = GameUI.Popup<ContractPopupPanel, int>();
         }
 
         [UnityTearDown] public IEnumerator Cleanup()
         {
             if (panel != null) panel.OpenAction = panel.CloseAction = panel.DestroyAction = panel.CompleteAction = null;
-            UI.Shutdown();
+            GameUI.Shutdown();
             yield return null;
         }
 
@@ -559,9 +561,9 @@ namespace UIFrame.Regression
             panel.OpenAction = () =>
             {
                 if (closeSelf) panel.CloseSelf();
-                else UI.Close<ContractPopupPanel>();
+                else GameUI.Close<ContractPopupPanel>();
             };
-            result = UI.Popup<ContractPopupPanel, int>();
+            result = GameUI.Popup<ContractPopupPanel, int>();
             Assert.Throws<OperationCanceledException>(() => previous.GetAwaiter().GetResult());
             Assert.Throws<OperationCanceledException>(() => result.GetAwaiter().GetResult());
             Assert.IsFalse(panel.gameObject.activeSelf);
@@ -577,17 +579,17 @@ namespace UIFrame.Regression
                 try { previous.GetAwaiter().GetResult(); }
                 catch (OperationCanceledException) { }
                 continued = true;
-                try { UI.Popup<ContractPopupPanel, int>().GetAwaiter().GetResult(); }
+                try { GameUI.Popup<ContractPopupPanel, int>().GetAwaiter().GetResult(); }
                 catch (Exception exception) { nestedError = exception; }
             });
-            result = UI.Popup<ContractPopupPanel, int>();
+            result = GameUI.Popup<ContractPopupPanel, int>();
             Assert.IsTrue(continued);
             Assert.IsInstanceOf<InvalidOperationException>(nestedError);
             StringAssert.Contains("正在打开", nestedError.Message);
             panel.Submit(17);
             Assert.AreEqual(17, result.GetAwaiter().GetResult());
             // 保护随本次操作结束解除，普通的后续打开不受影响。
-            result = UI.Popup<ContractPopupPanel, int>();
+            result = GameUI.Popup<ContractPopupPanel, int>();
             panel.Submit(18);
             Assert.AreEqual(18, result.GetAwaiter().GetResult());
         }

@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
-namespace Game.Pooling
+namespace GameFrame.Pooling
 {
     /// <summary>主线程托管对象池。稳态 Get/Release 不产生托管分配。</summary>
     public sealed class ManagedObjectPool<T> : IDisposable where T : class
@@ -34,7 +34,7 @@ namespace Game.Pooling
             var value = options ?? ManagedPoolOptions.Default;
             inactive = new List<T>(value.InitialCapacity);
             maxSize = value.MaxSize;
-            collectionCheck = value.CollectionCheck && UIFrame.UIFrameSafety.CollectionChecks;
+            collectionCheck = value.CollectionCheck && GameFrame.UI.UIFrameSafety.CollectionChecks;
         }
 
         public int CountAll => activeCount + inactive.Count;
@@ -93,7 +93,7 @@ namespace Game.Pooling
             if (disposed) return;
             EnsureUsable();
             disposed = true;
-            var failure = new UIFrame.CleanupFailure();
+            var failure = new GameFrame.UI.CleanupFailure();
             while (inactive.Count > 0)
             {
                 var item = TakeInactive();

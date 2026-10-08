@@ -1,4 +1,4 @@
-namespace UIFrame.Sqlite
+namespace GameFrame.Sqlite
 {
     public enum SqliteCheckpointMode
     {

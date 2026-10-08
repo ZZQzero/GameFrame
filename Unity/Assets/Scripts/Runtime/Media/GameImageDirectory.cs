@@ -4,7 +4,7 @@ using System.IO;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 
-namespace Game.Media
+namespace GameFrame.Media
 {
     public static class GameImageDirectory
     {

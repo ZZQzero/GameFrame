@@ -2,7 +2,7 @@ using System;
 using UnityEditor;
 using UnityEngine;
 
-namespace UIFrame.Sqlite.Editor
+namespace GameFrame.Sqlite.Editor
 {
     [InitializeOnLoad]
     internal static class SqliteEditorLifecycle

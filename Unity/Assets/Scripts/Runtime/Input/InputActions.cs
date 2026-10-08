@@ -1,4 +1,4 @@
-namespace Game.Input
+namespace GameFrame.Input
 {
     public static class PlayerActions
     {

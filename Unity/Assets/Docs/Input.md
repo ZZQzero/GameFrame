@@ -1,9 +1,9 @@
 # GameInput
 
-入口：`Game.Input.GameInput`。绑定：`Assets/InputSystem_Actions.inputactions`。配置：`Assets/Input/Config/DefaultInputRuntimeConfig.asset`。生命周期由 `Launch` 的 `Init` / `Shutdown` 管理。
+入口：`GameFrame.Input.GameInput`。绑定：`Assets/InputSystem_Actions.inputactions`。配置：`Assets/Input/Config/DefaultInputRuntimeConfig.asset`。生命周期由 `Launch` 的 `Init` / `Shutdown` 管理。
 
 ```csharp
-using Game.Input;
+using GameFrame.Input;
 ```
 
 ---
@@ -165,7 +165,7 @@ void OnPause(bool paused)
 
 ## 注意
 
-- 在 `namespace Game` 里不要写裸 `Input.`，会撞到 `Game.Input`。旧 Input Manager 用 `UnityEngine.Input`。
+- 在 `namespace Game` 里不要写裸 `Input.`，会撞到 `GameFrame.Input`。旧 Input Manager 用 `UnityEngine.Input`。
 - 不要用 `Input.GetKey` / `GetAxis`。
 - 开 UI 时不要手动把 Move 写成零，用 `PushUi`。
 - 本机只有一份 `GameInput.Player`，不要给每个单位各订一份输入。

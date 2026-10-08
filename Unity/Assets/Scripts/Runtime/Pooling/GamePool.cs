@@ -2,11 +2,11 @@ using System;
 using UnityEngine;
 using YooAsset;
 
-namespace Game.Pooling
+namespace GameFrame.Pooling
 {
     /// <summary>
     /// 进程内默认 <see cref="GameObjectPoolService"/> 入口。可选；测试和隔离场景请直接 new 服务。
-    /// <see cref="Init(ResourcePackage, Transform)"/> 的 persistRoot 必须比 <c>UI.Shutdown</c> 活得更久，不要挂在 UIFrameRoot 下。
+    /// <see cref="Init(ResourcePackage, Transform)"/> 的 persistRoot 必须比 <c>GameUI.Shutdown</c> 活得更久，不要挂在 UIFrameRoot 下。
     /// LoopScroll / UIItem 仍通过 <c>SetPool</c> 注入，不要在框架内部写死 <see cref="Service"/>。
     /// 不叫 <c>Pool</c>，以免和 <c>UILoopScrollBase.Pool</c> 属性撞名。
     /// </summary>
@@ -63,10 +63,10 @@ namespace Game.Pooling
             }
         }
 
-        /// <summary>释放默认池。未 Init 时为空操作。退出顺序必须是先 <c>UI.Shutdown</c>，再调本方法。</summary>
+        /// <summary>释放默认池。未 Init 时为空操作。退出顺序必须是先 <c>GameUI.Shutdown</c>，再调本方法。</summary>
         public static void Shutdown()
         {
-            var failure = new UIFrame.CleanupFailure();
+            var failure = new GameFrame.UI.CleanupFailure();
             if (service != null)
             {
                 try { service.Dispose(); }

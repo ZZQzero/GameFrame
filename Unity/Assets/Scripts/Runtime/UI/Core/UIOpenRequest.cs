@@ -1,7 +1,7 @@
 using System;
 using Cysharp.Threading.Tasks;
 
-namespace UIFrame
+namespace GameFrame.UI
 {
     class UILoadRequest
     {

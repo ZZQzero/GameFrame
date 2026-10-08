@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace UIFrame.Sqlite.Internal
+namespace GameFrame.Sqlite.Internal
 {
     internal sealed class NativeResult : IDisposable
     {
@@ -98,7 +98,7 @@ namespace UIFrame.Sqlite.Internal
             NativeMethods.Check(NativeMethods.ufsqlite_client_create(NativeMethods.Abi, out client));
             try
             {
-                pump = new Thread(Drain) { IsBackground = true, Name = "UIFrame.Sqlite completion" };
+                pump = new Thread(Drain) { IsBackground = true, Name = "GameFrame.Sqlite completion" };
                 pump.Start();
             }
             catch

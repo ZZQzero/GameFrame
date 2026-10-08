@@ -5,7 +5,7 @@ using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 
-namespace Game.Media
+namespace GameFrame.Media
 {
     public readonly struct ImageThumbnailCacheStatistics
     {
@@ -89,7 +89,7 @@ namespace Game.Media
             }
             catch(Exception error)
             {
-                var cleanup=new UIFrame.CleanupFailure();cleanup.Capture(error);
+                var cleanup=new GameFrame.UI.CleanupFailure();cleanup.Capture(error);
                 if(reservation!=null)cleanup.Run(reservation.Dispose);if(keyReservation!=null)cleanup.Run(keyReservation.Dispose);
                 if(fresh && entry!=null){Remove(entry);if(entry.SourceLease!=null)cleanup.Run(entry.SourceLease.Dispose);if(entry.Admission!=null)cleanup.Run(entry.Admission.Dispose);if(entry.Cancellation!=null)cleanup.Run(entry.Cancellation.Dispose);}
                 cleanup.Throw();throw;
@@ -142,7 +142,7 @@ namespace Game.Media
         void FinishWaiter(Waiter waiter,ImageTexture value,Exception error,bool cancel)
         {
             if(waiter.Finished){value?.Dispose();return;}waiter.Finished=true;waiter.Entry.Waiters.Remove(waiter);
-            var cleanup=new UIFrame.CleanupFailure();if(error!=null)cleanup.Capture(error);cleanup.Run(waiter.Cancellation.Dispose);if(waiter.Admission!=null)cleanup.Run(waiter.Admission.Dispose);
+            var cleanup=new GameFrame.UI.CleanupFailure();if(error!=null)cleanup.Capture(error);cleanup.Run(waiter.Cancellation.Dispose);if(waiter.Admission!=null)cleanup.Run(waiter.Admission.Dispose);
             try {cleanup.Throw();if(cancel)waiter.Completion.TrySetCanceled(waiter.Token);else waiter.Completion.TrySetResult(value);}
             catch(Exception failure){try{value?.Dispose();}catch(Exception secondary){Debug.LogException(secondary);}waiter.Completion.TrySetException(failure);}
         }
@@ -188,7 +188,7 @@ namespace Game.Media
             }
             finally
             {
-                var cleanup=new UIFrame.CleanupFailure();cleanup.Run(entry.Admission.Dispose);cleanup.Run(entry.Cancellation.Dispose);loading--;
+                var cleanup=new GameFrame.UI.CleanupFailure();cleanup.Run(entry.Admission.Dispose);cleanup.Run(entry.Cancellation.Dispose);loading--;
                 try{cleanup.Throw();}catch(Exception error){if(closed && shutdownFailure==null)shutdownFailure=error;throw;}
             }
         }
@@ -202,7 +202,7 @@ namespace Game.Media
         {
             MediaThread.Check();if(!closed)
             {
-                closed=true;var cleanup=new UIFrame.CleanupFailure();
+                closed=true;var cleanup=new GameFrame.UI.CleanupFailure();
                 foreach(var entry in entries.Values.ToArray())
                 {
                     Remove(entry);if(entry.Owner==null)cleanup.Run(entry.Cancellation.Cancel);else cleanup.Run(()=>Evict(entry));

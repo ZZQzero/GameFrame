@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using UIFrame.Sqlite.Internal;
+using GameFrame.Sqlite.Internal;
 
-namespace UIFrame.Sqlite
+namespace GameFrame.Sqlite
 {
     public sealed class SqliteDatabase
     {

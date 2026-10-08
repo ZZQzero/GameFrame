@@ -1,6 +1,6 @@
 {
   "name": "GameFrame.Sqlite",
-  "rootNamespace": "UIFrame.Sqlite",
+  "rootNamespace": "GameFrame.Sqlite",
   "references": [],
   "autoReferenced": true,
   "allowUnsafeCode": false,

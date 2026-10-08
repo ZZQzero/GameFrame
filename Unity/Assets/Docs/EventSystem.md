@@ -1,6 +1,6 @@
 # EventSystem 使用说明与注意事项
 
-宿主层事件总线，**独立于 UIFrame**。面板打开/关闭、弹窗返回值仍走 `UI.Push` / `UI.Popup<..., TResult>`，不要用事件代替。
+宿主层事件总线，**独立于 UIFrame**。面板打开/关闭、弹窗返回值仍走 `GameUI.Push` / `GameUI.Popup<..., TResult>`，不要用事件代替。
 
 与 Unity `EventSystems.EventSystem` 重名时写 `Game.EventSystem`。
 
@@ -129,7 +129,7 @@ EventSystem.DumpListenerCounts();    // 每种类型的监听数打到 Console
 
 | 场景 | 用什么 |
 |------|--------|
-| 打开/关闭面板、弹窗要返回值 | `UI.Push` / `UI.Popup<..., TResult>` |
+| 打开/关闭面板、弹窗要返回值 | `GameUI.Push` / `GameUI.Popup<..., TResult>` |
 | 切 / 加 / 卸 Unity 场景 | `GameScene` |
 | 红点数量 | `RedDot.Set` / `Bind` |
 | 背包变了、任务完成、多模块广播 | `EventSystem` |

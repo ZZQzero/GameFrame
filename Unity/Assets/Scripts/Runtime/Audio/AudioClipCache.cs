@@ -5,7 +5,7 @@ using Cysharp.Threading.Tasks;
 using UnityEngine;
 using YooAsset;
 
-namespace Game.Audio
+namespace GameFrame.Audio
 {
     internal sealed class AudioClipCache : IDisposable
     {
@@ -215,7 +215,7 @@ namespace Game.Audio
             }
 
             disposed = true;
-            var failure = new UIFrame.CleanupFailure();
+            var failure = new GameFrame.UI.CleanupFailure();
             foreach (CacheEntry entry in entries.Values)
             {
                 var handle = entry.Handle;

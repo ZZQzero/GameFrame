@@ -1,23 +1,26 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.IO;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using GameFrame.Editor.Excel;
 using NUnit.Framework;
-using UIFrame.Editor;
+using GameFrame.UI.Editor;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.TestTools;
 
-namespace UIFrame.Regression.First
+namespace GameFrame.Tests.First
 {
     public class Host : MonoBehaviour { public GameObject First; public GameObject Second; }
 }
-namespace UIFrame.Regression.Second
+namespace GameFrame.Tests.Second
 {
     public class Host : MonoBehaviour { public GameObject First; }
 }
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
     public class EditorFailureTests
     {

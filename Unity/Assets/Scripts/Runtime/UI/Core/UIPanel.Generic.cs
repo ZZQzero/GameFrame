@@ -1,4 +1,4 @@
-namespace UIFrame
+namespace GameFrame.UI
 {
     /// <summary>带类型化打开参数的面板。Args 只在打开时赋值一次。</summary>
     public abstract class UIPanel<TArgs> : UIPanel

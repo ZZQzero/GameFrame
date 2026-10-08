@@ -1,6 +1,6 @@
 using UnityEditor;
 
-namespace UIFrame.Editor
+namespace GameFrame.UI.Editor
 {
     [CustomEditor(typeof(UIPanel), true)]
     sealed class UIPanelInspector : UnityEditor.Editor

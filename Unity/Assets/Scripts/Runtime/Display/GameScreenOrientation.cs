@@ -1,4 +1,4 @@
-﻿namespace UIFrame
+﻿namespace GameFrame.Display
 {
     public enum GameScreenOrientation
     {

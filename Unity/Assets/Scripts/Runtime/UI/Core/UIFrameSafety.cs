@@ -1,4 +1,4 @@
-namespace UIFrame
+namespace GameFrame.UI
 {
     /// <summary>
     /// 主线程与集合安全检查。默认 Editor / Development 打开，Release 关闭。

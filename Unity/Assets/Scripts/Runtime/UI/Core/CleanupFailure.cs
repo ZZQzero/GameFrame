@@ -2,7 +2,7 @@ using System;
 using System.Runtime.ExceptionServices;
 using UnityEngine;
 
-namespace UIFrame
+namespace GameFrame.UI
 {
     // 清理必须继续；只向调用方传播第一个错误，次级错误记录一次。
     internal struct CleanupFailure

@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
-using Game;
-using Game.Timer;
+using GameFrame.Event;
+using GameFrame.Timing;
 
-namespace UIFrame
+namespace GameFrame.UI
 {
     /// <summary>
     /// 面板生命周期作用域。作用域结束时取消令牌并释放已登记的资源。
@@ -55,7 +55,7 @@ namespace UIFrame
         }
 
         /// <summary>创建归属于作用域的计时器。</summary>
-        public TimerHandle Schedule(in TimerOptions options, Game.Timer.TimerCallback callback)
+        public TimerHandle Schedule(in TimerOptions options, GameFrame.Timing.TimerCallback callback)
         {
             ThrowIfDisposed();
             if (!_timerOwner.IsValid)

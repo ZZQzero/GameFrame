@@ -4,7 +4,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Threading;
 
-namespace Game.Media
+namespace GameFrame.Media
 {
     // A file metadata reference is cheap to create. The persistent directory index
     // additionally proves content, and reuses that proof only under continuous observation.

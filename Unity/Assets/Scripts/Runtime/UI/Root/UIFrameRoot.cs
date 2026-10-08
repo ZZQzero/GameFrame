@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
+using GameFrame.Display;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem.UI;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.UI;
 
-namespace UIFrame
+namespace GameFrame.UI
 {
     /// <summary>UI 根节点。默认 Screen Space Camera + UI Camera，可挂入 URP Camera Stack。</summary>
     sealed class UIFrameRoot : MonoBehaviour

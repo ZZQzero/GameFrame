@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Game.Input
+namespace GameFrame.Input
 {
     public readonly struct InputLayerHandle : IEquatable<InputLayerHandle>
     {

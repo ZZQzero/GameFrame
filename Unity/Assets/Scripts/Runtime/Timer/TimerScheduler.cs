@@ -4,7 +4,7 @@ using System.Threading;
 using UnityEngine;
 using Unity.Profiling;
 
-namespace Game.Timer
+namespace GameFrame.Timing
 {
     public sealed partial class TimerScheduler : IDisposable
     {
@@ -21,13 +21,13 @@ namespace Game.Timer
 
         private static int nextSchedulerId;
         private static readonly ProfilerMarker TickProfilerMarker =
-            new("Game.Timer.Tick");
+            new("GameFrame.Timing.Tick");
         private static readonly ProfilerMarker FastForwardProfilerMarker =
-            new("Game.Timer.FastForward");
+            new("GameFrame.Timing.FastForward");
         private static readonly ProfilerMarker DispatchProfilerMarker =
-            new("Game.Timer.Dispatch");
+            new("GameFrame.Timing.Dispatch");
         private static readonly ProfilerMarker CallbackProfilerMarker =
-            new("Game.Timer.Callback");
+            new("GameFrame.Timing.Callback");
 
         private readonly int schedulerId;
         private readonly int ownerThreadId;

@@ -1,3 +1,5 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -7,14 +9,14 @@ using System.Net.Http;
 using System.Reflection;
 using System.Threading;
 using Cysharp.Threading.Tasks;
-using Game.Media;
-using Game.Media.Backup;
+using GameFrame.Media;
+using GameFrame.Media.Backup;
 using NUnit.Framework;
-using UIFrame.Sqlite;
+using GameFrame.Sqlite;
 using UnityEngine;
 using UnityEngine.TestTools;
 
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
     public sealed class MediaFlowTests
     {
@@ -106,7 +108,7 @@ namespace UIFrame.Regression
                 Assert.Greater((await library.GetPositionAsync(oldScope)).PermissionGeneration,initial);
                 await automatic.ScanOnceAsync();
                 string newScope=ImageBackupService.Hash(new ImageLibraryScope(ImageLibrarySourceKind.Directory,directory).Id+":"+true);
-                Assert.IsFalse((await service.Db(Game.Media.Backup.BackupRepository.Command.ScopeState,default,newScope)).Single.Flag("requires_confirmation"));
+                Assert.IsFalse((await service.Db(GameFrame.Media.Backup.BackupRepository.Command.ScopeState,default,newScope)).Single.Flag("requires_confirmation"));
             } finally {await service.ShutdownAsync();await library.ShutdownAsync();}
         });
         [UnityTest] public IEnumerator WatchThenRefreshWaitsForRegistration()=>UniTask.ToCoroutine(async()=>

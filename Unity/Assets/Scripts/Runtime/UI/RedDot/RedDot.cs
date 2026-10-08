@@ -4,7 +4,7 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using UnityEngine;
 
-namespace UIFrame
+namespace GameFrame.UI
 {
     /// <summary>
     /// 基于路径树的红点聚合器。只有叶子可写，父节点的值等于所有子节点之和。

@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 using TMPro;
 using UnityEngine;
 
-namespace Game.L10n
+namespace GameFrame.Localization
 {
     public static class LanguageManager
     {

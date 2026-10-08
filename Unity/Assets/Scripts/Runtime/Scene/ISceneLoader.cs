@@ -2,7 +2,7 @@ using System;
 using Cysharp.Threading.Tasks;
 using UnityEngine.SceneManagement;
 
-namespace Game.Scene
+namespace GameFrame.Scene
 {
     internal interface ISceneLoader
     {

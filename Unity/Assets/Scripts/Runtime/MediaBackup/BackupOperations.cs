@@ -5,9 +5,9 @@ using System.Security.Cryptography;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
-using Command = Game.Media.Backup.BackupRepository.Command;
+using Command = GameFrame.Media.Backup.BackupRepository.Command;
 
-namespace Game.Media.Backup
+namespace GameFrame.Media.Backup
 {
     public enum BackupAction { Resume, Pause, Cancel, Retry, RetryCleanup, ClearHistory }
     public enum BackupOperationPhase { Selecting, Running, Completed, Failed }

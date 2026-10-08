@@ -1,4 +1,4 @@
-namespace UIFrame
+namespace GameFrame.UI
 {
     /// <summary>一次打开解析出的绑定：地址、层、分组、关闭是否缓存。</summary>
     readonly struct UIPanelBind

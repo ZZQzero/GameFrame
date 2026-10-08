@@ -24,7 +24,7 @@ int mailCount = RedDot.Get("Mail"); // 5
 引用命名空间：
 
 ```csharp
-using UIFrame;
+using GameFrame.UI;
 ```
 
 ### 设置真实数量

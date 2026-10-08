@@ -1,3 +1,5 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -6,11 +8,11 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
-using Game.Media;
-using Game.Media.Backup;
+using GameFrame.Media;
+using GameFrame.Media.Backup;
 using UnityEngine;
 
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
     // Transport fixture only: all client state transitions use the production ABI.
     internal class BackupProtocolFixture : HttpMessageHandler

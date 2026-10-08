@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-namespace Game.Audio
+namespace GameFrame.Audio
 {
     [DisallowMultipleComponent]
     internal sealed class AudioRuntimeDriver : MonoBehaviour
@@ -243,7 +243,7 @@ namespace Game.Audio
             RequireRunning();
             initialized = false;
             SceneManager.sceneUnloaded -= OnSceneUnloaded;
-            var failure = new UIFrame.CleanupFailure();
+            var failure = new GameFrame.UI.CleanupFailure();
             foreach (var voice in voices)
                 if (voice.Active) failure.Run(() => ReleaseVoice(voice));
             failure.Run(cache.Dispose);
@@ -507,7 +507,7 @@ namespace Game.Audio
             slot.Entry = null;
             slot.Active = false;
             ClearFade(slot);
-            var failure = new UIFrame.CleanupFailure();
+            var failure = new GameFrame.UI.CleanupFailure();
             try
             {
                 slot.Source.Stop();

@@ -749,11 +749,11 @@ GameInput.Init
 初始化资源包
 GameScene.Init
 GameAudio.InitAsync
-UI.Init
+GameUI.Init
 GamePool.Init
 
 退出：
-UI.Shutdown
+GameUI.Shutdown
 GameScene.ShutdownAsync   // 只清静态，不走 YooAsset 卸场
 GameAudio.ShutdownAsync
 GameTimer.Shutdown

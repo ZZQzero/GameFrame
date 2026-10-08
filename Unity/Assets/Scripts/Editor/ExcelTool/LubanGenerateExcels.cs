@@ -6,7 +6,7 @@ using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
-namespace UIFrame.Editor
+namespace GameFrame.Editor.Excel
 {
     public class LubanGenerateExcels
     {

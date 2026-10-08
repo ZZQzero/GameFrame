@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace UIFrame
+namespace GameFrame.Display
 {
     /// <summary>
     /// 按安全区把自身 RectTransform 锚到 Canvas 像素矩形内。

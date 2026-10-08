@@ -1,13 +1,15 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
-using Game.Audio;
-using Game.Pooling;
+using GameFrame.Audio;
+using GameFrame.Pooling;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Audio;
 
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
     public class AudioPoolTests
     {

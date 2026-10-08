@@ -1,6 +1,6 @@
 # 图片、图库与备份使用说明
 
-入口位于 `Game.Media`、`Game.Media.Backup`。所有公开入口在 Unity 主线程调用；文件复制、哈希、数据库和平台后台网络在工作线程运行。无需调用 `UI.Init()`。SQLite 是独立的 `Runtime/Sqlite` 模块；照片仓库通过独立原生库复用同一个引擎。
+入口位于 `GameFrame.Media`、`GameFrame.Media.Backup`。所有公开入口在 Unity 主线程调用；文件复制、哈希、数据库和平台后台网络在工作线程运行。无需调用 `GameUI.Init()`。SQLite 是独立的 `Runtime/Sqlite` 模块；照片仓库通过独立原生库复用同一个引擎。
 
 ## 当前实现与范围
 
@@ -27,7 +27,7 @@
 ## 系统选择与图片所有权
 
 ```csharp
-using Game.Media;
+using GameFrame.Media;
 
 // 面板打开期间使用自己的取消令牌。
 using var selection = await GameGallery.PickImagesAsync(

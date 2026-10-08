@@ -4,7 +4,7 @@ using System.Threading;
 using UnityEngine;
 using YooAsset;
 
-namespace UIFrame
+namespace GameFrame.UI
 {
     /// <summary>
     /// 加载面板并保留 YooAsset Handle，直到销毁才 Release。
@@ -27,7 +27,7 @@ namespace UIFrame
             if (_package == null)
             {
                 throw new InvalidOperationException(
-                    $"[UIFrame] ResourcePackage 为空，无法加载 {location}。请先 UI.SetPackage。");
+                    $"[UIFrame] ResourcePackage 为空，无法加载 {location}。请先 GameUI.SetPackage。");
             }
 
             AssetHandle handle = null;
@@ -105,7 +105,7 @@ namespace UIFrame
             if (_package == null)
             {
                 throw new InvalidOperationException(
-                    $"[UIFrame] ResourcePackage 为空，无法加载 {location}。请先 UI.SetPackage。");
+                    $"[UIFrame] ResourcePackage 为空，无法加载 {location}。请先 GameUI.SetPackage。");
             }
 
             if (string.IsNullOrWhiteSpace(location))

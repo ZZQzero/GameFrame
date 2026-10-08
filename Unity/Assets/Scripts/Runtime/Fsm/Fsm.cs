@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Game.Fsm
+namespace GameFrame.Fsm
 {
     public sealed class Fsm<TId, TOwner>
         where TId : struct, Enum

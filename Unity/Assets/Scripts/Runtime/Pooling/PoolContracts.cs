@@ -1,6 +1,6 @@
 using System;
 
-namespace Game.Pooling
+namespace GameFrame.Pooling
 {
     /// <summary>
     /// 纯托管对象的可选生命周期接口。

@@ -1,6 +1,6 @@
 {
     "name": "GameFrame.Tests.PlayMode",
-    "rootNamespace": "",
+    "rootNamespace": "GameFrame.Tests",
     "references": [
         "Unity.TextMeshPro",
         "UniTask",

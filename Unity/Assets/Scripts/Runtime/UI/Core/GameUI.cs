@@ -4,10 +4,10 @@ using System.Threading;
 using UnityEngine;
 using YooAsset;
 
-namespace UIFrame
+namespace GameFrame.UI
 {
-    /// <summary>UIFrame 静态门面。业务只通过这里打开/关闭面板。</summary>
-    public static class UI
+    /// <summary>GameFrame UI 静态门面。业务只通过这里打开/关闭面板。</summary>
+    public static class GameUI
     {
         static UIManager _manager;
         static TipsSettings _tipsSettings = TipsSettings.Default;
@@ -363,7 +363,7 @@ namespace UIFrame
             if (packages.Count > 1)
             {
                 throw new InvalidOperationException(
-                    "[UIFrame] 存在多个 ResourcePackage，请调用 UI.Init(package) 指定。");
+                    "[UIFrame] 存在多个 ResourcePackage，请调用 GameUI.Init(package) 指定。");
             }
 
             return packages[0];
@@ -417,7 +417,7 @@ namespace UIFrame
         {
             if (!IsInited)
             {
-                throw new InvalidOperationException("[UIFrame] 请先调用 UI.Init()。");
+                throw new InvalidOperationException("[UIFrame] 请先调用 GameUI.Init()。");
             }
         }
 

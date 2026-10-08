@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-namespace UIFrame.Sqlite
+namespace GameFrame.Sqlite
 {
     public sealed class SqliteSnapshotOptions
     {

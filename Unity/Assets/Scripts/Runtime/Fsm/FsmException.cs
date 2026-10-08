@@ -1,6 +1,6 @@
 using System;
 
-namespace Game.Fsm
+namespace GameFrame.Fsm
 {
     public sealed class FsmException : InvalidOperationException
     {

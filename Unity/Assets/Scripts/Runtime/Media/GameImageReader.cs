@@ -5,7 +5,7 @@ using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Networking;
 
-namespace Game.Media
+namespace GameFrame.Media
 {
     public static class GameImageReader
     {
@@ -21,7 +21,7 @@ namespace Game.Media
             options ??= new ImagePreviewOptions(); options.Validate(); cancellationToken.ThrowIfCancellationRequested();
             using var admission=ImageWorkBudget.Acquire(image,true,true);
             int edge = options.MaxEdge, pixels = options.MaxPixels; bool readable = options.Readable;
-            IDisposable lease=null;ImageTexture result=null;bool entered=false;var cleanup=new UIFrame.CleanupFailure();
+            IDisposable lease=null;ImageTexture result=null;bool entered=false;var cleanup=new GameFrame.UI.CleanupFailure();
             try
             {
                 lease=image.Acquire();
@@ -39,7 +39,7 @@ namespace Game.Media
 
         internal static async UniTask<ImageTexture> LoadAdmittedPreviewAsync(ImageReference image,ImagePreviewOptions options,CancellationToken token)
         {
-            ImageTexture result=null;bool entered=false;var cleanup=new UIFrame.CleanupFailure();
+            ImageTexture result=null;bool entered=false;var cleanup=new GameFrame.UI.CleanupFailure();
             try
             {
                 await processingGate.WaitAsync(token);entered=true;
@@ -52,7 +52,7 @@ namespace Game.Media
 
         // The operation owns its result until all required source/decoder
         // cleanup succeeds. A failed handoff must not orphan that result.
-        static T Deliver<T>(T result,ref UIFrame.CleanupFailure cleanup) where T:class,IDisposable
+        static T Deliver<T>(T result,ref GameFrame.UI.CleanupFailure cleanup) where T:class,IDisposable
         {
             try {cleanup.Throw();return result;}
             catch
@@ -126,7 +126,7 @@ namespace Game.Media
             using var admission=ImageWorkBudget.Acquire(image,true,true);
             var copy = new ImageExportOptions { Mode = options.Mode, MaxEdge = options.MaxEdge, MaxPixels = options.MaxPixels,
                 JpegQuality = options.JpegQuality, JpegBackground = options.JpegBackground };
-            IDisposable lease=null;ImageFile result=null;bool entered=false;var cleanup=new UIFrame.CleanupFailure();
+            IDisposable lease=null;ImageFile result=null;bool entered=false;var cleanup=new GameFrame.UI.CleanupFailure();
             try
             {
                 lease=image.Acquire();

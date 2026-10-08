@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Game.Media.Backup
+namespace GameFrame.Media.Backup
 {
     public sealed class BackupTaskQuery
     {

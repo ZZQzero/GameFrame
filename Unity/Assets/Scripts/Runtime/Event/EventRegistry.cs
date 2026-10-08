@@ -1,6 +1,6 @@
 using System;
 
-namespace Game
+namespace GameFrame.Event
 {
     /// <summary>
     /// 事件类型分桶注册表。Post 的 Drain 扫注册桶；与 Register 通过快照避免交叉读写。

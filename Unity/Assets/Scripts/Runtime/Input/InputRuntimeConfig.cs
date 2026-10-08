@@ -2,7 +2,7 @@ using System;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-namespace Game.Input
+namespace GameFrame.Input
 {
     [CreateAssetMenu(
         menuName = "Game/Input Runtime Config",

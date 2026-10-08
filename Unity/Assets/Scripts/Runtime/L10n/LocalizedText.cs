@@ -3,7 +3,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace Game.L10n
+namespace GameFrame.Localization
 {
     [DisallowMultipleComponent]
     [RequireComponent(typeof(TMP_Text))]

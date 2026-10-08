@@ -1,3 +1,5 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.Collections;
 using System.IO;
@@ -15,7 +17,7 @@ using UnityEditor;
 using YooAsset.Editor;
 #endif
 
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
 #if UNITY_EDITOR
     public sealed class UIImageLoaderPackageSetup : IPrebuildSetup, IPostBuildCleanup
@@ -133,7 +135,7 @@ namespace UIFrame.Regression
             yield return manifest;
             Assert.That(manifest.Status, Is.EqualTo(EOperationStatus.Succeeded), manifest.Error);
 
-            UI.Init(_package);
+            GameUI.Init(_package);
 #else
             Assert.Ignore("UIImageLoader tests require the Unity Editor YooAsset simulation mode.");
 #endif
@@ -165,8 +167,8 @@ namespace UIFrame.Regression
                 UnityEngine.Object.Destroy(_errorTexture);
             yield return null;
 
-            if (UI.IsInited)
-                UI.Shutdown();
+            if (GameUI.IsInited)
+                GameUI.Shutdown();
             if (_package != null)
             {
                 var destroy = _package.DestroyPackageAsync();

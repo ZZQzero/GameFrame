@@ -2,7 +2,7 @@ using System;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-namespace Game.Audio
+namespace GameFrame.Audio
 {
     public enum AudioBus
     {

@@ -1,6 +1,6 @@
 using System;
 
-namespace Game.Timer
+namespace GameFrame.Timing
 {
     public enum TimerClock : byte
     {

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 
-namespace Game.Media
+namespace GameFrame.Media
 {
     public enum LibraryAccess { NotDetermined, Denied, Limited, Authorized, Restricted }
     public enum ImageExportMode { PreserveProvidedBytes, Jpeg, Png }

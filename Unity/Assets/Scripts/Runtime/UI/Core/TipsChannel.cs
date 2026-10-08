@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 
-namespace UIFrame
+namespace GameFrame.UI
 {
-    /// <summary>Tips 层默认配置。业务只通过 <see cref="UI.ConfigureTips"/> 修改。</summary>
+    /// <summary>Tips 层默认配置。业务只通过 <see cref="GameUI.ConfigureTips"/> 修改。</summary>
     public readonly struct TipsSettings
     {
         public const int DefaultMaxVisible = 3;

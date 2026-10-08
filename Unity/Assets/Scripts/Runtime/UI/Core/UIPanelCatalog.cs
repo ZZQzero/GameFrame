@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace UIFrame
+namespace GameFrame.UI
 {
     /// <summary>
     /// Type → Prefab 地址目录。无反射。层由 Hud/Push/Popup/Toast 决定。
@@ -72,7 +72,7 @@ namespace UIFrame
             if (!Map.TryGetValue(panelType, out var entry))
             {
                 throw new InvalidOperationException(
-                    $"[UIFrame] 未注册 {panelType.Name}，请先 UI.Register<{panelType.Name}>(location)。");
+                    $"[UIFrame] 未注册 {panelType.Name}，请先 GameUI.Register<{panelType.Name}>(location)。");
             }
 
             return new UIPanelBind(entry.Location, InferLayer(mode), entry.Group, entry.Cache);

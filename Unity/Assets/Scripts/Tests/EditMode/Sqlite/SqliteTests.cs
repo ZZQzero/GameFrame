@@ -5,9 +5,10 @@ using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
+using GameFrame.Sqlite;
 using NUnit.Framework;
 
-namespace UIFrame.Sqlite.Tests
+namespace GameFrame.Tests.Sqlite
 {
     public sealed class SqliteTests
     {
@@ -53,7 +54,7 @@ namespace UIFrame.Sqlite.Tests
         }
         static async Task<(object dispatcher, SqliteDatabase database)> OpenIsolated(string path)
         {
-            var type = typeof(SqliteDatabase).Assembly.GetType("UIFrame.Sqlite.Internal.CompletionDispatcher");
+            var type = typeof(SqliteDatabase).Assembly.GetType("GameFrame.Sqlite.Internal.CompletionDispatcher");
             var completion = Activator.CreateInstance(type, true);
             byte[] payload;
             using (var bytes = new MemoryStream())

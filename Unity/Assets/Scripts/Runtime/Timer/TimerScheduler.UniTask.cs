@@ -5,7 +5,7 @@ using System.Diagnostics;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 
-namespace Game.Timer
+namespace GameFrame.Timing
 {
     public sealed partial class TimerScheduler
     {

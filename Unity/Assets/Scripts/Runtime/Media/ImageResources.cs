@@ -5,7 +5,7 @@ using System.Threading;
 using UnityEngine;
 using Cysharp.Threading.Tasks;
 
-namespace Game.Media
+namespace GameFrame.Media
 {
     internal sealed class ImageStorage : IDisposable
     {
@@ -82,7 +82,7 @@ namespace Game.Media
             {
                 if(--Leases!=0)return;
                 var sprite=Sprite;var texture=Texture;Sprite=null;Texture=null;
-                var cleanup=new UIFrame.CleanupFailure();cleanup.Run(()=>Destroy(sprite));cleanup.Run(()=>Destroy(texture));cleanup.Throw();
+                var cleanup=new GameFrame.UI.CleanupFailure();cleanup.Run(()=>Destroy(sprite));cleanup.Run(()=>Destroy(texture));cleanup.Throw();
             }
         }
         Resource resource;
@@ -105,7 +105,7 @@ namespace Game.Media
         public void Dispose()
         {
             MediaThread.Check();var old=resource;var callback=released;resource=null;released=null;if(old==null)return;
-            var cleanup=new UIFrame.CleanupFailure();cleanup.Run(old.Release);if(callback!=null)cleanup.Run(callback);cleanup.Throw();
+            var cleanup=new GameFrame.UI.CleanupFailure();cleanup.Run(old.Release);if(callback!=null)cleanup.Run(callback);cleanup.Throw();
         }
         internal static long PendingDestroyBytes { get; private set; }
         static async Cysharp.Threading.Tasks.UniTask ObserveDestroy(long bytes)

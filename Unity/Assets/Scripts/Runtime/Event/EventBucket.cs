@@ -2,7 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using UnityEngine;
 
-namespace Game
+namespace GameFrame.Event
 {
     /// <summary>
     /// 单一事件类型的槽位表。Publish 按 iterate 快照遍历；发布中退订只标无效，结束后 compact。

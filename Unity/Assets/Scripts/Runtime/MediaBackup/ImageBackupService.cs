@@ -11,9 +11,9 @@ using System.Text;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
-using Command = Game.Media.Backup.BackupRepository.Command;
+using Command = GameFrame.Media.Backup.BackupRepository.Command;
 
-namespace Game.Media.Backup
+namespace GameFrame.Media.Backup
 {
     /// <summary>Application-owned facade over the shared native backup repository.</summary>
     public sealed partial class ImageBackupService : IDisposable
@@ -248,7 +248,7 @@ namespace Game.Media.Backup
         public async UniTask ShutdownAsync()
         {
             Check();if(closing)throw new InvalidOperationException("Backup shutdown is already active.");closing=true;
-            var cleanup=new UIFrame.CleanupFailure();cleanup.Run(lifetime.Cancel);
+            var cleanup=new GameFrame.UI.CleanupFailure();cleanup.Run(lifetime.Cancel);
             while(running || preparing || registering || pausing || drivingOperations || downloads!=0 || metadataReads!=0 || operations!=0)await UniTask.Yield();
             if(preparationFailure!=null && !ReferenceEquals(preparationFailure,executorFailure))cleanup.Run(()=>System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(preparationFailure).Throw());
             if(executorFailure!=null)cleanup.Run(()=>System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(executorFailure).Throw());
@@ -258,7 +258,7 @@ namespace Game.Media.Backup
         }
         public void Dispose()
         {
-            if(disposed) return;CheckIdle();disposed=true;var cleanup=new UIFrame.CleanupFailure();
+            if(disposed) return;CheckIdle();disposed=true;var cleanup=new GameFrame.UI.CleanupFailure();
             desktopCredentials.Clear();cleanup.Run(desktopSignal.Dispose);cleanup.Run(client.Dispose);cleanup.Run(repository.Dispose);cleanup.Run(lifetime.Dispose);cleanup.Throw();
         }
         static async UniTask ValidateSource(ImageReference image,CancellationToken token)

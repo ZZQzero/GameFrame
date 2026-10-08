@@ -1,6 +1,6 @@
 # Sqlite 通用本地存储模块
 
-位于 `Runtime/Sqlite`，程序集为 `GameFrame.Sqlite`，命名空间为 `UIFrame.Sqlite`。不依赖 Unity、UniTask、GameFrame.Runtime 或照片模块。使用官方 SQLite 3.53.4、一份共享 C++ 执行核心和 C ABI 3；数据库实际工作在原生线程池中执行。
+位于 `Runtime/Sqlite`，程序集为 `GameFrame.Sqlite`，命名空间为 `GameFrame.Sqlite`。不依赖 Unity、UniTask、GameFrame.Runtime 或照片模块。使用官方 SQLite 3.53.4、一份共享 C++ 执行核心和 C ABI 3；数据库实际工作在原生线程池中执行。
 
 目前已实现通用核心、托管接口和桌面行为验证。已构建 macOS universal、Android ARM64、iOS ARM64 和 Windows x86_64 原生产物；Windows DLL 已通过交叉编译、架构、接口导出与依赖检查，Windows Editor / Player 的实际运行尚待验证。移动端已有独立 IL2CPP 构建记录，真机后台运行及商业性能门槛尚未验收；iOS Simulator 未提供已验收产物。照片业务已接入：图库索引使用托管门面，C# / Android / iOS 备份共用原生 BackupRepository 和本模块核心；两库 schema 已用于当前实现。完整状态见 [Validation.md](Validation.md) 和 [实施计划](ImplementationPlan.md)。
 
@@ -9,7 +9,7 @@
 调用方提供绝对路径、创建父目录并明确选择打开模式；打开既有库不会创建空库，创建新库不会覆盖已有文件。
 
 ```csharp
-using UIFrame.Sqlite;
+using GameFrame.Sqlite;
 
 var db = await SqliteDatabase.OpenAsync(new SqliteOpenOptions(
     absolutePath, SqliteOpenMode.CreateNew));

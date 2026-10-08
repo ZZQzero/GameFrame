@@ -1,6 +1,6 @@
 using UnityEditor;
 
-namespace UIFrame.Editor
+namespace GameFrame.UI.Editor
 {
     sealed class UIBindAssetHook : AssetPostprocessor
     {

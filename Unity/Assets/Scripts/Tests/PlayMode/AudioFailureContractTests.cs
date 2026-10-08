@@ -1,3 +1,5 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -5,14 +7,14 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Threading;
 using Cysharp.Threading.Tasks;
-using Game.Audio;
+using GameFrame.Audio;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Audio;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
     public class AudioFailureContractTests
     {

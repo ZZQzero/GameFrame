@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace UIFrame
+namespace GameFrame.Display
 {
     public static class ScreenOrientationManager
     {
@@ -21,7 +21,7 @@ namespace UIFrame
 
         /// <summary>
         /// 初始化方向状态并同步当前 Canvas 布局，不修改 Unity 的屏幕方向配置。
-        /// 只有显式调用 Set / Push / Pop / ResetTo 才会写入 Screen.orientation。
+        /// 只有显式调用 Set / Push / Pop / ResetTo 才会写入 UnityEngine.Screen.orientation。
         /// </summary>
         public static void Initialize()
         {
@@ -95,7 +95,7 @@ namespace UIFrame
             ApplyInternal(orientation, force: true);
         }
 
-        /// <summary>仅重新通知 Canvas 同步布局（不改 Screen.orientation）。</summary>
+        /// <summary>仅重新通知 Canvas 同步布局（不改 UnityEngine.Screen.orientation）。</summary>
         public static void SyncCanvasLayoutNow()
         {
             Initialize();
@@ -129,7 +129,7 @@ namespace UIFrame
 
         static GameScreenOrientation DetectCurrentOrientation()
         {
-            switch (Screen.orientation)
+            switch (UnityEngine.Screen.orientation)
             {
                 case ScreenOrientation.LandscapeLeft:
                 case ScreenOrientation.LandscapeRight:
@@ -140,7 +140,7 @@ namespace UIFrame
                     return GameScreenOrientation.Portrait;
 
                 default:
-                    return Screen.width > Screen.height
+                    return UnityEngine.Screen.width > UnityEngine.Screen.height
                         ? GameScreenOrientation.Landscape
                         : GameScreenOrientation.Portrait;
             }
@@ -168,34 +168,34 @@ namespace UIFrame
 
         static void ApplyToUnity(GameScreenOrientation orientation)
         {
-            Screen.autorotateToPortrait = false;
-            Screen.autorotateToPortraitUpsideDown = false;
-            Screen.autorotateToLandscapeLeft = false;
-            Screen.autorotateToLandscapeRight = false;
+            UnityEngine.Screen.autorotateToPortrait = false;
+            UnityEngine.Screen.autorotateToPortraitUpsideDown = false;
+            UnityEngine.Screen.autorotateToLandscapeLeft = false;
+            UnityEngine.Screen.autorotateToLandscapeRight = false;
 
             switch (orientation)
             {
                 case GameScreenOrientation.Portrait:
-                    Screen.autorotateToPortrait = true;
-                    Screen.orientation = ScreenOrientation.Portrait;
+                    UnityEngine.Screen.autorotateToPortrait = true;
+                    UnityEngine.Screen.orientation = ScreenOrientation.Portrait;
                     break;
 
                 case GameScreenOrientation.Landscape:
-                    Screen.autorotateToLandscapeLeft = true;
-                    Screen.autorotateToLandscapeRight = true;
-                    Screen.orientation = ScreenOrientation.LandscapeLeft;
+                    UnityEngine.Screen.autorotateToLandscapeLeft = true;
+                    UnityEngine.Screen.autorotateToLandscapeRight = true;
+                    UnityEngine.Screen.orientation = ScreenOrientation.LandscapeLeft;
                     break;
 
                 case GameScreenOrientation.AutoPortrait:
-                    Screen.autorotateToPortrait = true;
-                    Screen.autorotateToPortraitUpsideDown = true;
-                    Screen.orientation = ScreenOrientation.AutoRotation;
+                    UnityEngine.Screen.autorotateToPortrait = true;
+                    UnityEngine.Screen.autorotateToPortraitUpsideDown = true;
+                    UnityEngine.Screen.orientation = ScreenOrientation.AutoRotation;
                     break;
 
                 case GameScreenOrientation.AutoLandscape:
-                    Screen.autorotateToLandscapeLeft = true;
-                    Screen.autorotateToLandscapeRight = true;
-                    Screen.orientation = ScreenOrientation.AutoRotation;
+                    UnityEngine.Screen.autorotateToLandscapeLeft = true;
+                    UnityEngine.Screen.autorotateToLandscapeRight = true;
+                    UnityEngine.Screen.orientation = ScreenOrientation.AutoRotation;
                     break;
 
                 default:

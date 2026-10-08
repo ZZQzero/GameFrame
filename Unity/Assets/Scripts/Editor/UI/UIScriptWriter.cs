@@ -3,7 +3,7 @@ using System.Text;
 using UnityEditor;
 using UnityEngine;
 
-namespace UIFrame.Editor
+namespace GameFrame.UI.Editor
 {
     static class UIScriptWriter
     {
@@ -11,7 +11,7 @@ namespace UIFrame.Editor
         {
             var ns = string.IsNullOrWhiteSpace(namespaceName) ? "Game" : namespaceName.Trim();
             var sb = new StringBuilder();
-            sb.AppendLine("using UIFrame;");
+            sb.AppendLine("using GameFrame.UI;");
             sb.AppendLine();
             sb.Append("namespace ").Append(ns).AppendLine();
             sb.AppendLine("{");
@@ -33,7 +33,7 @@ namespace UIFrame.Editor
         {
             var ns = string.IsNullOrWhiteSpace(namespaceName) ? "Game" : namespaceName.Trim();
             var sb = new StringBuilder();
-            sb.AppendLine("using UIFrame;");
+            sb.AppendLine("using GameFrame.UI;");
             sb.AppendLine("using UnityEngine;");
             sb.AppendLine();
             sb.Append("namespace ").Append(ns).AppendLine();

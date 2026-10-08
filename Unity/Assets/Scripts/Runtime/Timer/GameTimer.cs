@@ -3,7 +3,7 @@ using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 
-namespace Game.Timer
+namespace GameFrame.Timing
 {
     /// <summary>
     /// 进程内默认 Timer 入口。必须由 Launch 显式 Init/Shutdown。

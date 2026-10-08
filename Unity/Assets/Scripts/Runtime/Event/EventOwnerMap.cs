@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
-namespace Game
+namespace GameFrame.Event
 {
     /// <summary>
     /// Owner → 句柄列表。面板/系统销毁时一次退订该 Owner 下全部监听。

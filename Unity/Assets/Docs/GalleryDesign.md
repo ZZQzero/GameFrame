@@ -80,4 +80,4 @@ Android 自动模式由 JobScheduler 调度，用户主动模式在 API 34+ 使�
 
 同日存储优化增加历史查询模型验证（240 组页面、20 组完整遍历及空库）和软时间片回归。优化后 Unity 共验证 115 个独立用例，1 个 Android 目标专属用例跳过；下载集成用例在补齐本地测试服务后单独通过。原生协议 30/30、托管核心 17/17 及扩展游戏示例通过。百万条历史默认候选查询的宿主中位数约由 470ms 降至 0.60ms；持续历史查询期间，游戏存档读取 p95 约由 469ms 降至 0.60ms。该测量不包含完整上传、图库刷新或渲染，记录与适用范围见项目根 `ReviewArtifacts/storage-improvements-2026-10-07/report.md`。
 
-复现入口：Unity EditMode 的 `UIFrame.Regression.Media` 与 `UIFrame.Regression.Backup`；服务端 `python3 -m unittest discover -s Tools~/BackupServer -p 'test_*.py' -v`；协议契约 `python3 Tools~/BackupServer/validate_contract.py`；原生业务边界 `Runtime/MediaBackup/Native~/tests/business_boundaries.py`（使用现有 macOS 插件与 SQLite 依赖）。集成 HTTP 用例运行时另启 `Tools~/BackupServer/integration_server.py`。具体参数见脚本帮助与使用说明。
+复现入口：Unity EditMode 的 `GameFrame.Tests.Media` 与 `GameFrame.Tests.Backup`；服务端 `python3 -m unittest discover -s Tools~/BackupServer -p 'test_*.py' -v`；协议契约 `python3 Tools~/BackupServer/validate_contract.py`；原生业务边界 `Runtime/MediaBackup/Native~/tests/business_boundaries.py`（使用现有 macOS 插件与 SQLite 依赖）。集成 HTTP 用例运行时另启 `Tools~/BackupServer/integration_server.py`。具体参数见脚本帮助与使用说明。

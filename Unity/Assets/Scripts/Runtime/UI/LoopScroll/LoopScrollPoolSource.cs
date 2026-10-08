@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
-using Game.Pooling;
+using GameFrame.Pooling;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace UIFrame
+namespace GameFrame.UI
 {
     /// <summary>
     /// 默认 LoopScroll Prefab 源：GetObject 走 TrySpawn，ReturnObject 走 DespawnImmediate。

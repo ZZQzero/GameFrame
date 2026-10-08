@@ -1,3 +1,5 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -7,7 +9,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
 
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
     public class ExtensionPanel : FailurePanel { }
     public class AddressPanel : FailurePanel { }
@@ -20,9 +22,9 @@ namespace UIFrame.Regression
 
         [UnityTearDown] public IEnumerator TearDown()
         {
-            UI.RootReady -= rootReady;
-            UI.PanelShown -= panelShown;
-            UI.Shutdown();
+            GameUI.RootReady -= rootReady;
+            GameUI.PanelShown -= panelShown;
+            GameUI.Shutdown();
             manager?.Shutdown();
             yield return null;
         }
@@ -32,38 +34,38 @@ namespace UIFrame.Regression
             var failure = new InvalidOperationException("root-ready-primary");
             rootReady = () =>
             {
-                Assert.IsTrue(UI.IsInited);
-                Assert.IsNotNull(UI.CanvasRoot);
+                Assert.IsTrue(GameUI.IsInited);
+                Assert.IsNotNull(GameUI.CanvasRoot);
                 throw failure;
             };
-            UI.RootReady += rootReady;
-            Assert.AreSame(failure, Assert.Throws<InvalidOperationException>(UI.Init));
-            Assert.IsFalse(UI.IsInited);
-            Assert.IsNull(UI.CanvasRoot);
-            UI.RootReady -= rootReady;
+            GameUI.RootReady += rootReady;
+            Assert.AreSame(failure, Assert.Throws<InvalidOperationException>(GameUI.Init));
+            Assert.IsFalse(GameUI.IsInited);
+            Assert.IsNull(GameUI.CanvasRoot);
+            GameUI.RootReady -= rootReady;
             yield return null; // Destroy 完成后 EventSystem 所有权才释放。
             int readyCount = 0;
             rootReady = () => readyCount++;
-            UI.RootReady += rootReady;
-            Assert.DoesNotThrow(UI.Init);
-            Assert.IsNotNull(UI.CanvasRoot);
+            GameUI.RootReady += rootReady;
+            Assert.DoesNotThrow(GameUI.Init);
+            Assert.IsNotNull(GameUI.CanvasRoot);
             Assert.AreEqual(1, readyCount);
         }
 
         [UnityTest] public IEnumerator RootReadyShutdownCancelsInitAndAllowsRetry()
         {
-            rootReady = UI.Shutdown;
-            UI.RootReady += rootReady;
+            rootReady = GameUI.Shutdown;
+            GameUI.RootReady += rootReady;
 
-            Assert.Throws<OperationCanceledException>(UI.Init);
-            Assert.IsFalse(UI.IsInited);
-            Assert.IsNull(UI.CanvasRoot);
+            Assert.Throws<OperationCanceledException>(GameUI.Init);
+            Assert.IsFalse(GameUI.IsInited);
+            Assert.IsNull(GameUI.CanvasRoot);
 
-            UI.RootReady -= rootReady;
+            GameUI.RootReady -= rootReady;
             yield return null; // 等待旧 Root 与 EventSystem 销毁。
-            Assert.DoesNotThrow(UI.Init);
-            Assert.IsTrue(UI.IsInited);
-            Assert.IsNotNull(UI.CanvasRoot);
+            Assert.DoesNotThrow(GameUI.Init);
+            Assert.IsTrue(GameUI.IsInited);
+            Assert.IsNotNull(GameUI.CanvasRoot);
         }
 
         ExtensionPanel Prepare(UIOpenMode mode)
@@ -122,7 +124,7 @@ namespace UIFrame.Regression
                 Assert.IsTrue(shown.transform.IsChildOf(manager.CanvasRoot));
                 shownCount++;
             };
-            UI.PanelShown += panelShown;
+            GameUI.PanelShown += panelShown;
             Assert.AreSame(panel, manager.Open<ExtensionPanel, UINone>(mode, UINone.Value).GetAwaiter().GetResult());
             Assert.AreEqual(1, shownCount);
         }
@@ -133,7 +135,7 @@ namespace UIFrame.Regression
             var panel = Prepare(mode);
             var failure = new InvalidOperationException("panel-shown-primary");
             panelShown = _ => throw failure;
-            UI.PanelShown += panelShown;
+            GameUI.PanelShown += panelShown;
             Assert.AreSame(failure, Assert.Throws<InvalidOperationException>(() =>
                 manager.Open<ExtensionPanel, UINone>(mode, UINone.Value).GetAwaiter().GetResult()));
             Assert.IsTrue(panel.DestroyDispatched);
@@ -146,7 +148,7 @@ namespace UIFrame.Regression
         {
             var panel = Prepare(mode);
             panelShown = _ => manager.Shutdown();
-            UI.PanelShown += panelShown;
+            GameUI.PanelShown += panelShown;
             Assert.Throws<OperationCanceledException>(() =>
                 manager.Open<ExtensionPanel, UINone>(mode, UINone.Value).GetAwaiter().GetResult());
             Assert.IsFalse(manager.IsInited);

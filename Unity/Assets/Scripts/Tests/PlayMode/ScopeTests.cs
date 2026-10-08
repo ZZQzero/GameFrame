@@ -1,14 +1,16 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
-using Game.Timer;
+using GameFrame.Timing;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
-using Game;
+using GameFrame.Event;
 
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
     struct ScopeEvent
     {
@@ -41,7 +43,7 @@ namespace UIFrame.Regression
             OpenScope.Register(disposable);
         }
 
-        public TimerHandle ScheduleOpenTimer(TimerOptions options, Game.Timer.TimerCallback callback)
+        public TimerHandle ScheduleOpenTimer(TimerOptions options, GameFrame.Timing.TimerCallback callback)
         {
             return OpenScope.Schedule(in options, callback);
         }

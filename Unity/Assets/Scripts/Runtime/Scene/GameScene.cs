@@ -5,7 +5,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using YooAsset;
 
-namespace Game.Scene
+namespace GameFrame.Scene
 {
     public static class GameScene
     {

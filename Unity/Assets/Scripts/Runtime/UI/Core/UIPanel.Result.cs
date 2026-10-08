@@ -1,7 +1,7 @@
 using System;
 using Cysharp.Threading.Tasks;
 
-namespace UIFrame
+namespace GameFrame.UI
 {
     /// <summary>
     /// 带打开参数和返回值的面板。提交结果且关闭成功后交付结果；

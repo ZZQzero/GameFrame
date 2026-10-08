@@ -2,7 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace UIFrame.Sqlite.Internal
+namespace GameFrame.Sqlite.Internal
 {
     internal static class NativeMethods
     {

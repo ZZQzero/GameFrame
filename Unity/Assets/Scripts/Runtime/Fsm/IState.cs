@@ -1,4 +1,4 @@
-namespace Game.Fsm
+namespace GameFrame.Fsm
 {
     public interface IState<TId, TOwner>
         where TId : struct, System.Enum

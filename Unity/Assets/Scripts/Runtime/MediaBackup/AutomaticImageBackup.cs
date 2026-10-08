@@ -5,9 +5,9 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using Cysharp.Threading.Tasks;
-using Command = Game.Media.Backup.BackupRepository.Command;
+using Command = GameFrame.Media.Backup.BackupRepository.Command;
 
-namespace Game.Media.Backup
+namespace GameFrame.Media.Backup
 {
     public enum BackupSourceKind { Directory, PhotoLibrary, GrantedDirectory }
     public sealed class BackupPreparationFailure
@@ -298,7 +298,7 @@ namespace Game.Media.Backup
         public async UniTask RunAsync(CancellationToken cancellationToken)
         {
             using var operation=EnterOperation();Validate(policy);
-            bool changed=true;long nextReconciliation=0;ImageLibraryIndex.WatchHandle watch=null;var cleanup=new UIFrame.CleanupFailure();
+            bool changed=true;long nextReconciliation=0;ImageLibraryIndex.WatchHandle watch=null;var cleanup=new GameFrame.UI.CleanupFailure();
             try
             {
                 watch=policy.enabled?library.Watch(Scope,batch=>{if(batch.RequiresRefresh || batch.Items.Count!=0)changed=true;}):null;

@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using Cysharp.Threading.Tasks;
-using Command = Game.Media.Backup.BackupRepository.Command;
+using Command = GameFrame.Media.Backup.BackupRepository.Command;
 
-namespace Game.Media.Backup
+namespace GameFrame.Media.Backup
 {
     public sealed class BackupControlCleanupInfo
     {

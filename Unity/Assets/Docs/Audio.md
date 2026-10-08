@@ -38,14 +38,14 @@ await GameAudio.InitAsync(
     audioConfig,          // Launch 上的 AudioRuntimeConfig
     startupCancellation.Token);
 
-UI.Init(package);
+GameUI.Init(package);
 GamePool.Init(package, transform);
 ```
 
 退出：
 
 ```csharp
-UI.Shutdown();
+GameUI.Shutdown();
 if (GameScene.IsInited)
 {
     await GameScene.ShutdownAsync(); // 只清静态，不卸场
@@ -94,7 +94,7 @@ BGM 有专用双声道和交叉淡化，后一次请求覆盖前一次。音效�
 ## 3. 播放音效
 
 ```csharp
-using Game.Audio;
+using GameFrame.Audio;
 using Cysharp.Threading.Tasks;
 
 AudioPlayResult result = await GameAudio.TryPlayAsync(

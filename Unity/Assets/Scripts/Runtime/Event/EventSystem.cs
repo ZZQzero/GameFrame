@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using UnityEngine;
 
-namespace Game
+namespace GameFrame.Event
 {
     public sealed class EventSystemException : InvalidOperationException
     {

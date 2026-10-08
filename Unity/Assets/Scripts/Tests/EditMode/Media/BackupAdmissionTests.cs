@@ -1,3 +1,5 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -6,14 +8,14 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
-using Game.Media;
-using Game.Media.Backup;
+using GameFrame.Media;
+using GameFrame.Media.Backup;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
-using Command=Game.Media.Backup.BackupRepository.Command;
+using Command=GameFrame.Media.Backup.BackupRepository.Command;
 
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
     public sealed class BackupAdmissionTests
     {

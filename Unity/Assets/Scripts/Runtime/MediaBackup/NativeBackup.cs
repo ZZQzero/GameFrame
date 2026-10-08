@@ -2,7 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using UnityEngine;
 
-namespace Game.Media.Backup
+namespace GameFrame.Media.Backup
 {
     [Serializable] internal sealed class NativeBackupRequest
     {

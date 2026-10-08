@@ -1,14 +1,16 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.Collections;
 using Cysharp.Threading.Tasks;
-using Game.Pooling;
+using GameFrame.Pooling;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.TestTools;
 using UnityEngine.UI;
 
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
     public class LoopAndRootTests
     {

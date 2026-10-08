@@ -4,7 +4,7 @@ using System.Threading;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-namespace Game.Input
+namespace GameFrame.Input
 {
     /// <summary>
     /// 进程内输入入口。Launch 显式 Init / Shutdown。

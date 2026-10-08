@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 
-namespace Game.Pooling
+namespace GameFrame.Pooling
 {
     /// <summary>
     /// GameObject 池的分组、收缩和延迟回收等进阶能力。

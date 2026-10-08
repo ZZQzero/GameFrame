@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace UIFrame
+namespace GameFrame.UI
 {
     internal static class UIRect
     {

@@ -6,7 +6,7 @@ using UnityEngine;
 using Unity.Profiling;
 using YooAsset;
 
-namespace Game.Pooling
+namespace GameFrame.Pooling
 {
     /// <summary>
     /// 按 YooAsset location 分桶的主线程 GameObject 对象池。
@@ -14,8 +14,8 @@ namespace Game.Pooling
     public sealed partial class GameObjectPoolService : IDisposable
     {
         private readonly IPrefabProvider prefabProvider;
-        private static readonly ProfilerMarker SpawnProfilerMarker = new("Game.Pooling.Spawn");
-        private static readonly ProfilerMarker DespawnProfilerMarker = new("Game.Pooling.Despawn");
+        private static readonly ProfilerMarker SpawnProfilerMarker = new("GameFrame.Pooling.Spawn");
+        private static readonly ProfilerMarker DespawnProfilerMarker = new("GameFrame.Pooling.Despawn");
         private readonly Transform poolRoot;
         private readonly bool ownsPoolRoot;
         private readonly int ownerThreadId;
@@ -324,7 +324,7 @@ namespace Game.Pooling
             }
 
             disposed = true;
-            var failure = new UIFrame.CleanupFailure();
+            var failure = new GameFrame.UI.CleanupFailure();
             foreach (PoolBucket bucket in buckets.Values)
             {
                 failure.Run(() => bucket.Dispose(force));
@@ -659,7 +659,7 @@ namespace Game.Pooling
 
         private void EnsureOwnerThread()
         {
-            if (!UIFrame.UIFrameSafety.ThreadChecks)
+            if (!GameFrame.UI.UIFrameSafety.ThreadChecks)
             {
                 return;
             }

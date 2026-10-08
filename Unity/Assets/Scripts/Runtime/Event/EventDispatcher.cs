@@ -1,7 +1,7 @@
 using System.Threading;
 using UnityEngine;
 
-namespace Game
+namespace GameFrame.Event
 {
     /// <summary>
     /// 主线程 Drain Post 队列。由 Launch 调用 EnsureDispatcher 创建。

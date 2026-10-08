@@ -1,14 +1,16 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.Collections;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Reflection;
 using Cysharp.Threading.Tasks;
-using Game.Media;
+using GameFrame.Media;
 using NUnit.Framework;
 using UnityEngine.TestTools;
 
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
     public sealed class MediaDirectoryMembershipTests
     {

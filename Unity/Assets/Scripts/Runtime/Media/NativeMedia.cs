@@ -5,7 +5,7 @@ using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 
-namespace Game.Media
+namespace GameFrame.Media
 {
     [Serializable] internal sealed class MediaRequest
     {

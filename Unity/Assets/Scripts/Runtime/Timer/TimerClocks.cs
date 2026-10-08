@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace Game.Timer
+namespace GameFrame.Timing
 {
     public interface ITimeSource
     {

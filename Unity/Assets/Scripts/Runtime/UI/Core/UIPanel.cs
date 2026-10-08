@@ -4,7 +4,7 @@ using System.Threading;
 using UnityEngine;
 using YooAsset;
 
-namespace UIFrame
+namespace GameFrame.UI
 {
     /// <summary>
     /// 非泛型面板基础设施。没有业务 Data；打开参数只存在 <see cref="UIPanel{TArgs}.Args"/>。
@@ -216,7 +216,7 @@ namespace UIFrame
             if (!DestroyDispatched)
             {
                 Debug.LogError(
-                    $"[UIFrame] 面板 {GetType().Name} 被外部 Destroy，未经过 UI.Close/Shutdown。");
+                    $"[UIFrame] 面板 {GetType().Name} 被外部 Destroy，未经过 GameUI.Close/Shutdown。");
             }
 
             var handle = AssetHandle;
@@ -244,13 +244,13 @@ namespace UIFrame
         /// <summary>关闭自己。默认隐藏进缓存，不 Destroy、不释放 Handle。</summary>
         public void CloseSelf(bool destroy = false)
         {
-            UI.CloseInstance(this, destroy);
+            GameUI.CloseInstance(this, destroy);
         }
 
         /// <summary>关闭并销毁自己，释放 GameObject 与 YooAsset Handle。</summary>
         public void CloseAndDestroySelf()
         {
-            UI.CloseInstance(this, destroy: true);
+            GameUI.CloseInstance(this, destroy: true);
         }
     }
 }

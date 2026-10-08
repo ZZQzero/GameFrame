@@ -1,11 +1,13 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using Cysharp.Threading.Tasks;
-using Game.Input;
-using Game.Scene;
+using GameFrame.Input;
+using GameFrame.Scene;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -13,7 +15,7 @@ using UnityEngine.InputSystem.LowLevel;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
     public class FailurePanel : UIPanel<UINone, int>
     {

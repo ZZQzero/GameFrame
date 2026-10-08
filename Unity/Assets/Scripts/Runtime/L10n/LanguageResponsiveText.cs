@@ -3,7 +3,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace Game.L10n
+namespace GameFrame.Localization
 {
     [Serializable]
     public struct LanguageAutoSize

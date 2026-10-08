@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using UIFrame.Sqlite.Internal;
+using GameFrame.Sqlite.Internal;
 
-namespace UIFrame.Sqlite
+namespace GameFrame.Sqlite
 {
     /// <summary>A row is valid only during its mapping callback. Copy values needed by the caller.</summary>
     public sealed class SqliteRow

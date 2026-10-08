@@ -6,9 +6,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using Cysharp.Threading.Tasks;
-using Game.Media.Storage;
+using GameFrame.Media.Storage;
 
-namespace Game.Media
+namespace GameFrame.Media
 {
     public enum ImageLibrarySourceKind { Directory, PhotoLibrary, GrantedDirectory }
     public enum ImageLibraryChangeKind { Added, ContentChanged, MetadataChanged, RemovedFromScope, AccessChanged }
@@ -144,7 +144,7 @@ namespace Game.Media
             }
             internal void Stamp(){long now=System.Diagnostics.Stopwatch.GetTimestamp();if(FirstSignal==0)FirstSignal=now;LastSignal=now;Serial++;}
             internal void Signal(bool full){lock(Gate){Stamp();if(full){Reconcile=true;Paths.Clear();NativeItems.Clear();}}}
-            public void Dispose() { var files=Watcher;var directories=DirectoryWatcher;Watcher=DirectoryWatcher=null;var cleanup=new UIFrame.CleanupFailure();if(files!=null)cleanup.Run(files.Dispose);if(directories!=null)cleanup.Run(directories.Dispose);cleanup.Throw(); }
+            public void Dispose() { var files=Watcher;var directories=DirectoryWatcher;Watcher=DirectoryWatcher=null;var cleanup=new GameFrame.UI.CleanupFailure();if(files!=null)cleanup.Run(files.Dispose);if(directories!=null)cleanup.Run(directories.Dispose);cleanup.Throw(); }
         }
         void Check() { MediaThread.Check();if(closed || closing) throw new ObjectDisposedException(nameof(ImageLibraryIndex)); }
         Observer AcquireObserver(ImageLibraryScope scope)
@@ -171,7 +171,7 @@ namespace Game.Media
         }
         async UniTask CloseObserverCore(Observer observer)
         {
-            work++;var cleanup=new UIFrame.CleanupFailure();
+            work++;var cleanup=new GameFrame.UI.CleanupFailure();
             try
             {
                 cleanup.Run(observer.Dispose);
@@ -489,7 +489,7 @@ namespace Game.Media
         public async UniTask ShutdownAsync()
         {
             MediaThread.Check();if(closed)return;if(closing)throw new InvalidOperationException("Library shutdown is already active.");closing=true;
-            var cleanup=new UIFrame.CleanupFailure();UnityEngine.Application.focusChanged-=OnFocus;cleanup.Run(lifetime.Cancel);
+            var cleanup=new GameFrame.UI.CleanupFailure();UnityEngine.Application.focusChanged-=OnFocus;cleanup.Run(lifetime.Cancel);
             while(work!=0 || driving)await UniTask.Yield();
             foreach(var observer in observers.Values.ToArray())
                 try{await CloseObserver(observer);}catch(Exception error){cleanup.Capture(error);}

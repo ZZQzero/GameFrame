@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Audio;
 
-namespace Game.Audio
+namespace GameFrame.Audio
 {
     [Serializable]
     public sealed class AudioEntry

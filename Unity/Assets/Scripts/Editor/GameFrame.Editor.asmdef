@@ -1,6 +1,6 @@
 {
     "name": "GameFrame.Editor",
-    "rootNamespace": "",
+    "rootNamespace": "GameFrame",
     "references": [
         "GUID:dcdc64fc1a1126e47b040435b7581256",
         "GameFrame.Sqlite",

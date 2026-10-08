@@ -1,4 +1,4 @@
-namespace Game.L10n
+namespace GameFrame.Localization
 {
     public enum GameLanguage
     {

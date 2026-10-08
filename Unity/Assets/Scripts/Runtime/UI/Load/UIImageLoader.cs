@@ -5,7 +5,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using YooAsset;
 
-namespace UIFrame
+namespace GameFrame.UI
 {
     /// <summary>
     /// 为 UGUI Image 加载 YooAsset Sprite。组件只持有当前图片的资源句柄。
@@ -73,7 +73,7 @@ namespace UIFrame
             AssetHandle handle = null;
             try
             {
-                handle = await UI.LoadAsset<Sprite>(location, requestCts.Token);
+                handle = await GameUI.LoadAsset<Sprite>(location, requestCts.Token);
                 requestCts.Token.ThrowIfCancellationRequested();
 
                 Sprite sprite = handle.GetAssetObject<Sprite>();

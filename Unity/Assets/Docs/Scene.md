@@ -1,9 +1,9 @@
 # GameScene 用法
 
-进程内场景入口是 `Game.Scene.GameScene`。业务只通过它加载、激活、卸场；不要直接
+进程内场景入口是 `GameFrame.Scene.GameScene`。业务只通过它加载、激活、卸场；不要直接
 `SceneManager.LoadScene`，也不要自己握 YooAsset `SceneHandle`。
 
-和 UI 的 `CloseGroup` 不是同一件事：`GameScene` 管 Unity 场景，`UI.CloseGroup` 关面板。
+和 UI 的 `CloseGroup` 不是同一件事：`GameScene` 管 Unity 场景，`GameUI.CloseGroup` 关面板。
 
 ---
 
@@ -18,7 +18,7 @@ await GameScene.ShutdownAsync();
 ```
 
 `Launch` 在资源包装好之后 `Init`。退出时先看 `IsInited` 再 `ShutdownAsync`：未 Init 会抛，
-和 `UI.Shutdown`（未 Init 直接返回）不同。
+和 `GameUI.Shutdown`（未 Init 直接返回）不同。
 
 ### 注意
 
@@ -117,12 +117,12 @@ float p = GameScene.Progress; // 与回调同一值；操作结束归 0
 
 ```csharp
 await GameScene.LoadAsync("Battle", LoadSceneMode.Single);
-UI.CloseGroup(UIGroup.Scene, destroy: true);
+GameUI.CloseGroup(UIGroup.Scene, destroy: true);
 ```
 
 | 需求 | 用 |
 |------|-----|
 | 切 / 加 / 卸 Unity 场景 | `GameScene` |
-| 关掉本场景组面板 | `UI.CloseGroup(UIGroup.Scene)` |
+| 关掉本场景组面板 | `GameUI.CloseGroup(UIGroup.Scene)` |
 | 场景 BGM | `GameAudio`，不要在 Scene 里播 |
 | 场景加载进度条 | `SwitchAsync` / `LoadAsync` / `LoadBuiltinAsync` 的进度回调 |

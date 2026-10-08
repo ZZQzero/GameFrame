@@ -1,12 +1,14 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
-using Game.Pooling;
+using GameFrame.Pooling;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
 
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
     public class ManagedPoolFailureTests
     {

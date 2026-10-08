@@ -1,4 +1,4 @@
-namespace Game
+namespace GameFrame.Event
 {
     interface IEventBucket
     {

@@ -11,7 +11,7 @@ using UnityEditor.Callbacks;
 using UnityEditor.iOS.Xcode;
 #endif
 
-namespace UIFrame.Editor
+namespace GameFrame.Media.Editor
 {
     [FilePath("ProjectSettings/UIFrameMediaSettings.asset", FilePathAttribute.Location.ProjectFolder)]
     public sealed class GalleryBuildSettings : ScriptableSingleton<GalleryBuildSettings>

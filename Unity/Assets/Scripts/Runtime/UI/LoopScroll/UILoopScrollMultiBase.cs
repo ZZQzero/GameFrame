@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
-using Game.Pooling;
+using GameFrame.Pooling;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace UIFrame
+namespace GameFrame.UI
 {
     [DisallowMultipleComponent]
     public abstract class UILoopScrollMultiBase<TArgs> :

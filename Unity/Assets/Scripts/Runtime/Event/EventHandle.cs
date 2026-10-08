@@ -1,6 +1,6 @@
 using System;
 
-namespace Game
+namespace GameFrame.Event
 {
     /// <summary>
     /// 槽位 + 世代句柄。默认值无效；Unsubscribe 后世代递增，旧句柄失效。

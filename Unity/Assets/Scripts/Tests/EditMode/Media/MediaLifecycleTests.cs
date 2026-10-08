@@ -1,3 +1,5 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.Collections;
 using System.IO;
@@ -6,13 +8,13 @@ using System.Net.Http;
 using System.Reflection;
 using System.Threading;
 using Cysharp.Threading.Tasks;
-using Game.Media;
-using Game.Media.Backup;
+using GameFrame.Media;
+using GameFrame.Media.Backup;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
 
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
     public sealed class MediaLifecycleTests
     {

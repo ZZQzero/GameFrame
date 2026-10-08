@@ -22,16 +22,16 @@ Event、红点是并列模块，不要互相套门面或 Shutdown 顺序以外�
 推荐顺序：
 
 ```csharp
-UI.Init(package);                    // 或 Init() / Init(packageName)
-UI.ConfigureURPCameraStack();        // 失败会抛
+GameUI.Init(package);                    // 或 Init() / Init(packageName)
+GameUI.ConfigureURPCameraStack();        // 失败会抛
 
-UI.Register<MainPanel>("MainPanel", UIGroup.Scene);
-GamePool.Init(package, persistRoot); // persistRoot 须比 UI.Shutdown 更久，不要用 UIFrameRoot
+GameUI.Register<MainPanel>("MainPanel", UIGroup.Scene);
+GamePool.Init(package, persistRoot); // persistRoot 须比 GameUI.Shutdown 更久，不要用 UIFrameRoot
 
-await UI.Push<MainPanel>();          // 未 Register / 加载失败会抛
+await GameUI.Push<MainPanel>();          // 未 Register / 加载失败会抛
 
 // 退出时：先 UI，再池
-UI.Shutdown();
+GameUI.Shutdown();
 GamePool.Shutdown();
 ```
 
@@ -39,8 +39,8 @@ GamePool.Shutdown();
 
 - 先 `Init`，再 `Register` / 打开面板。
 - `Push` / `Popup` / `Toast` / `SetPackage` / Camera Stack 不会代替业务自动 `Init`；漏掉或重复 `Init` 都会抛。
-- 未 Init 时 **`UI.Shutdown` 直接返回**（进程收尾）。`Close` / `Back` / `ClearCache` 未 Init 仍会抛。
-- 退出顺序必须是 **`UI.Shutdown()` → 再 `GamePool.Shutdown()`**。面板的 `OnDestroyPanel` 可能还要还池。若还用了场景 / 音频 / Timer，见 [Scene.md](Scene.md)、[Audio.md](Audio.md)、[Timer.md](Timer.md) 与 `Launch` 的 Teardown。
+- 未 Init 时 **`GameUI.Shutdown` 直接返回**（进程收尾）。`Close` / `Back` / `ClearCache` 未 Init 仍会抛。
+- 退出顺序必须是 **`GameUI.Shutdown()` → 再 `GamePool.Shutdown()`**。面板的 `OnDestroyPanel` 可能还要还池。若还用了场景 / 音频 / Timer，见 [Scene.md](Scene.md)、[Audio.md](Audio.md)、[Timer.md](Timer.md) 与 `Launch` 的 Teardown。
 - `Shutdown` 会销毁 Root、打开中与缓存面板，并释放 YooAsset Handle；**注册表会保留**，可再次 `Init`。
 - 进行中的 `Push` / `Popup` / `Hud` 在 `Shutdown` 时以 **`OperationCanceledException`** 结束，不会返回 `null`。
 - 不要只检查“启动完成”日志：相机 Stack 配不上会抛，首屏 `Push` 失败也会抛。
@@ -52,9 +52,9 @@ GamePool.Shutdown();
 
 ### 全局扩展入口
 
-- `UI.CanvasRoot`：框架拥有的 Canvas 根节点，未初始化或关闭后返回 null。可用于挂载全局适配组件；外部不能销毁根节点或更换其父级。
-- `UI.RootReady`：每次根节点和管理器初始化完成后同步触发，回调内可访问 `CanvasRoot`。不保证资源包已绑定，也不代表业务启动完成；后订阅不会补发，可在订阅后检查 `UI.IsInited` 并主动绑定。回调中 Shutdown 会使本次 Init 抛出 `OperationCanceledException`。
-- `UI.PanelShown`：面板激活并同步执行完 `OnOpen` 后触发。首次打开、缓存重开和对已打开面板再次调用打开接口都会触发；`OnResume` 恢复显示不触发。不等待异步内容、布局重建或入场动画完成，动态生成的子节点需要另行处理。
+- `GameUI.CanvasRoot`：框架拥有的 Canvas 根节点，未初始化或关闭后返回 null。可用于挂载全局适配组件；外部不能销毁根节点或更换其父级。
+- `GameUI.RootReady`：每次根节点和管理器初始化完成后同步触发，回调内可访问 `CanvasRoot`。不保证资源包已绑定，也不代表业务启动完成；后订阅不会补发，可在订阅后检查 `GameUI.IsInited` 并主动绑定。回调中 Shutdown 会使本次 Init 抛出 `OperationCanceledException`。
+- `GameUI.PanelShown`：面板激活并同步执行完 `OnOpen` 后触发。首次打开、缓存重开和对已打开面板再次调用打开接口都会触发；`OnResume` 恢复显示不触发。不等待异步内容、布局重建或入场动画完成，动态生成的子节点需要另行处理。
 
 两个事件都是同步扩展回调。首个订阅者异常会中止后续派发，并让初始化或打开失败，由框架执行对应清理；`PanelShown` 回调中 Shutdown 会取消打开。静态订阅在 Shutdown 后保留，临时订阅者应在自身生命周期结束时退订。
 
@@ -62,36 +62,36 @@ GamePool.Shutdown();
 
 ```text
 CanvasRoot
-├── Window   ← UI.Push
-├── Hud      ← UI.Hud
+├── Window   ← GameUI.Push
+├── Hud      ← GameUI.Hud
 ├── Mask     ← 框架内部（Popup 遮罩）
-├── Popup    ← UI.Popup
-├── Tips     ← UI.Tips / UI.Toast
-└── Guide    ← UI.Guide
+├── Popup    ← GameUI.Popup
+├── Tips     ← GameUI.Tips / GameUI.Toast
+└── Guide    ← GameUI.Guide
 ```
 
 | API | 层 | 语义 |
 |-----|----|------|
-| `UI.Hud` | Hud | 常驻 HUD，不进窗口栈，`Back` 关不掉 |
-| `UI.Push` | Window | 窗口栈；新 Push 会 Pause 旧窗，并关掉全部 Popup |
-| `UI.Popup` | Popup | 弹窗栈；显示 Mask，可点遮罩关闭 |
-| `UI.Tips` | Tips | 同类型单实例，不排队、不定时 |
-| `UI.Toast` | Tips | 多实例 + 队列 + 可选自动关闭 |
-| `UI.Guide` | Guide | 最上层引导，不进栈 |
+| `GameUI.Hud` | Hud | 常驻 HUD，不进窗口栈，`Back` 关不掉 |
+| `GameUI.Push` | Window | 窗口栈；新 Push 会 Pause 旧窗，并关掉全部 Popup |
+| `GameUI.Popup` | Popup | 弹窗栈；显示 Mask，可点遮罩关闭 |
+| `GameUI.Tips` | Tips | 同类型单实例，不排队、不定时 |
+| `GameUI.Toast` | Tips | 多实例 + 队列 + 可选自动关闭 |
+| `GameUI.Guide` | Guide | 最上层引导，不进栈 |
 
 ### UIGroup（卸载分组，不是显示层）
 
 | Group | 用途 |
 |-------|------|
-| `Scene` | 默认。切场景用 `UI.CloseGroup(UIGroup.Scene)` |
+| `Scene` | 默认。切场景用 `GameUI.CloseGroup(UIGroup.Scene)` |
 | `Hud` | HUD 组；`CloseGroup(Scene)` 不会关它 |
 | `Persistent` | 全局常驻 |
 
 ```csharp
-UI.Register<MainHud>("MainHud", UIGroup.Hud);
-UI.Register<BagPanel>("Bag", UIGroup.Scene, cache: true);
-UI.CloseGroup(UIGroup.Scene);                 // 默认进缓存
-UI.CloseGroup(UIGroup.Scene, destroy: true);  // 销毁并释放 Handle
+GameUI.Register<MainHud>("MainHud", UIGroup.Hud);
+GameUI.Register<BagPanel>("Bag", UIGroup.Scene, cache: true);
+GameUI.CloseGroup(UIGroup.Scene);                 // 默认进缓存
+GameUI.CloseGroup(UIGroup.Scene, destroy: true);  // 销毁并释放 Handle
 ```
 
 ### 生命周期时序
@@ -164,7 +164,7 @@ protected override void OnOpen(ItemArgs args)
 
 ### 注意
 
-- **严禁** `Destroy(panel.gameObject)`。只能 `UI.Close` / `UI.Destroy` / `CloseSelf` / `CloseAndDestroySelf`。
+- **严禁** `Destroy(panel.gameObject)`。只能 `GameUI.Close` / `GameUI.Destroy` / `CloseSelf` / `CloseAndDestroySelf`。
 - 按钮监听放 `OnCreate`（或 LoopScroll 的 `OnLoopScrollCreated`）；数据刷新放 `OnOpen`。
 - 同类型 `Hud/Push/Popup/Tips/Guide` 单实例；再次打开会复用并再次 `OnOpen`，**不会先 `OnClose`**。
 - 同类型面板正在同步执行打开流程时，回调或旧结果取消的续体不能重入打开该类型，违规直接抛错。
@@ -172,7 +172,7 @@ protected override void OnOpen(ItemArgs args)
 - 同类型加载中再次 Open：合并为一次加载，后一次 Args/Mode 生效。
 - **`Tips` 与 `Toast` 不要用同一面板类型**（通道不同，可能同时存在两套实例）。
 - `Back()` 只关 Popup / Window；Hud / Tips / Guide / Toast 需显式 Close。
-- 必须 `UI.Register`。未注册、空 Location、重复且不一致的注册都会抛。
+- 必须 `GameUI.Register`。未注册、空 Location、重复且不一致的注册都会抛。
 - 资源地址原样传递，不自动去除首尾空格。无参打开重载使用 `UINone.Value`；显式传入 `null` 不会自动补成无参对象。
 - 默认 `cache: true`：Close 只隐藏，不释放内存；要释放用 `destroy: true` 或 `ClearCache()`。
 
@@ -183,12 +183,12 @@ protected override void OnOpen(ItemArgs args)
 ### 用法
 
 ```csharp
-UI.Init(package);
-UI.ConfigureURPCameraStack();                 // Base = Camera.main
+GameUI.Init(package);
+GameUI.ConfigureURPCameraStack();                 // Base = Camera.main
 // 或
-UI.ConfigureURPCameraStack(baseCamera, uiCamera, uiLayer);
+GameUI.ConfigureURPCameraStack(baseCamera, uiCamera, uiLayer);
 
-UI.DisableURPCameraStack();                   // 仅从 Stack 移除
+GameUI.DisableURPCameraStack();                   // 仅从 Stack 移除
 ```
 
 ### 设计约定（不要当成 bug）
@@ -210,7 +210,7 @@ UI.DisableURPCameraStack();                   // 仅从 Stack 移除
 ### 用法
 
 ```csharp
-// UI.Init 只会检测当前横竖并同步 Canvas 参考分辨率，
+// GameUI.Init 只会检测当前横竖并同步 Canvas 参考分辨率，
 // 不会改 Screen.orientation。
 
 ScreenOrientationManager.SetPortrait();
@@ -224,7 +224,7 @@ ScreenOrientationManager.SyncCanvasLayoutNow();
 ### 注意
 
 - 只有显式 `Set / Push / Pop / ResetTo` 才会写系统方向。
-- `UI.Shutdown` **不恢复**系统方向（进程退出场景下不需要恢复）。
+- `GameUI.Shutdown` **不恢复**系统方向（进程退出场景下不需要恢复）。
 - `Shutdown` 会清空方向栈与事件订阅；业务若自己订阅了 `CanvasLayoutChanged`，不要假设 Shutdown 后还在。
 
 ---
@@ -257,12 +257,12 @@ ScreenSafeArea.Refresh();
 ### 用法
 
 ```csharp
-UI.ConfigureTips(maxVisible: 3, maxQueued: 8, defaultDuration: 2f);
+GameUI.ConfigureTips(maxVisible: 3, maxQueued: 8, defaultDuration: 2f);
 
-await UI.Tips<NetStatusPanel>();                      // 常驻状态条
-await UI.Toast<HintToast, string>("保存成功");
-await UI.Toast<HintToast, string>("保存成功", 1.5f);
-await UI.Toast<StickyToast>(duration: 0f);            // 常驻到手动关
+await GameUI.Tips<NetStatusPanel>();                      // 常驻状态条
+await GameUI.Toast<HintToast, string>("保存成功");
+await GameUI.Toast<HintToast, string>("保存成功", 1.5f);
+await GameUI.Toast<StickyToast>(duration: 0f);            // 常驻到手动关
 ```
 
 ### 注意
@@ -305,7 +305,7 @@ RedDot.Remove("Activity/Summer");     // 删子树
 
 ---
 
-## 8. 对象池（Game.Pooling）
+## 8. 对象池（GameFrame.Pooling）
 
 详见 [Pool.md](Pool.md)。
 
@@ -327,7 +327,7 @@ if (pool.TrySpawn("PlayerItem", parent, out PlayerItem item))
 ### 注意
 
 - 与 `UIPanel` 缓存是两套所有权：**UIPanel 不要进这个池**。
-- 退出时先 `UI.Shutdown`，再 `GamePool.Shutdown`（或自己 `Dispose` 注入的服务）。
+- 退出时先 `GameUI.Shutdown`，再 `GamePool.Shutdown`（或自己 `Dispose` 注入的服务）。
 - 禁止业务直接 `Destroy` 池化实例。外部 Destroy 打 Error，并从集合摘掉该实例；分桶仍可用，下一次 Spawn 拿还活着的或新建。
 - `TrySpawn` 返回 `false` 只表示尚未 Prepare。还错走 `Despawn` 会抛；`TrySpawn<T>` 缺组件会抛；未 Init 读 `GamePool.Service` 会抛。
 - 已 Init 时再 `GamePool.Init` 会抛。
@@ -421,22 +421,22 @@ UIFrameSafety.CollectionChecks = true;  // 池重复归还检查
 
 ```csharp
 GameScene.Init(package);             // 资源包装好后；见 Scene.md
-UI.Init(package);
-UI.ConfigureURPCameraStack();
+GameUI.Init(package);
+GameUI.ConfigureURPCameraStack();
 
-UI.Register<MainHud>("MainHud", UIGroup.Hud);
-UI.Register<HomePanel>("Home", UIGroup.Scene);
+GameUI.Register<MainHud>("MainHud", UIGroup.Hud);
+GameUI.Register<HomePanel>("Home", UIGroup.Scene);
 GamePool.Init(package, transform);
 
-await UI.Hud<MainHud>();
-await UI.Push<HomePanel>();
+await GameUI.Hud<MainHud>();
+await GameUI.Push<HomePanel>();
 
 // 切 Unity 场景（见 Scene.md）；关本场景组面板
 await GameScene.SwitchAsync("Battle");
-UI.CloseGroup(UIGroup.Scene, destroy: true);
+GameUI.CloseGroup(UIGroup.Scene, destroy: true);
 
 // 退出
-UI.Shutdown();
+GameUI.Shutdown();
 GamePool.Shutdown();
 ```
 

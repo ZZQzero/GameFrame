@@ -1,14 +1,16 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
-using Game.L10n;
+using GameFrame.Localization;
 using NUnit.Framework;
 using TMPro;
 using UnityEngine;
 using UnityEngine.TestTools;
 
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
     public class LanguageTableTests
     {

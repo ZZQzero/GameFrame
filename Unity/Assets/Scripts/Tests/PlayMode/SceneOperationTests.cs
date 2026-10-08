@@ -1,16 +1,18 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
-using Game.Scene;
+using GameFrame.Scene;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
     public class SceneOperationTests
     {

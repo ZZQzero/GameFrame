@@ -3,7 +3,7 @@ using Cysharp.Threading.Tasks;
 using UnityEngine;
 using YooAsset;
 
-namespace Game.Pooling
+namespace GameFrame.Pooling
 {
     public interface IPrefabHandle : IDisposable
     {

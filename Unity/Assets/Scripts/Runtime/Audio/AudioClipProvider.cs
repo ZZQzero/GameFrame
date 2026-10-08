@@ -3,7 +3,7 @@ using Cysharp.Threading.Tasks;
 using UnityEngine;
 using YooAsset;
 
-namespace Game.Audio
+namespace GameFrame.Audio
 {
     internal interface IAudioClipProvider
     {

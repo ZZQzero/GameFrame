@@ -1,6 +1,6 @@
 using System;
 
-namespace Game.Media
+namespace GameFrame.Media
 {
     /// <summary>One admission budget for cached thumbnails, direct previews and image exports.</summary>
     internal static class ImageWorkBudget

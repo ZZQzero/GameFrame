@@ -6,9 +6,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
-using Command = Game.Media.Backup.BackupRepository.Command;
+using Command = GameFrame.Media.Backup.BackupRepository.Command;
 
-namespace Game.Media.Backup
+namespace GameFrame.Media.Backup
 {
     /// <summary>A registered request. Waiting never owns or cancels its preparation.</summary>
     public sealed class BackupSubmission

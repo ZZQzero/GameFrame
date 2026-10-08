@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.ExceptionServices;
 
-namespace Game.Media.Backup
+namespace GameFrame.Media.Backup
 {
     public enum BackupState { Queued, Uploading, Verifying, Completed, Paused, NeedsAttention=6, Failed, Canceled, Preparing }
     public enum BackupTransferMode { Automatic, UserInitiated }

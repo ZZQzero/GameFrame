@@ -2,7 +2,7 @@ using System;
 using TMPro;
 using UnityEngine;
 
-namespace UIFrame
+namespace GameFrame.UI
 {
     /// <summary>
     /// 将红点路径绑定到一个子级显示对象，并可选显示聚合数量。

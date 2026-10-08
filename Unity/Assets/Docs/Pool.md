@@ -13,17 +13,17 @@
 LoopScroll / UIItem 仍通过 `SetPool` 注入，不要在框架内部写死 `GamePool.Service`。
 
 ```csharp
-GamePool.Init(package, persistRoot); // persistRoot 须比 UI.Shutdown 更久，不要用 UIFrameRoot
+GamePool.Init(package, persistRoot); // persistRoot 须比 GameUI.Shutdown 更久，不要用 UIFrameRoot
 SetPool(GamePool.Service);
 
-UI.Shutdown();
+GameUI.Shutdown();
 GamePool.Shutdown();
 ```
 
 已 Init、或上次直接 `Dispose` 了 `Service` 还没 `Shutdown` 时再 `Init` 会抛。未 Init 时读 `GamePool.Service` 也会抛。不要绕过 `Shutdown` 去 `Dispose` 默认池。未 Init 时 `GamePool.Shutdown` 是空操作。
 
 `persistRoot` 由宿主提供常驻节点（例如 `DontDestroyOnLoad` 的 Launch）。不要把池根
-挂在 UIFrameRoot 下：退出顺序是先 `UI.Shutdown`（面板 `OnDestroyPanel` 还要还池），
+挂在 UIFrameRoot 下：退出顺序是先 `GameUI.Shutdown`（面板 `OnDestroyPanel` 还要还池），
 再 `GamePool.Shutdown`。
 
 ## 纯托管对象

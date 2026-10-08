@@ -4,7 +4,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 
-namespace UIFrame.Editor
+namespace GameFrame.UI.Editor
 {
     internal static class UICodeGenUtil
     {

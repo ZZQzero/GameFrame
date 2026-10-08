@@ -7,7 +7,7 @@ using System.Text;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 
-namespace Game.Media.Backup
+namespace GameFrame.Media.Backup
 {
     public sealed class BackupRepositoryException : Exception
     {

@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
-namespace UIFrame.Editor
+namespace GameFrame.UI.Editor
 {
     static class UIBindInspectorGui
     {

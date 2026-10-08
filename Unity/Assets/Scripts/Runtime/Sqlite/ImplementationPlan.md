@@ -29,7 +29,7 @@
 
 ~~~mermaid
 flowchart TD
-    G["C# 游戏仓库：存档 / 背包 / 任务"] --> M["UIFrame.Sqlite 托管门面"]
+    G["C# 游戏仓库：存档 / 背包 / 任务"] --> M["GameFrame.Sqlite 托管门面"]
     L["C# 图库索引仓库"] --> M
     M --> C["统一 C ABI"]
     C --> S["共享原生存储核心"]

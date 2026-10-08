@@ -1,6 +1,6 @@
 {
     "name": "GameFrame.Tests.EditMode",
-    "rootNamespace": "",
+    "rootNamespace": "GameFrame.Tests",
     "references": [
         "UniTask",
         "Unity.InputSystem",

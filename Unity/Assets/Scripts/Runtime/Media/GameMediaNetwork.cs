@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using UnityEngine;
 
-namespace Game.Media
+namespace GameFrame.Media
 {
     public static class GameMediaNetwork
     {

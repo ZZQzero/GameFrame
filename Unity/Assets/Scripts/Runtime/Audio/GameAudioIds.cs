@@ -1,4 +1,4 @@
-namespace Game.Audio
+namespace GameFrame.Audio
 {
     public static class GameAudioIds
     {

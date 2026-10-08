@@ -6,7 +6,7 @@ using UnityEditor;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
-namespace UIFrame.Editor
+namespace GameFrame.UI.Editor
 {
     static class UIBindActions
     {

@@ -1,5 +1,5 @@
 // Generated from Schema~/library.sql. Regenerate with Tools~/generate_media_schema.py.
-namespace Game.Media.Storage
+namespace GameFrame.Media.Storage
 {
     internal static class LibrarySchema
     {

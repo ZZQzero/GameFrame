@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-namespace Game.Input
+namespace GameFrame.Input
 {
     /// <summary>
     /// 玩法轮询入口。Init 时缓存 InputAction 引用，Update 里只 ReadValue / WasPressedThisFrame。

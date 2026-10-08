@@ -1,16 +1,18 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.Collections;
 using System.IO;
 using System.Linq;
 using System.Threading;
 using Cysharp.Threading.Tasks;
-using Game.Media;
-using Game.Media.Backup;
+using GameFrame.Media;
+using GameFrame.Media.Backup;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
 
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
     public sealed class MediaTests
     {
@@ -275,14 +277,14 @@ namespace UIFrame.Regression
 
         [Test] public void AndroidBuildPermissionConfigurationIsOptInAndIdempotent()
         {
-            var method = typeof(UIFrame.Editor.GalleryBuildProcessor).GetMethod("OnPostGenerateGradleAndroidProject");
+            var method = typeof(GameFrame.Media.Editor.GalleryBuildProcessor).GetMethod("OnPostGenerateGradleAndroidProject");
             if (method == null) Assert.Ignore("Requires the active Android build target.");
             string manifest = Path.Combine(root,"src","main","AndroidManifest.xml"); Directory.CreateDirectory(Path.GetDirectoryName(manifest));
             File.WriteAllText(manifest,"<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"><application /></manifest>");
-            var settings = UIFrame.Editor.GalleryBuildSettings.instance; bool previous = settings.enableLibraryRead;
+            var settings = GameFrame.Media.Editor.GalleryBuildSettings.instance; bool previous = settings.enableLibraryRead;
             try
             {
-                var processor = new UIFrame.Editor.GalleryBuildProcessor(); settings.enableLibraryRead = false;
+                var processor = new GameFrame.Media.Editor.GalleryBuildProcessor(); settings.enableLibraryRead = false;
                 method.Invoke(processor,new object[]{root}); Assert.IsFalse(File.ReadAllText(manifest).Contains("READ_MEDIA_IMAGES"));
                 settings.enableLibraryRead = true; method.Invoke(processor,new object[]{root}); method.Invoke(processor,new object[]{root});
                 var xml = new System.Xml.XmlDocument(); xml.Load(manifest);
@@ -313,7 +315,7 @@ namespace UIFrame.Regression
         });
         [UnityTest] public IEnumerator ChangeSnapshotRemainsContinuousDuringPruningAndScanHistoryIsBounded() => UniTask.ToCoroutine(async()=>
         {
-            var repository=await Game.Media.Storage.LibraryRepository.OpenAsync(Path.Combine(root,"snapshot.sqlite"),default);
+            var repository=await GameFrame.Media.Storage.LibraryRepository.OpenAsync(Path.Combine(root,"snapshot.sqlite"),default);
             var scope=new ImageLibraryScope(ImageLibrarySourceKind.Directory,root);
             try {
                 var state=await repository.Scope(scope,0,default);
@@ -322,7 +324,7 @@ namespace UIFrame.Regression
                     await repository.Upsert(state,run,new[]{new ImageReference("file",imagePath,"photo.png","image/png",version:"v"+i)},default);
                     await repository.Finish(state,run,start.sequence,default);
                 }
-                var scans=await repository.Query(new UIFrame.Sqlite.SqliteCommand("SELECT count(*) FROM scan_runs"),r=>r.GetInt64(0));Assert.AreEqual(1,scans[0]);
+                var scans=await repository.Query(new GameFrame.Sqlite.SqliteCommand("SELECT count(*) FROM scan_runs"),r=>r.GetInt64(0));Assert.AreEqual(1,scans[0]);
                 // Both reads can legally win. A snapshot must contain the rows or
                 // expose the new retained watermark; an empty, continuous page is forbidden.
                 var reading=repository.Changes(scope.Id,0,200,default);
@@ -377,7 +379,7 @@ namespace UIFrame.Regression
                 await automatic.ConfigureAsync(new AutomaticBackupPolicy {enabled=true,source=root,sourceKind=BackupSourceKind.Directory,includeExisting=true,wifiOnly=false});
                 await automatic.ScanOnceAsync();var task=(await service.QueryTasksAsync()).Items.Single();
                 var field=typeof(ImageLibraryIndex).GetField("repository",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic);
-                var repository=(Game.Media.Storage.LibraryRepository)field.GetValue(library);
+                var repository=(GameFrame.Media.Storage.LibraryRepository)field.GetValue(library);
                 await repository.Scope(new ImageLibraryScope(ImageLibrarySourceKind.Directory,root),1,default);
                 try {await automatic.ScanOnceAsync();Assert.Fail("Changed scope continued without confirmation");}
                 catch(GalleryException error){Assert.AreEqual("ScopeConfirmationRequired",error.Code);}
@@ -398,7 +400,7 @@ namespace UIFrame.Regression
                 await automatic.ConfigureAsync(new AutomaticBackupPolicy {enabled=true,source=root,sourceKind=BackupSourceKind.Directory,includeExisting=true,wifiOnly=false});
                 await automatic.ScanOnceAsync();var task=(await service.QueryTasksAsync()).Items.Single();
                 var field=typeof(ImageLibraryIndex).GetField("repository",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic);
-                var repository=(Game.Media.Storage.LibraryRepository)field.GetValue(library);
+                var repository=(GameFrame.Media.Storage.LibraryRepository)field.GetValue(library);
                 await repository.Scope(new ImageLibraryScope(ImageLibrarySourceKind.Directory,root),1,default);
                 using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(10));
                 Exception failure=null;try{await automatic.RunAsync(timeout.Token);}catch(Exception error){failure=error;}

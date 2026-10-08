@@ -1,14 +1,16 @@
+using GameFrame.UI;
+using GameFrame.Display;
 using System;
 using System.Collections;
 using System.IO;
 using System.Linq;
 using Cysharp.Threading.Tasks;
-using Game.Media;
+using GameFrame.Media;
 using NUnit.Framework;
-using UIFrame.Sqlite;
+using GameFrame.Sqlite;
 using UnityEngine.TestTools;
 
-namespace UIFrame.Regression
+namespace GameFrame.Tests
 {
     public sealed class MediaLibrarySizeTests
     {

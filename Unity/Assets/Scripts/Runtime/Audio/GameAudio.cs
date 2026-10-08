@@ -5,7 +5,7 @@ using Cysharp.Threading.Tasks;
 using UnityEngine;
 using YooAsset;
 
-namespace Game.Audio
+namespace GameFrame.Audio
 {
     public static class GameAudio
     {
@@ -104,7 +104,7 @@ namespace Game.Audio
             }
             catch (Exception exception)
             {
-                var failure = new UIFrame.CleanupFailure();
+                var failure = new GameFrame.UI.CleanupFailure();
                 failure.Capture(exception);
                 failure.Run(DisposeResidentLeases);
                 if (cache != null)
@@ -307,7 +307,7 @@ namespace Game.Audio
 
             state = RuntimeState.ShuttingDown;
             bgmRequestGate.Invalidate();
-            var failure = new UIFrame.CleanupFailure();
+            var failure = new GameFrame.UI.CleanupFailure();
             failure.Run(runtimeCancellation.Cancel);
             try
             {
@@ -468,7 +468,7 @@ namespace Game.Audio
             }
             finally
             {
-                var failure = new UIFrame.CleanupFailure();
+                var failure = new GameFrame.UI.CleanupFailure();
                 if (operationFailure != null) failure.Capture(operationFailure);
                 if (!transferred)
                 {
@@ -572,7 +572,7 @@ namespace Game.Audio
         private static void CompleteShutdown()
         {
             var rootObject = ownedRoot != null ? ownedRoot.gameObject : null;
-            var failure = new UIFrame.CleanupFailure();
+            var failure = new GameFrame.UI.CleanupFailure();
             failure.Run(DisposeResidentLeases);
             failure.Run(driver.Shutdown);
             failure.Run(() => ResetRuntime(rootObject));
@@ -589,7 +589,7 @@ namespace Game.Audio
             runtimeCancellation = null;
             operationsIdle = null;
             pendingOperations = 0;
-            var failure = new UIFrame.CleanupFailure();
+            var failure = new GameFrame.UI.CleanupFailure();
             try { cancellation?.Dispose(); }
             catch (Exception exception) { failure.Capture(exception); }
             try { DestroyObject(rootObject); }
@@ -655,7 +655,7 @@ namespace Game.Audio
 
         private static void DisposeResidentLeases()
         {
-            var failure = new UIFrame.CleanupFailure();
+            var failure = new GameFrame.UI.CleanupFailure();
             while (ResidentLeases.Count > 0)
             {
                 int index = ResidentLeases.Count - 1;

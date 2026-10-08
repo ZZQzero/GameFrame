@@ -1,7 +1,7 @@
 using System;
 using System.Text;
 
-namespace UIFrame.Sqlite.Internal
+namespace GameFrame.Sqlite.Internal
 {
     internal static class Wire
     {

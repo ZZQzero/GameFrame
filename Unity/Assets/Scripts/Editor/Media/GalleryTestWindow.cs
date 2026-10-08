@@ -3,12 +3,13 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using Cysharp.Threading.Tasks;
-using Game.Media;
-using Game.Media.Backup;
+using GameFrame.Media;
+using GameFrame.Media.Backup;
+using GameFrame.UI;
 using UnityEditor;
 using UnityEngine;
 
-namespace UIFrame.Editor
+namespace GameFrame.Media.Editor
 {
     public sealed class GalleryTestWindow : EditorWindow
     {

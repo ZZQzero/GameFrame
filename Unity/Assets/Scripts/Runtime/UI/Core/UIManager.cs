@@ -3,10 +3,11 @@ using System.Collections.Generic;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using Cysharp.Threading.Tasks;
+using GameFrame.Display;
 using UnityEngine;
 using YooAsset;
 
-namespace UIFrame
+namespace GameFrame.UI
 {
     sealed class UIManager
     {
@@ -445,7 +446,7 @@ namespace UIFrame
             AddVisibleToast(panel);
             panel.DispatchOpen();
             EnsureOpenCanContinue();
-            UI.RaisePanelShown(panel);
+            GameUI.RaisePanelShown(panel);
             EnsureOpenCanContinue();
             if (!IsVisibleToast(panel) || TipsChannel.IsSticky(duration))
             {
@@ -543,7 +544,7 @@ namespace UIFrame
             panel.gameObject.SetActive(true);
             panel.DispatchOpen();
             EnsureOpenCanContinue();
-            UI.RaisePanelShown(panel);
+            GameUI.RaisePanelShown(panel);
             EnsureOpenCanContinue();
             RefreshMask();
         }

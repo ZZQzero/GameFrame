@@ -28,13 +28,13 @@ namespace UIFrame.Editor
     {
         internal static string LocateRoot()
         {
-            foreach(string guid in AssetDatabase.FindAssets("UIFrame.Runtime t:AssemblyDefinitionAsset"))
+            foreach(string guid in AssetDatabase.FindAssets("GameFrame.Runtime t:AssemblyDefinitionAsset"))
             {
-                string asset=AssetDatabase.GUIDToAssetPath(guid);if(Path.GetFileName(asset)!="UIFrame.Runtime.asmdef")continue;
+                string asset=AssetDatabase.GUIDToAssetPath(guid);if(Path.GetFileName(asset)!="GameFrame.Runtime.asmdef")continue;
                 var package=UnityEditor.PackageManager.PackageInfo.FindForAssetPath(asset);
                 return package!=null?package.resolvedPath:Directory.GetParent(Path.GetDirectoryName(Path.GetFullPath(asset))).FullName;
             }
-            throw new BuildFailedException("UIFrame runtime assembly not found.");
+            throw new BuildFailedException("GameFrame runtime assembly not found.");
         }
         public int callbackOrder => 100;
         public void OnPreprocessBuild(BuildReport report)

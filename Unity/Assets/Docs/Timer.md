@@ -1018,7 +1018,7 @@ Development Build 复测，并区分 Scheduler 自身分配、业务委托分配
 代码建议放置在：
 
 ```text
-Assets/UIFrame1/Runtime/Timer/
+Assets/Scripts/Runtime/Timer/
 ├── TimerContracts.cs
 ├── TimerClocks.cs
 ├── TimerScheduler.cs

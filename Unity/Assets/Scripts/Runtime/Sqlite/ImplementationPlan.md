@@ -2,7 +2,7 @@
 
 日期：2026-09-30  
 状态：实施中。通用核心、托管接口、维护与快照已有代码及桌面验证；移动端和商业发布门槛尚未通过。当前实现与证据见 [Validation.md](Validation.md)。本文替代此前分别选择 C#、Android 和 iOS 数据库封装的方案。  
-位置：Packages/UIFrame/Runtime/Sqlite。
+位置：Assets/Scripts/Runtime/Sqlite。
 
 面向长期运营的商业游戏。以数据可靠性、明确的资源所有权、可测量的帧耗时和内存、跨平台一致行为及可维护的构建链作为交付标准。通用模块遵守 [ErrorContract.md](../../Docs/ErrorContract.md)，照片业务另见 [照片业务设计](../../Docs/GalleryDesign.md)。
 

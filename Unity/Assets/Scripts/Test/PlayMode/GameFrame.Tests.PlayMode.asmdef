@@ -1,5 +1,5 @@
 {
-    "name": "UIFrame.Regression.PlayMode",
+    "name": "GameFrame.Tests.PlayMode",
     "rootNamespace": "",
     "references": [
         "Unity.TextMeshPro",
@@ -9,7 +9,7 @@
         "YooAsset.Editor",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
-        "Aot"
+        "GameFrame.Runtime"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

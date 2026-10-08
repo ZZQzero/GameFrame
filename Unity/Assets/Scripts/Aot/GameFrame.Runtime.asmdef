@@ -1,14 +1,15 @@
 {
-    "name": "UIFrame.Editor",
+    "name": "GameFrame.Runtime",
     "rootNamespace": "",
     "references": [
-        "GUID:dcdc64fc1a1126e47b040435b7581256",
         "GUID:e34a5702dd353724aa315fb8011f08c3",
-        "GUID:f51ebe6a0ceec4240a699833d6309b23"
+        "GUID:f51ebe6a0ceec4240a699833d6309b23",
+        "GUID:75469ad4d38634e559750d17036d5f7c",
+        "GUID:6055be8ebefd69e48b49212b09b47b2f",
+        "GUID:6d65d1d0925844fca8ea8dd2e57571ad",
+        "GUID:15fc0a57446b3144c949da3e2b9737a9"
     ],
-    "includePlatforms": [
-        "Editor"
-    ],
+    "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": false,

@@ -65,10 +65,10 @@ namespace UIFrame.Sqlite.Editor
         }
         static string LocateRoot()
         {
-            foreach (string guid in AssetDatabase.FindAssets("UIFrame.Sqlite t:AssemblyDefinitionAsset"))
+            foreach (string guid in AssetDatabase.FindAssets("GameFrame.Sqlite t:AssemblyDefinitionAsset"))
             {
                 string path = AssetDatabase.GUIDToAssetPath(guid);
-                if (Path.GetFileName(path) == "UIFrame.Sqlite.asmdef")
+                if (Path.GetFileName(path) == "GameFrame.Sqlite.asmdef")
                 {
                     var package = UnityEditor.PackageManager.PackageInfo.FindForAssetPath(path);
                     string physical = package == null

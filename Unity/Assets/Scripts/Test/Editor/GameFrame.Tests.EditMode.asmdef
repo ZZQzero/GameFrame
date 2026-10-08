@@ -1,14 +1,14 @@
 {
-    "name": "UIFrame.Regression.Editor",
+    "name": "GameFrame.Tests.EditMode",
     "rootNamespace": "",
     "references": [
         "UniTask",
         "Unity.InputSystem",
-        "UIFrame.Editor",
-        "UIFrame.Sqlite",
+        "GameFrame.Editor",
+        "GameFrame.Sqlite",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
-        "Aot"
+        "GameFrame.Runtime"
     ],
     "includePlatforms": [
         "Editor"

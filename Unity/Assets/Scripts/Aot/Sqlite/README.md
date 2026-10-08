@@ -1,6 +1,6 @@
 # Sqlite 通用本地存储模块
 
-位于 `Runtime/Sqlite`，程序集与命名空间为 `UIFrame.Sqlite`。不依赖 Unity、UniTask、UIFrame.Runtime 或照片模块。使用官方 SQLite 3.53.4、一份共享 C++ 执行核心和 C ABI 3；数据库实际工作在原生线程池中执行。
+位于 `Runtime/Sqlite`，程序集为 `GameFrame.Sqlite`，命名空间为 `UIFrame.Sqlite`。不依赖 Unity、UniTask、GameFrame.Runtime 或照片模块。使用官方 SQLite 3.53.4、一份共享 C++ 执行核心和 C ABI 3；数据库实际工作在原生线程池中执行。
 
 目前已实现通用核心、托管接口和桌面行为验证。已构建 macOS universal、Android ARM64、iOS ARM64 和 Windows x86_64 原生产物；Windows DLL 已通过交叉编译、架构、接口导出与依赖检查，Windows Editor / Player 的实际运行尚待验证。移动端已有独立 IL2CPP 构建记录，真机后台运行及商业性能门槛尚未验收；iOS Simulator 未提供已验收产物。照片业务已接入：图库索引使用托管门面，C# / Android / iOS 备份共用原生 BackupRepository 和本模块核心；两库 schema 已用于当前实现。完整状态见 [Validation.md](Validation.md) 和 [实施计划](ImplementationPlan.md)。
 
@@ -120,7 +120,7 @@ python3 Native~/tests/validate_managed.py \
   --native-directory /absolute/build/macos
 ```
 
-Unity Test Runner选择 `UIFrame.Sqlite.Tests.Editor`。内存检查另用 `build.py --target macos --sanitize`，该产物不能安装到Unity。详见 [验证记录](Validation.md)、[ABI数据格式](Native~/include/WireFormat.md) 和 [第三方声明](ThirdPartyNotices.md)。
+Unity Test Runner选择 `GameFrame.Sqlite.Tests.EditMode`。内存检查另用 `build.py --target macos --sanitize`，该产物不能安装到Unity。详见 [验证记录](Validation.md)、[ABI数据格式](Native~/include/WireFormat.md) 和 [第三方声明](ThirdPartyNotices.md)。
 
 独立工程 IL2CPP 验证（不会把测试脚本加入业务工程）：
 
@@ -143,4 +143,4 @@ py .\Native~\tests\prepare_unity_project.py --project C:\Build\SqliteSmoke --uni
 & "C:\Build\SqliteSmoke\Build\Windows\SqliteSmoke.exe" -batchmode -nographics -logFile C:\Build\windows-player.log
 ```
 
-成功需同时满足构建成功、Player退出码为0、Player日志出现上述成功标记及当前构建ID；单有EXE或退出码不足以证明验证通过。Windows Editor 中还需运行 `UIFrame.Sqlite.Tests.Editor`，覆盖托管映射与异常传播。独立工程没有测试程序集，Editor测试在包含本包测试程序集的宿主工程执行。
+成功需同时满足构建成功、Player退出码为0、Player日志出现上述成功标记及当前构建ID；单有EXE或退出码不足以证明验证通过。Windows Editor 中还需运行 `GameFrame.Sqlite.Tests.EditMode`，覆盖托管映射与异常传播。独立工程没有测试程序集，Editor测试在包含本包测试程序集的宿主工程执行。

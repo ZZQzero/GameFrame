@@ -1,6 +1,6 @@
 {
-  "name": "UIFrame.Sqlite.Tests.Editor",
-  "references": ["UIFrame.Sqlite"],
+  "name": "GameFrame.Sqlite.Tests.EditMode",
+  "references": ["GameFrame.Sqlite"],
   "optionalUnityReferences": ["TestAssemblies"],
   "includePlatforms": ["Editor"],
   "autoReferenced": false

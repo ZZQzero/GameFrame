@@ -1,3 +1,3 @@
 using System.Runtime.CompilerServices;
-[assembly: InternalsVisibleTo("UIFrame.Regression.Editor")]
-[assembly: InternalsVisibleTo("UIFrame.Editor")]
+[assembly: InternalsVisibleTo("GameFrame.Tests.EditMode")]
+[assembly: InternalsVisibleTo("GameFrame.Editor")]

@@ -1,5 +1,5 @@
 {
-    "name": "Editor",
+    "name": "UIFrame.Editor",
     "rootNamespace": "",
     "references": [
         "GUID:dcdc64fc1a1126e47b040435b7581256",

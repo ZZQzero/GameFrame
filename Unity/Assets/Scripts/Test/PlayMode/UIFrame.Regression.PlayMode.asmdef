@@ -1,0 +1,27 @@
+{
+    "name": "UIFrame.Regression.PlayMode",
+    "rootNamespace": "",
+    "references": [
+        "Unity.TextMeshPro",
+        "UniTask",
+        "Unity.InputSystem",
+        "YooAsset",
+        "YooAsset.Editor",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "Aot"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

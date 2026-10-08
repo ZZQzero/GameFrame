@@ -1,0 +1,157 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading;
+using Cysharp.Threading.Tasks;
+
+namespace Game.Media
+{
+    public static class GameGallery
+    {
+        public static GalleryCapabilities GetCapabilities()
+        {
+#if UNITY_EDITOR
+            return new GalleryCapabilities(true, false, false, false);
+#else
+            return new GalleryCapabilities(NativeMedia.Available, NativeMedia.Available, NativeMedia.Available, NativeMedia.Available);
+#endif
+        }
+
+        public static async UniTask<ImageSelection> PickImagesAsync(ImagePickOptions options = null, CancellationToken cancellationToken = default)
+        {
+            MediaThread.Check(); options ??= new ImagePickOptions(); options.Validate();
+            cancellationToken.ThrowIfCancellationRequested();
+#if UNITY_EDITOR
+            if (options.MaxCount != 1) throw new PlatformNotSupportedException("The Editor file dialog supports one image. Use ImportFilesAsync for explicit multi-file selection.");
+            var path = UnityEditor.EditorUtility.OpenFilePanelWithFilters("选择图片", "", new[] { "图片", "png,jpg,jpeg,heic,heif" });
+            if (string.IsNullOrEmpty(path)) throw new OperationCanceledException();
+            return await ImportFilesAsync(new[] { path }, cancellationToken);
+#else
+            if (!NativeMedia.Available) throw new PlatformNotSupportedException("System picker unavailable.");
+            string directory = ImagePaths.NewDirectory();
+            // Once submitted, native code owns cleanup until a successful response transfers it.
+            var response = await NativeMedia.Request(new MediaRequest { op = "pick", count = options.MaxCount, output = directory }, cancellationToken);
+            try { return Selection(response.items, directory); }
+            catch { ImagePaths.CleanAfterFailure(directory); throw; }
+#endif
+        }
+
+        public static async UniTask<ImageSelection> ImportFilesAsync(IReadOnlyList<string> absolutePaths, CancellationToken cancellationToken = default)
+        {
+            MediaThread.Check();
+            if (absolutePaths == null) throw new ArgumentNullException(nameof(absolutePaths));
+            if (absolutePaths.Count == 0) throw new ArgumentException("At least one file is required.", nameof(absolutePaths));
+            var sources = new ImageReference[absolutePaths.Count];
+            for (int i = 0; i < sources.Length; i++) sources[i] = ImageReference.FromFile(absolutePaths[i]);
+            cancellationToken.ThrowIfCancellationRequested();
+            string directory = ImagePaths.NewDirectory();
+            try
+            {
+                var items = await UniTask.RunOnThreadPool(() =>
+                {
+                    var result = new MediaItem[sources.Length];
+                    for (int i = 0; i < sources.Length; i++)
+                    {
+                        string output = Path.Combine(directory, i + ImagePaths.Extension(sources[i].FileName));
+                        CopyFile(sources[i].Id, output, cancellationToken);
+                        result[i] = new MediaItem { id = sources[i].Id, path = output, name = sources[i].FileName, mime = sources[i].MimeType, size = new FileInfo(output).Length };
+                    }
+                    return result;
+                });
+                cancellationToken.ThrowIfCancellationRequested();
+                return Selection(items, directory);
+            }
+            catch { ImagePaths.CleanAfterFailure(directory); throw; }
+        }
+
+        internal static void CopyFile(string source, string destination, CancellationToken token)
+        {
+            using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            var buffer = new byte[128 * 1024]; int count;
+            while ((count = input.Read(buffer, 0, buffer.Length)) != 0)
+            { token.ThrowIfCancellationRequested(); output.Write(buffer, 0, count); }
+            token.ThrowIfCancellationRequested(); output.Flush(true);
+        }
+
+        static ImageSelection Selection(MediaItem[] items, string directory)
+        {
+            if (items == null || items.Length == 0) throw new GalleryException("InvalidResult", "Picker returned no images.");
+            var owner = new ImageStorage(directory); var images = new ImageReference[items.Length];
+            for (int i = 0; i < images.Length; i++)
+            {
+                var item = items[i];
+                if (!File.Exists(item.path)) throw new GalleryException("SourceUnavailable", "Selected file is missing.");
+                var file = new FileInfo(item.path);
+                images[i] = new ImageReference("file", item.path, item.name, item.mime, file.Length,
+                    item.width, item.height, file.LastWriteTimeUtc.Ticks + ":" + file.Length, owner, item.id ?? ("selected:" + item.name));
+            }
+            return new ImageSelection(images, owner);
+        }
+
+        public static UniTask<LibraryAccess> GetLibraryAccessAsync(CancellationToken cancellationToken = default) => Access(false, cancellationToken);
+        public static UniTask<LibraryAccess> RequestLibraryAccessAsync(CancellationToken cancellationToken = default) => Access(true, cancellationToken);
+        static async UniTask<LibraryAccess> Access(bool request, CancellationToken token)
+        {
+            var result = await NativeMedia.Request(new MediaRequest { op = request ? "requestAccess" : "access" }, token);
+            if (!Enum.TryParse(result.access, out LibraryAccess value)) throw new GalleryException("InvalidResult", "Invalid library access response.");
+            return value;
+        }
+        public static async UniTask<IReadOnlyList<ImageAlbum>> QueryAlbumsAsync(CancellationToken cancellationToken = default)
+        {
+            var albums = new List<ImageAlbum>();
+            await NativeMedia.Request(new MediaRequest { op = "albums" }, cancellationToken, items =>
+            {
+                foreach (var item in items) albums.Add(new ImageAlbum(item.id, item.name, item.count));
+                return UniTask.FromResult(true);
+            });
+            return albums.AsReadOnly();
+        }
+        public static async UniTask<ImageSnapshot> QueryImagesAsync(string albumId = null, CancellationToken cancellationToken = default)
+        {
+            var images = new List<ImageReference>();
+            await VisitImagesAsync(page => { images.AddRange(page); return UniTask.FromResult(true); }, albumId, cancellationToken);
+            return new ImageSnapshot(images.ToArray());
+        }
+        /// <summary>Consumes at most 200 items per callback. Return false to stop; the visit returns false when stopped.</summary>
+        public static async UniTask<bool> VisitImagesAsync(Func<IReadOnlyList<ImageReference>, UniTask<bool>> consume,
+            string albumId = null, CancellationToken cancellationToken = default)
+            => await VisitObservedImagesAsync(consume,albumId,null,cancellationToken);
+        internal static async UniTask<bool> VisitObservedImagesAsync(Func<IReadOnlyList<ImageReference>,UniTask<bool>> consume,string albumId,string observerId,CancellationToken cancellationToken)
+        {
+            if (consume == null) throw new ArgumentNullException(nameof(consume));
+            MediaThread.Check();string scan=Guid.NewGuid().ToString("N");Exception failure=null;
+            try
+            {
+                await NativeMedia.Request(new MediaRequest {op="imagesOpen",path=scan,album=albumId,source=observerId},cancellationToken);
+                for(;;)
+                {
+                    var page=await NativeMedia.Request(new MediaRequest {op="imagesNext",path=scan},cancellationToken);
+                    if(!await ConsumePage(page.items??Array.Empty<MediaItem>(),"library",consume))return false;
+                    if(!page.hasNext)return true;
+                }
+            }
+            catch(Exception error){failure=error;throw;}
+            finally
+            {
+                try {await NativeMedia.Request(new MediaRequest {op="imagesClose",path=scan},default);}
+                catch(Exception cleanup){if(failure==null)throw;UnityEngine.Debug.LogException(cleanup);}
+            }
+        }
+        internal static async UniTask ValidateVersionAsync(ImageReference image,CancellationToken token)
+        {
+            string version=image.Source=="file"?await UniTask.RunOnThreadPool(()=>FileImageVersion.Current(image,token)):
+                (await NativeMedia.Request(new MediaRequest {op="stat",source=image.Source,path=image.Id},token)).items[0].version;
+            if(version!=image.Version)throw new GalleryException("SourceChanged","Image content changed after its metadata was read.");
+        }
+        internal static UniTask<bool> ConsumePage(MediaItem[] items, string source, Func<IReadOnlyList<ImageReference>, UniTask<bool>> consume)
+        {
+            var images = new ImageReference[items.Length];
+            for (int i = 0; i < items.Length; i++)
+            {
+                var item = items[i]; images[i] = new ImageReference(item.source ?? source, item.id, item.name, item.mime, item.size, item.width, item.height, item.version);
+            }
+            return consume(Array.AsReadOnly(images));
+        }
+    }
+}

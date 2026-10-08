@@ -1,0 +1,431 @@
+using System;
+using Cysharp.Threading.Tasks;
+using System.Threading;
+using UnityEngine;
+using YooAsset;
+
+namespace UIFrame
+{
+    /// <summary>UIFrame 静态门面。业务只通过这里打开/关闭面板。</summary>
+    public static class UI
+    {
+        static UIManager _manager;
+        static TipsSettings _tipsSettings = TipsSettings.Default;
+
+        public static bool IsInited => _manager != null && _manager.IsInited;
+        public static Camera UICamera => IsInited ? _manager.UICamera : null;
+        /// <summary>框架拥有的 Canvas 根节点；未初始化或关闭后为 null。外部不得销毁或更换父级。</summary>
+        public static RectTransform CanvasRoot => IsInited ? _manager.CanvasRoot : null;
+
+        /// <summary>
+        /// 根节点与管理器初始化完成后同步触发，不保证资源包已绑定。
+        /// 回调异常使 Init 失败；回调中 Shutdown 会取消本次 Init。
+        /// 不补发给后订阅者，订阅在 Shutdown 后保留，订阅者负责退订。
+        /// </summary>
+        public static event Action RootReady;
+
+        /// <summary>
+        /// 面板激活并同步执行完 OnOpen 后触发，缓存重开和再次打开也触发，Resume 不触发。
+        /// 不等待异步内容、布局重建或动画完成。回调异常使打开失败。
+        /// 订阅在 Shutdown 后保留，订阅者负责退订。
+        /// </summary>
+        public static event Action<UIPanel> PanelShown;
+
+        internal static void RaisePanelShown(UIPanel panel)
+        {
+            if (panel != null)
+            {
+                PanelShown?.Invoke(panel);
+            }
+        }
+
+        /// <summary>创建 Root。若 YooAsset 已初始化且只有一个包，会自动绑定。</summary>
+        public static void Init()
+        {
+            CreateManager(ResolveAutoPackage());
+        }
+
+        /// <summary>创建 Root 并绑定指定 YooAsset 包。</summary>
+        public static void Init(ResourcePackage package)
+        {
+            if (package == null)
+            {
+                throw new ArgumentNullException(nameof(package));
+            }
+
+            CreateManager(package);
+        }
+
+        /// <summary>创建 Root 并按包名绑定 YooAsset 包。</summary>
+        public static void Init(string packageName)
+        {
+            if (string.IsNullOrWhiteSpace(packageName))
+            {
+                throw new ArgumentException("[UIFrame] packageName 为空。", nameof(packageName));
+            }
+
+            var package = YooAssets.GetPackage(packageName);
+            if (package == null)
+            {
+                throw new InvalidOperationException(
+                    $"[UIFrame] ResourcePackage 不存在: {packageName}");
+            }
+
+            CreateManager(package);
+        }
+
+        /// <summary>资源系统就绪后绑定 YooAsset 包。可在 <see cref="Init()"/> 之后再调用。</summary>
+        public static void SetPackage(ResourcePackage package)
+        {
+            RequireInit();
+            if (package == null)
+            {
+                throw new ArgumentNullException(nameof(package));
+            }
+
+            _manager.SetPackage(package);
+        }
+
+        /// <summary>按包名绑定 YooAsset 包。</summary>
+        public static void SetPackage(string packageName)
+        {
+            RequireInit();
+            _manager.SetPackage(packageName);
+        }
+
+        internal static UniTask<AssetHandle> LoadAsset<T>(
+            string location,
+            CancellationToken cancellationToken)
+            where T : UnityEngine.Object
+        {
+            RequireInit();
+            return _manager.LoadAsset<T>(location, cancellationToken);
+        }
+
+        /// <summary>将 UI Camera 加入 Base Camera Stack。默认 Base=Camera.main，复用已有 UI Camera。</summary>
+        public static Camera ConfigureURPCameraStack(
+            Camera baseCamera = null,
+            Camera uiCamera = null,
+            int uiLayer = -1)
+        {
+            RequireInit();
+            return _manager.ConfigureURPCameraStack(baseCamera, uiCamera, uiLayer);
+        }
+
+        /// <summary>仅从 Base Camera Stack 移除 UI Camera。Canvas 模式与引用不变。</summary>
+        public static void DisableURPCameraStack()
+        {
+            RequireInit();
+            _manager.DisableURPCameraStack();
+        }
+
+        /// <summary>
+        /// 完整关闭 UIFrame：取消加载、销毁已打开与缓存面板、释放 Handle，并销毁 Root。
+        /// 注册目录会保留，之后可再次调用 Init。未 Init 时直接返回。
+        /// </summary>
+        public static void Shutdown()
+        {
+            if (!IsInited)
+            {
+                return;
+            }
+
+            var manager = _manager;
+            _manager = null;
+            manager.Shutdown();
+        }
+
+        /// <summary>注册地址与分组。关闭默认进缓存，不释放内存。</summary>
+        public static void Register<TPanel>(string location, UIGroup group = UIGroup.Scene)
+            where TPanel : UIPanel
+        {
+            UIPanelCatalog.Register<TPanel>(location, group);
+        }
+
+        /// <summary>显式指定关闭后是否缓存。cache: false 时 Close 会销毁并释放 Handle。</summary>
+        public static void Register<TPanel>(string location, UIGroup group, bool cache)
+            where TPanel : UIPanel
+        {
+            UIPanelCatalog.Register<TPanel>(location, group, cache);
+        }
+
+        public static UniTask<TPanel> Hud<TPanel>() where TPanel : UIPanel<UINone>
+        {
+            return Open<TPanel, UINone>(UIOpenMode.Hud, UINone.Value);
+        }
+
+        public static UniTask<TPanel> Hud<TPanel, TArgs>(TArgs args) where TPanel : UIPanel<TArgs>
+        {
+            return Open<TPanel, TArgs>(UIOpenMode.Hud, args);
+        }
+
+        public static UniTask<TPanel> Push<TPanel>() where TPanel : UIPanel<UINone>
+        {
+            return Open<TPanel, UINone>(UIOpenMode.Push, UINone.Value);
+        }
+
+        /// <summary>
+        /// 打开窗口。同一类型若正在加载，后一次 Args/Mode 覆盖前一次，两次 await 拿到同一块面板。
+        /// </summary>
+        public static UniTask<TPanel> Push<TPanel, TArgs>(TArgs args) where TPanel : UIPanel<TArgs>
+        {
+            return Open<TPanel, TArgs>(UIOpenMode.Push, args);
+        }
+
+        public static UniTask<TPanel> Popup<TPanel>() where TPanel : UIPanel<UINone>
+        {
+            return Open<TPanel, UINone>(UIOpenMode.Popup, UINone.Value);
+        }
+
+        public static UniTask<TPanel> Popup<TPanel, TArgs>(TArgs args) where TPanel : UIPanel<TArgs>
+        {
+            return Open<TPanel, TArgs>(UIOpenMode.Popup, args);
+        }
+
+        /// <summary>
+        /// 打开确认框并等待结果。点遮罩 / Back / CloseSelf 未提交结果时任务取消。
+        /// </summary>
+        public static UniTask<TResult> Popup<TPanel, TResult>()
+            where TPanel : UIPanel<UINone, TResult>
+        {
+            return Popup<TPanel, UINone, TResult>(UINone.Value);
+        }
+
+        /// <summary>
+        /// 打开确认框并等待结果。点遮罩 / Back / CloseSelf 未提交结果时任务取消。
+        /// </summary>
+        public static async UniTask<TResult> Popup<TPanel, TArgs, TResult>(TArgs args)
+            where TPanel : UIPanel<TArgs, TResult>
+        {
+            var panel = await Open<TPanel, TArgs>(UIOpenMode.Popup, args);
+            return await panel.WaitResultAsync();
+        }
+
+        /// <summary>
+        /// 打开 Tips 层面板。同类型单实例，不进 Toast 队列，也不进 Window / Popup 栈。
+        /// 需要多实例自动关闭请用 <see cref="Toast{TPanel}"/>。
+        /// </summary>
+        public static UniTask<TPanel> Tips<TPanel>() where TPanel : UIPanel<UINone>
+        {
+            return Open<TPanel, UINone>(UIOpenMode.Tips, UINone.Value);
+        }
+
+        /// <summary>
+        /// 打开 Tips 层面板。同类型单实例，不进 Toast 队列，也不进 Window / Popup 栈。
+        /// 需要多实例自动关闭请用 <see cref="Toast{TPanel, TArgs}"/>。
+        /// </summary>
+        public static UniTask<TPanel> Tips<TPanel, TArgs>(TArgs args) where TPanel : UIPanel<TArgs>
+        {
+            return Open<TPanel, TArgs>(UIOpenMode.Tips, args);
+        }
+
+        /// <summary>打开引导层面板，叠在 Tips 之上。不进 Window / Popup 栈。</summary>
+        public static UniTask<TPanel> Guide<TPanel>() where TPanel : UIPanel<UINone>
+        {
+            return Open<TPanel, UINone>(UIOpenMode.Guide, UINone.Value);
+        }
+
+        /// <summary>打开引导层面板，叠在 Tips 之上。不进 Window / Popup 栈。</summary>
+        public static UniTask<TPanel> Guide<TPanel, TArgs>(TArgs args) where TPanel : UIPanel<TArgs>
+        {
+            return Open<TPanel, TArgs>(UIOpenMode.Guide, args);
+        }
+
+        /// <summary>
+        /// 配置 Tips 层：同时可见条数、等待队列长度、默认自动关闭秒数。
+        /// <paramref name="defaultDuration"/> ≤ 0 表示常驻到手动关闭。队列满时丢掉最旧等待项。
+        /// Shutdown 后仍保留该配置。
+        /// </summary>
+        public static void ConfigureTips(
+            int maxVisible = TipsSettings.DefaultMaxVisible,
+            int maxQueued = TipsSettings.DefaultMaxQueued,
+            float defaultDuration = TipsSettings.DefaultDurationSeconds)
+        {
+            _tipsSettings = new TipsSettings(maxVisible, maxQueued, defaultDuration);
+            if (!IsInited)
+            {
+                return;
+            }
+
+            _manager.ConfigureTips(
+                _tipsSettings.MaxVisible,
+                _tipsSettings.MaxQueued,
+                _tipsSettings.DefaultDuration);
+        }
+
+        /// <summary>
+        /// 打开 Tips Toast。<paramref name="duration"/> 为空用 ConfigureTips 的默认值；
+        /// ≤ 0 常驻到手动关闭。可见已满时只入队，出队后才加载。
+        /// </summary>
+        public static UniTask<TPanel> Toast<TPanel>(float? duration = null)
+            where TPanel : UIPanel<UINone>
+        {
+            return Toast<TPanel, UINone>(UINone.Value, duration);
+        }
+
+        /// <summary>
+        /// 打开 Tips Toast。<paramref name="duration"/> 为空用 ConfigureTips 的默认值；
+        /// ≤ 0 常驻到手动关闭。可见已满时只入队，出队后才加载。
+        /// </summary>
+        public static UniTask<TPanel> Toast<TPanel, TArgs>(TArgs args, float? duration = null)
+            where TPanel : UIPanel<TArgs>
+        {
+            RequireInit();
+            return _manager.Toast<TPanel>(args, duration);
+        }
+
+        public static void Back()
+        {
+            RequireInit();
+            _manager.Back();
+        }
+
+        /// <summary>关闭面板。默认隐藏进缓存，不 Destroy、不释放 Handle。</summary>
+        public static void Close<TPanel>(bool destroy = false) where TPanel : UIPanel
+        {
+            Close(typeof(TPanel), destroy);
+        }
+
+        /// <summary>关闭面板。默认隐藏进缓存；<paramref name="destroy"/> 为 true 时才释放内存。</summary>
+        public static void Close(Type panelType, bool destroy = false)
+        {
+            if (panelType == null)
+            {
+                throw new ArgumentNullException(nameof(panelType));
+            }
+
+            RequireInit();
+            _manager.Close(panelType, destroy);
+        }
+
+        public static void CloseInstance(UIPanel panel, bool destroy = false)
+        {
+            if (panel == null)
+            {
+                throw new ArgumentNullException(nameof(panel));
+            }
+
+            RequireInit();
+            _manager.CloseInstance(panel, destroy);
+        }
+
+        /// <summary>关闭并销毁，释放 GameObject 与 YooAsset Handle。</summary>
+        public static void Destroy<TPanel>() where TPanel : UIPanel
+        {
+            Close<TPanel>(destroy: true);
+        }
+
+        /// <summary>关闭并销毁，释放 GameObject 与 YooAsset Handle。</summary>
+        public static void Destroy(Type panelType)
+        {
+            Close(panelType, destroy: true);
+        }
+
+        /// <summary>
+        /// 关闭该分组下已打开的面板。默认进缓存；切场景要释放内存时传 <paramref name="destroy"/> true。
+        /// </summary>
+        public static void CloseGroup(UIGroup group, bool destroy = false)
+        {
+            RequireInit();
+            _manager.CloseGroup(group, destroy);
+        }
+
+        /// <summary>销毁所有已关闭进缓存的面板（含 Tips 闲置 Toast），释放内存。不影响当前打开的界面。</summary>
+        public static void ClearCache()
+        {
+            RequireInit();
+            _manager.ClearCache();
+        }
+
+        public static TPanel Get<TPanel>() where TPanel : UIPanel
+        {
+            return IsInited ? _manager.Get<TPanel>() : null;
+        }
+
+        public static bool IsOpen<TPanel>() where TPanel : UIPanel
+        {
+            return IsInited && _manager.IsOpen<TPanel>();
+        }
+
+        static ResourcePackage ResolveAutoPackage()
+        {
+            if (!YooAssets.IsInitialized)
+            {
+                return null;
+            }
+
+            var packages = YooAssets.GetPackages();
+            if (packages.Count == 0)
+            {
+                return null;
+            }
+
+            if (packages.Count > 1)
+            {
+                throw new InvalidOperationException(
+                    "[UIFrame] 存在多个 ResourcePackage，请调用 UI.Init(package) 指定。");
+            }
+
+            return packages[0];
+        }
+
+        static void CreateManager(ResourcePackage package)
+        {
+            if (_manager != null)
+            {
+                throw new InvalidOperationException("[UIFrame] 已经 Init，请勿重复初始化。");
+            }
+
+            var manager = new UIManager();
+            try
+            {
+                manager.Init();
+                if (package != null)
+                {
+                    manager.SetPackage(package);
+                }
+
+                manager.ConfigureTips(
+                    _tipsSettings.MaxVisible,
+                    _tipsSettings.MaxQueued,
+                    _tipsSettings.DefaultDuration);
+                _manager = manager;
+                RootReady?.Invoke();
+                if (!ReferenceEquals(_manager, manager) || !manager.IsInited)
+                {
+                    throw new OperationCanceledException(
+                        "[UIFrame] RootReady 回调期间 UI 已关闭或替换，本次 Init 已取消。");
+                }
+            }
+            catch
+            {
+                if (ReferenceEquals(_manager, manager))
+                    _manager = null;
+                try
+                {
+                    manager.Shutdown();
+                }
+                catch (Exception cleanupException)
+                {
+                    Debug.LogException(cleanupException);
+                }
+                throw;
+            }
+        }
+
+        static void RequireInit()
+        {
+            if (!IsInited)
+            {
+                throw new InvalidOperationException("[UIFrame] 请先调用 UI.Init()。");
+            }
+        }
+
+        static UniTask<TPanel> Open<TPanel, TArgs>(UIOpenMode mode, TArgs args)
+            where TPanel : UIPanel<TArgs>
+        {
+            RequireInit();
+            return _manager.Open<TPanel, TArgs>(mode, args);
+        }
+    }
+}

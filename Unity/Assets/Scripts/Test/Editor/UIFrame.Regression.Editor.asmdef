@@ -1,0 +1,28 @@
+{
+    "name": "UIFrame.Regression.Editor",
+    "rootNamespace": "",
+    "references": [
+        "UniTask",
+        "Unity.InputSystem",
+        "UIFrame.Editor",
+        "UIFrame.Sqlite",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "Aot"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

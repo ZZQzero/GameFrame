@@ -1,0 +1,113 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading;
+using Cysharp.Threading.Tasks;
+
+namespace Game.Media
+{
+    public static class GameImageDirectory
+    {
+        public static async UniTask<ImageDirectoryHandle> PickDirectoryAsync(CancellationToken cancellationToken = default)
+        {
+            var response = await NativeMedia.Request(new MediaRequest { op = "pickDirectory" }, cancellationToken);
+            return ImageDirectoryHandle.FromBookmark(response.items[0].id);
+        }
+
+        public static async UniTask<ImageSnapshot> QueryAsync(string absoluteDirectory, bool recursive = false,
+            CancellationToken cancellationToken = default)
+        {
+            var images = new List<ImageReference>();
+            await VisitAsync(absoluteDirectory, page => { images.AddRange(page); return UniTask.FromResult(true); }, recursive, cancellationToken);
+            images.Sort((a, b) => StringComparer.Ordinal.Compare(a.Id, b.Id));
+            return new ImageSnapshot(images.ToArray());
+        }
+        public static async UniTask<bool> VisitAsync(string absoluteDirectory, Func<IReadOnlyList<ImageReference>, UniTask<bool>> consume,
+            bool recursive = false, CancellationToken cancellationToken = default)
+        {
+            MediaThread.Check();
+            if (consume == null) throw new ArgumentNullException(nameof(consume));
+            if (string.IsNullOrWhiteSpace(absoluteDirectory) || !Path.IsPathRooted(absoluteDirectory))
+                throw new ArgumentException("An absolute directory is required.", nameof(absoluteDirectory));
+            string root = Path.GetFullPath(absoluteDirectory);
+            if (!Directory.Exists(root)) throw new DirectoryNotFoundException(root);
+            using var iterator = Enumerate(root, recursive, cancellationToken).GetEnumerator();
+            bool more = true;
+            while (more)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var page = await UniTask.RunOnThreadPool(() =>
+                {
+                    var result = new List<ImageReference>(200);
+                    while (result.Count < 200 && (more = iterator.MoveNext())) result.Add(iterator.Current);
+                    return result.AsReadOnly();
+                });
+                cancellationToken.ThrowIfCancellationRequested();
+                if (page.Count != 0 && !await consume(page)) return false;
+            }
+            return true;
+        }
+        static IEnumerable<ImageReference> Enumerate(string root, bool recursive, CancellationToken token)
+        {
+            foreach (string path in Directory.EnumerateFileSystemEntries(root))
+            {
+                token.ThrowIfCancellationRequested(); var attributes = File.GetAttributes(path);
+                if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
+                if ((attributes & FileAttributes.Directory) != 0)
+                {
+                    if (recursive) foreach (var image in Enumerate(path, true, token)) yield return image;
+                }
+                else if (IsImageFile(path,attributes)) yield return ImageReference.FromFile(path);
+            }
+        }
+        static bool IsImageFile(string path,FileAttributes attributes)
+            => (attributes&(FileAttributes.ReparsePoint|FileAttributes.Directory))==0 &&
+               ImagePaths.Mime(Path.GetExtension(path)).StartsWith("image/",StringComparison.Ordinal);
+        // Match full enumeration, including links in an ancestor below the selected root.
+        internal static bool ContainsImage(string root, bool recursive, string path)
+        {
+            string prefix=Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar)+Path.DirectorySeparatorChar;
+            path=Path.GetFullPath(path);
+            var comparison=Path.DirectorySeparatorChar=='\\'?StringComparison.OrdinalIgnoreCase:StringComparison.Ordinal;
+            if(!path.StartsWith(prefix,comparison))return false;
+            string relative=path.Substring(prefix.Length);
+            if(!recursive && relative.IndexOf(Path.DirectorySeparatorChar)>=0)return false;
+            try
+            {
+                if(!IsImageFile(path,File.GetAttributes(path)))return false;
+                for(string parent=Path.GetDirectoryName(path);parent.Length>=prefix.Length;parent=Path.GetDirectoryName(parent))
+                    if((File.GetAttributes(parent)&FileAttributes.ReparsePoint)!=0)return false;
+                return true;
+            }
+            catch(FileNotFoundException){return false;}
+            catch(DirectoryNotFoundException){return false;}
+        }
+    }
+
+    /// <summary>Persist Bookmark if the user wants to reuse a granted directory. It is not a filesystem path.</summary>
+    public sealed class ImageDirectoryHandle
+    {
+        public string Bookmark { get; }
+        ImageDirectoryHandle(string bookmark) { Bookmark = bookmark; }
+        public static ImageDirectoryHandle FromBookmark(string bookmark)
+        {
+            if (string.IsNullOrWhiteSpace(bookmark)) throw new ArgumentException("Directory bookmark required.", nameof(bookmark));
+            return new ImageDirectoryHandle(bookmark);
+        }
+        public async UniTask<ImageSnapshot> QueryAsync(bool recursive = false, CancellationToken cancellationToken = default)
+        {
+            var images = new List<ImageReference>();
+            await VisitAsync(page => { images.AddRange(page); return UniTask.FromResult(true); }, recursive, cancellationToken);
+            return new ImageSnapshot(images.ToArray());
+        }
+        public async UniTask<bool> VisitAsync(Func<IReadOnlyList<ImageReference>, UniTask<bool>> consume, bool recursive = false,
+            CancellationToken cancellationToken = default)
+        {
+            if (consume == null) throw new ArgumentNullException(nameof(consume));
+            bool completed = true;
+            await NativeMedia.Request(new MediaRequest { op = "directory", path = Bookmark, recursive = recursive }, cancellationToken,
+                async items => completed = await GameGallery.ConsumePage(items, "directory", consume));
+            return completed;
+        }
+    }
+}

@@ -1,0 +1,467 @@
+# UIFrame 各系统用法与注意点
+
+本文按系统说明用法，以及接入时必须遵守的边界。Audio、Input、Timer、Scene、对象池、
+Event、红点是并列模块，不要互相套门面或 Shutdown 顺序以外的依赖。
+
+- UI / Tips / 循环列表：本文
+- 场景：[Scene.md](Scene.md)
+- Timer：[Timer.md](Timer.md)
+- 音频：[Audio.md](Audio.md)
+- 输入：[Input.md](Input.md)
+- 事件：[EventSystem.md](EventSystem.md)
+- FSM：[Fsm.md](Fsm.md)
+- 红点：[RedDot.md](RedDot.md)
+- 对象池：[Pool.md](Pool.md)
+
+---
+
+## 1. 启动与关闭
+
+### 用法
+
+推荐顺序：
+
+```csharp
+UI.Init(package);                    // 或 Init() / Init(packageName)
+UI.ConfigureURPCameraStack();        // 失败会抛
+
+UI.Register<MainPanel>("MainPanel", UIGroup.Scene);
+GamePool.Init(package, persistRoot); // persistRoot 须比 UI.Shutdown 更久，不要用 UIFrameRoot
+
+await UI.Push<MainPanel>();          // 未 Register / 加载失败会抛
+
+// 退出时：先 UI，再池
+UI.Shutdown();
+GamePool.Shutdown();
+```
+
+### 注意
+
+- 先 `Init`，再 `Register` / 打开面板。
+- `Push` / `Popup` / `Toast` / `SetPackage` / Camera Stack 不会代替业务自动 `Init`；漏掉或重复 `Init` 都会抛。
+- 未 Init 时 **`UI.Shutdown` 直接返回**（进程收尾）。`Close` / `Back` / `ClearCache` 未 Init 仍会抛。
+- 退出顺序必须是 **`UI.Shutdown()` → 再 `GamePool.Shutdown()`**。面板的 `OnDestroyPanel` 可能还要还池。若还用了场景 / 音频 / Timer，见 [Scene.md](Scene.md)、[Audio.md](Audio.md)、[Timer.md](Timer.md) 与 `Launch` 的 Teardown。
+- `Shutdown` 会销毁 Root、打开中与缓存面板，并释放 YooAsset Handle；**注册表会保留**，可再次 `Init`。
+- 进行中的 `Push` / `Popup` / `Hud` 在 `Shutdown` 时以 **`OperationCanceledException`** 结束，不会返回 `null`。
+- 不要只检查“启动完成”日志：相机 Stack 配不上会抛，首屏 `Push` 失败也会抛。
+- 宿主需在退出 Play / `OnApplicationQuit` / `OnDestroy` 里主动 Teardown；框架本身不注册 Editor PlayMode 退出钩子。
+
+---
+
+## 2. 面板核心（层级、打开、关闭、生命周期）
+
+### 全局扩展入口
+
+- `UI.CanvasRoot`：框架拥有的 Canvas 根节点，未初始化或关闭后返回 null。可用于挂载全局适配组件；外部不能销毁根节点或更换其父级。
+- `UI.RootReady`：每次根节点和管理器初始化完成后同步触发，回调内可访问 `CanvasRoot`。不保证资源包已绑定，也不代表业务启动完成；后订阅不会补发，可在订阅后检查 `UI.IsInited` 并主动绑定。回调中 Shutdown 会使本次 Init 抛出 `OperationCanceledException`。
+- `UI.PanelShown`：面板激活并同步执行完 `OnOpen` 后触发。首次打开、缓存重开和对已打开面板再次调用打开接口都会触发；`OnResume` 恢复显示不触发。不等待异步内容、布局重建或入场动画完成，动态生成的子节点需要另行处理。
+
+两个事件都是同步扩展回调。首个订阅者异常会中止后续派发，并让初始化或打开失败，由框架执行对应清理；`PanelShown` 回调中 Shutdown 会取消打开。静态订阅在 Shutdown 后保留，临时订阅者应在自身生命周期结束时退订。
+
+### Canvas 层与打开 API
+
+```text
+CanvasRoot
+├── Window   ← UI.Push
+├── Hud      ← UI.Hud
+├── Mask     ← 框架内部（Popup 遮罩）
+├── Popup    ← UI.Popup
+├── Tips     ← UI.Tips / UI.Toast
+└── Guide    ← UI.Guide
+```
+
+| API | 层 | 语义 |
+|-----|----|------|
+| `UI.Hud` | Hud | 常驻 HUD，不进窗口栈，`Back` 关不掉 |
+| `UI.Push` | Window | 窗口栈；新 Push 会 Pause 旧窗，并关掉全部 Popup |
+| `UI.Popup` | Popup | 弹窗栈；显示 Mask，可点遮罩关闭 |
+| `UI.Tips` | Tips | 同类型单实例，不排队、不定时 |
+| `UI.Toast` | Tips | 多实例 + 队列 + 可选自动关闭 |
+| `UI.Guide` | Guide | 最上层引导，不进栈 |
+
+### UIGroup（卸载分组，不是显示层）
+
+| Group | 用途 |
+|-------|------|
+| `Scene` | 默认。切场景用 `UI.CloseGroup(UIGroup.Scene)` |
+| `Hud` | HUD 组；`CloseGroup(Scene)` 不会关它 |
+| `Persistent` | 全局常驻 |
+
+```csharp
+UI.Register<MainHud>("MainHud", UIGroup.Hud);
+UI.Register<BagPanel>("Bag", UIGroup.Scene, cache: true);
+UI.CloseGroup(UIGroup.Scene);                 // 默认进缓存
+UI.CloseGroup(UIGroup.Scene, destroy: true);  // 销毁并释放 Handle
+```
+
+### 生命周期时序
+
+首次打开：
+
+```text
+加载 / Instantiate
+→ OnCreate          // 只一次：绑按钮
+→ ApplyArgs
+→ 激活并挂到对应层
+→ OnOpen(args)      // 每次显示：刷数据、开异步
+```
+
+缓存后再开：只走 `ApplyArgs` → `OnOpen`，**不再** `OnCreate`。
+
+`Push` 暂停旧窗口时，先执行 `OnPause`，成功后才隐藏它。`OnPause` 抛错会中止本次打开并原样传播异常，框架不会继续隐藏旧窗口，也不会自动调用 `OnResume` 或重试回调。回调内已经发生的业务改动由业务处理。
+
+关闭：
+
+```text
+OnClose             // 取消本次显示态、还临时对象
+→ 默认隐藏进缓存
+→ destroy: true 时 OnDestroyPanel + Destroy + Release Handle
+```
+
+### OpenCancellationToken
+
+```csharp
+protected override void OnOpen(MyArgs args)
+{
+    BindAsync(args, OpenCancellationToken).Forget();
+}
+
+async UniTask BindAsync(MyArgs args, CancellationToken ct)
+{
+    var cancelled = await PrepareAsync(ct).SuppressCancellationThrow();
+    if (cancelled) return;
+    // 使用本次传入的 args，不要事后读可能被覆盖的 Args
+}
+```
+
+关闭、重新打开、销毁都会取消上一次 Open 作用域；Pause/Resume 不会取消。
+
+`OpenScope` 可统一登记本次打开的事件、计时器和资源，关闭时自动清理；`LifetimeScope` 在面板实例销毁时清理，适合 `OnCreate` 中的长期资源：
+
+```csharp
+protected override void OnOpen(UINone args)
+{
+    OpenScope.Subscribe<DataChanged>(_ => Refresh());
+    LoadAsync(OpenScope.Token).Forget();
+}
+
+protected override void OnCreate()
+{
+    LifetimeScope.Register(viewModel);
+}
+```
+
+图片加载组件挂在 `Image` 上，传入 `OpenScope` 可在面板关闭时取消请求并清理图片：
+
+```csharp
+protected override void OnOpen(ItemArgs args)
+{
+    Icon.LoadAsync(args.IconLocation, OpenScope).Forget();
+}
+```
+
+`UIImageLoader` 会在新请求开始时取消旧请求，只有当前请求仍对应这个组件时才写入 Sprite；失败使用 Error 图。成功后保留当前图片的 YooAsset 句柄，直到替换图片、调用 `Clear()`、绑定的作用域结束或组件销毁时释放；失败或取消的请求会释放自己的句柄。
+
+### 注意
+
+- **严禁** `Destroy(panel.gameObject)`。只能 `UI.Close` / `UI.Destroy` / `CloseSelf` / `CloseAndDestroySelf`。
+- 按钮监听放 `OnCreate`（或 LoopScroll 的 `OnLoopScrollCreated`）；数据刷新放 `OnOpen`。
+- 同类型 `Hud/Push/Popup/Tips/Guide` 单实例；再次打开会复用并再次 `OnOpen`，**不会先 `OnClose`**。
+- 同类型面板正在同步执行打开流程时，回调或旧结果取消的续体不能重入打开该类型，违规直接抛错。
+  打开流程结束后的再次打开与异步加载期间的请求合并保持原有语义。
+- 同类型加载中再次 Open：合并为一次加载，后一次 Args/Mode 生效。
+- **`Tips` 与 `Toast` 不要用同一面板类型**（通道不同，可能同时存在两套实例）。
+- `Back()` 只关 Popup / Window；Hud / Tips / Guide / Toast 需显式 Close。
+- 必须 `UI.Register`。未注册、空 Location、重复且不一致的注册都会抛。
+- 资源地址原样传递，不自动去除首尾空格。无参打开重载使用 `UINone.Value`；显式传入 `null` 不会自动补成无参对象。
+- 默认 `cache: true`：Close 只隐藏，不释放内存；要释放用 `destroy: true` 或 `ClearCache()`。
+
+---
+
+## 3. URP Camera Stack
+
+### 用法
+
+```csharp
+UI.Init(package);
+UI.ConfigureURPCameraStack();                 // Base = Camera.main
+// 或
+UI.ConfigureURPCameraStack(baseCamera, uiCamera, uiLayer);
+
+UI.DisableURPCameraStack();                   // 仅从 Stack 移除
+```
+
+### 设计约定（不要当成 bug）
+
+- UI Camera 固定为 Overlay。
+- 只负责加入 / 移出 Base Camera Stack。
+- **不修改** Base Camera 的其它配置。
+- `Disable` 后 Overlay 不再独立渲染，界面会消失；这是预期行为。
+
+### 注意
+
+- `ConfigureURPCameraStack` 失败会抛。不要吞掉。
+- 框架硬依赖 URP。
+
+---
+
+## 4. 屏幕方向
+
+### 用法
+
+```csharp
+// UI.Init 只会检测当前横竖并同步 Canvas 参考分辨率，
+// 不会改 Screen.orientation。
+
+ScreenOrientationManager.SetPortrait();
+ScreenOrientationManager.SetLandscape();
+ScreenOrientationManager.Push(GameScreenOrientation.Landscape);
+ScreenOrientationManager.Pop();
+ScreenOrientationManager.ResetTo(GameScreenOrientation.Portrait);
+ScreenOrientationManager.SyncCanvasLayoutNow();
+```
+
+### 注意
+
+- 只有显式 `Set / Push / Pop / ResetTo` 才会写系统方向。
+- `UI.Shutdown` **不恢复**系统方向（进程退出场景下不需要恢复）。
+- `Shutdown` 会清空方向栈与事件订阅；业务若自己订阅了 `CanvasLayoutChanged`，不要假设 Shutdown 后还在。
+
+---
+
+## 5. SafeArea
+
+### 用法
+
+```csharp
+// 挂在内容节点上，不要挂 Layer / 全屏背景 / Mask / Guide 根
+fitter.SetPads(left: true, right: true, bottom: true, top: true);
+
+// 原生壳已扣过顶底时
+fitter.SetPads(left: true, right: true, bottom: false, top: false);
+
+ScreenSafeArea.SetOverride(rect); // Editor / 测试模拟
+ScreenSafeArea.Refresh();
+```
+
+### 注意
+
+- `ScreenSafeArea.Current` 只读缓存；由 `UIFrameRoot` 在转屏、尺寸变化、焦点恢复时刷新，并再连刷两帧。
+- 父节点必须是铺满 Canvas 的 Stretch，否则可能套两次安全区。
+- `Shutdown` 清缓存但不主动通知 Fitter；组件 `OnDisable` 会解绑事件。
+
+---
+
+## 6. Tips / Toast
+
+### 用法
+
+```csharp
+UI.ConfigureTips(maxVisible: 3, maxQueued: 8, defaultDuration: 2f);
+
+await UI.Tips<NetStatusPanel>();                      // 常驻状态条
+await UI.Toast<HintToast, string>("保存成功");
+await UI.Toast<HintToast, string>("保存成功", 1.5f);
+await UI.Toast<StickyToast>(duration: 0f);            // 常驻到手动关
+```
+
+### 注意
+
+- 可见满了只入队，出队后才加载；队列满丢掉最旧等待项，那一次 `Toast` **返回 `null`**（产品规则，不是加载失败）。
+- `maxVisible == 0` 时 `Toast` 也返回 `null`。
+- `duration <= 0` 不自动关。
+- `maxVisible` / `maxQueued` 不能为负数，时长不能是 NaN / Infinity；这些配置错误会立即抛。
+- `Shutdown` 会取消排队中的 Toast（`OperationCanceledException`），与队列满丢弃返回 `null` 不同。
+- Toast 关掉后按类型进闲置列表复用 `OnOpen`；`Register(..., cache: false)` 时关闭会 Destroy。
+- 世界飘字（伤害数字）用 `UIItem` + 对象池，不要用 Toast。
+- 不要把 `UIPanel` 放进 `GameObjectPoolService`。
+
+---
+
+## 7. 红点（RedDot）
+
+详见 [RedDot.md](RedDot.md)。
+
+### 用法摘要
+
+```csharp
+RedDot.Set("Mail/Inbox", 3);          // 只设叶子
+int total = RedDot.Get("Mail");       // 父节点自动聚合
+RedDot.Bind("Mail", OnChanged);
+RedDot.Unbind("Mail", OnChanged);
+RedDot.Clear();                       // 切号：清数据，保留监听
+RedDot.Remove("Activity/Summer");     // 删子树
+```
+
+`RedDotView`：挂在常驻宿主上，`Target` 不能是自身或祖先。
+
+### 注意
+
+- 必须在主线程调用。
+- 用绝对数量 `Set`，不要加减累计。
+- 父节点不能直接 `Set`。
+- Play 模式 LateUpdate 自动 Flush；业务通常不要手动 Flush。
+- 登出 / 切号调 `Clear`；功能卸载调 `Remove`。
+
+---
+
+## 8. 对象池（Game.Pooling）
+
+详见 [Pool.md](Pool.md)。
+
+### 用法摘要
+
+```csharp
+var pool = new GameObjectPoolService(package, poolRoot);
+await pool.PrewarmAsync("PlayerItem", 32, options, ct);
+
+if (pool.TrySpawn("PlayerItem", parent, out PlayerItem item))
+{
+    // ...
+    pool.DespawnImmediate(item.gameObject);
+}
+```
+
+循环列表必须：异步 Prepare / Prewarm，同步 `TrySpawn` / `DespawnImmediate`。
+
+### 注意
+
+- 与 `UIPanel` 缓存是两套所有权：**UIPanel 不要进这个池**。
+- 退出时先 `UI.Shutdown`，再 `GamePool.Shutdown`（或自己 `Dispose` 注入的服务）。
+- 禁止业务直接 `Destroy` 池化实例。外部 Destroy 打 Error，并从集合摘掉该实例；分桶仍可用，下一次 Spawn 拿还活着的或新建。
+- `TrySpawn` 返回 `false` 只表示尚未 Prepare。还错走 `Despawn` 会抛；`TrySpawn<T>` 缺组件会抛；未 Init 读 `GamePool.Service` 会抛。
+- 已 Init 时再 `GamePool.Init` 会抛。
+- 主线程与集合检查看 `UIFrameSafety`。
+
+---
+
+## 9. 循环列表（LoopScroll）
+
+### 用法
+
+```csharp
+public sealed class RankPanel : UILoopScrollBase<RankArgs>
+{
+    protected override void OnLoopScrollCreated()
+    {
+        closeBtn.onClick.AddListener(OnClickClose); // 只绑一次
+    }
+
+    protected override void OnOpen(RankArgs args)
+    {
+        BindAsync(args, OpenCancellationToken).Forget();
+    }
+
+    async UniTask BindAsync(RankArgs args, CancellationToken ct)
+    {
+        SetPool(GamePool.Service);
+        var cancelled = await PrepareCellsAsync(
+            new GameObjectPoolOptions(group: PoolGroup.UI), ct)
+            .SuppressCancellationThrow();
+        if (cancelled) return;
+
+        ScrollRect.totalCount = args.Ranks.Count;
+        ScrollRect.RefillCells();
+    }
+
+    public override void ProvideData(Transform item, int index)
+    {
+        item.GetComponent<RankCell>().Bind(Args.Ranks[index]);
+    }
+}
+```
+
+多 Prefab 列表继承 `UILoopScrollMultiBase`，实现 `GetCellLocation(int)`，并 `PrepareCellsAsync(locations)`。
+
+### 注意
+
+- `OnCreate` 已 sealed；额外初始化覆写 `OnLoopScrollCreated`。
+- 覆写 `OnClose` / `OnDestroyPanel` 必须 `base.`，否则 Cell 不还池。
+- `OnCreate` 未绑 LoopScrollRect / Cell location 会抛。
+- 退出顺序必须先关 UI（还 Cell）再 `GamePool.Shutdown`。池已 Dispose 后再还 Cell 会抛。
+- 列表异步必须用 `OpenCancellationToken`，不要只用 `destroyCancellationToken`（缓存关闭不会取消后者）。
+- Cell 无 Sprite 的 Image 时，尺寸会回退到 RectTransform；有正数 LayoutElement 仍优先。
+
+---
+
+## 10. 编辑器代码生成 / 绑定
+
+### 用法
+
+1. 选中 UI Prefab 根 → Inspector「生成脚本」。
+2. 子节点点「添加到 XXX」记录绑定。
+3. 「写入脚本」生成 `.Gen.cs`，编译后自动挂组件并回填引用。
+4. Prefab Stage 里改完后要 **保存 Prefab**。
+5. 「刷新绑定」按 `.Gen.cs` 对齐：脚本里没了的字段从列表去掉，脚本里有的会补回来。还没写入的「添加到…」会保留。
+
+### 注意
+
+- `.Gen.cs` 是生成文件，不要手改。删绑定用列表上的 `×`，再「写入脚本」。只 × 不写入时，刷新会按脚本把字段加回来。
+- 刷新不会因为 Prefab 引用空了就删字段，只显示未定位。
+- 绑定列表为空但 `.Gen.cs` 仍有字段时，写入会拒绝（避免 Store 丢失把脚本写成空）。用 `×` 清空后再写入可以。
+- 回填引用只按 LocalFileId 和层级路径，找不到就失败，不猜重名节点。失败不写半份引用，立即终止本批处理并清除失败任务的等待标记；修正后显式重新生成，不自动重试。
+- Prefab Stage 若未保存就关闭，磁盘可能没有组件/引用。
+- 绑定失败时宁可报错；重名节点要靠路径区分，不要依赖同名唯一。
+- Host 按类型名精确匹配；对不上则回填失败，不改去猜别的脚本。
+
+---
+
+## 11. 安全开关
+
+```csharp
+UIFrameSafety.ThreadChecks = true;      // 主线程检查
+UIFrameSafety.CollectionChecks = true;  // 池重复归还检查
+```
+
+默认 Editor / Development 打开，Release 关闭。要在正式包抓问题，在 `Init`、建池、调红点之前打开。
+
+---
+
+## 12. 推荐宿主模板
+
+```csharp
+GameScene.Init(package);             // 资源包装好后；见 Scene.md
+UI.Init(package);
+UI.ConfigureURPCameraStack();
+
+UI.Register<MainHud>("MainHud", UIGroup.Hud);
+UI.Register<HomePanel>("Home", UIGroup.Scene);
+GamePool.Init(package, transform);
+
+await UI.Hud<MainHud>();
+await UI.Push<HomePanel>();
+
+// 切 Unity 场景（见 Scene.md）；关本场景组面板
+await GameScene.SwitchAsync("Battle");
+UI.CloseGroup(UIGroup.Scene, destroy: true);
+
+// 退出
+UI.Shutdown();
+GamePool.Shutdown();
+```
+
+---
+
+## 快速对照：什么时候用哪个
+
+| 需求 | 用 |
+|------|----|
+| 主界面 / 功能页 | `Push` |
+| 确认框 / 二级弹窗 | `Popup` |
+| 血条 / 摇杆 / 货币栏 | `Hud` |
+| 网络状态条等单实例 Tips | `Tips` |
+| 飘字 / 多条自动消失提示 | `Toast` |
+| 新手引导遮罩层 | `Guide` |
+| 列表 Cell / 特效多实例 | `GameObjectPool` + `UIItem` |
+| 未读角标 | `RedDot` / `RedDotView` |
+| 切 / 加 / 卸 Unity 场景 | `GameScene`（见 [Scene.md](Scene.md)） |
+
+## 统一失败语义
+
+通用规则见 [ErrorContract.md](ErrorContract.md)。Popup 只有提交结果并完成关闭后才成功；关闭、销毁或关闭后必要导航失败，使本次结果任务与发起调用者均收到失败；无结果的正常关闭才取消。提交结果不等于任务已成功，整个关闭操作才是结果确定点。Shutdown 尝试所有清理后抛首个错误，后续错误单独记录。
+
+`LocalizedText.SetKey` 不接受 null 或空字符串，在修改绑定前抛错，原绑定保留。尚未配置 Key 的组件可以保持未绑定状态；这不表示显式传空 Key 可以清除绑定。
+
+`LanguageAutoSize` 只校验当前模式使用的字段：固定模式校验 `fontSize`，自动缩放模式校验 `min/max`。切换模式时按新模式校验；非法配置在写入前拒绝，保留原配置。省略值的默认行为不变。
+
+多语言空 key、缺 key、当前语言翻译为空及 null 目标均报错；保存的非法语言值也报错，不自动改写。预热数量超过 MaxSize 在加载前拒绝。安全区覆盖值必须有限、非负且位于屏幕内；原生屏幕数据仍按平台规则裁剪。UI Layer 仅 -1 表示使用默认层，其他值必须为 0–31。

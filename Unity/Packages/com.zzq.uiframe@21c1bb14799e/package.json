@@ -1,0 +1,35 @@
+{
+  "name": "com.zzq.uiframe",
+  "displayName": "UIFrame",
+  "version": "1.5.0",
+  "unity": "6000.0",
+  "description": "A lightweight URP UI framework with panel lifecycle management, YooAsset loading, Camera Stack support, screen orientation, safe area, Tips/Toast/Guide, and editor code generation.",
+  "keywords": [
+    "ui",
+    "ugui",
+    "yooasset",
+    "unitask"
+  ],
+  "author": {
+    "name": "ZZQzero"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "com.cysharp.unitask": "2.5.10",
+    "com.tuyoogame.yooasset": "3.0.5",
+    "com.unity.ugui": "2.0.0",
+    "com.unity.render-pipelines.universal": "17.3.0",
+    "com.unity.inputsystem": "1.19.0",
+    "com.unity.modules.audio": "1.0.0",
+    "com.unity.modules.imageconversion": "1.0.0",
+    "com.unity.modules.unitywebrequesttexture": "1.0.0"
+  },
+  "samples": [
+    {
+      "displayName": "图片选择与备份示例",
+      "description": "系统选图、图片预览、相册查询与持久备份的 UGUI 接入示例。",
+      "path": "Samples~/GalleryDemo"
+    }
+  ],
+  "_fingerprint": "21c1bb14799e6ecc690ea60e99ce391ba52ddc52"
+}

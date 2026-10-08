@@ -1,0 +1,1466 @@
+using System;
+using System.Collections.Generic;
+using System.Runtime.ExceptionServices;
+using System.Threading;
+using Cysharp.Threading.Tasks;
+using UnityEngine;
+using YooAsset;
+
+namespace UIFrame
+{
+    sealed class UIManager
+    {
+        readonly Dictionary<Type, UIPanel> _opened = new Dictionary<Type, UIPanel>();
+        readonly Dictionary<Type, UIPanel> _cached = new Dictionary<Type, UIPanel>();
+        readonly Dictionary<Type, UIOpenRequest> _loading = new Dictionary<Type, UIOpenRequest>();
+        readonly Dictionary<Type, List<UIPanel>> _toasts = new Dictionary<Type, List<UIPanel>>();
+        readonly Dictionary<Type, List<UIPanel>> _toastIdle = new Dictionary<Type, List<UIPanel>>();
+        readonly Dictionary<UIPanel, CancellationTokenSource> _toastTimers =
+            new Dictionary<UIPanel, CancellationTokenSource>();
+        readonly HashSet<UILoadRequest> _toastLoading = new HashSet<UILoadRequest>();
+        readonly TipsChannel _tips = new TipsChannel();
+        readonly List<UIPanel> _windowStack = new List<UIPanel>();
+        readonly List<UIPanel> _popupStack = new List<UIPanel>();
+        // 失败实例保留所有权与导航位置；只有显式销毁成功后才完成关闭。
+        readonly Dictionary<UIPanel, Exception> _failedPanels = new Dictionary<UIPanel, Exception>();
+        readonly HashSet<UIPanel> _closingPanels = new HashSet<UIPanel>();
+        readonly HashSet<Type> _openingTypes = new HashSet<Type>();
+        bool _toastPumping;
+        int _toastSuppressPump;
+
+        UIFrameRoot _root;
+        UILoader _loader;
+        bool _inited;
+
+        public bool IsInited => _inited;
+        public Camera UICamera => _root != null ? _root.UICamera : null;
+        public RectTransform CanvasRoot => _root != null ? _root.CanvasRoot : null;
+
+        public void Init()
+        {
+            if (_inited)
+            {
+                return;
+            }
+
+            _loader = new UILoader();
+            _root = UIFrameRoot.Create();
+            _root.MaskClicked += OnMaskClicked;
+            _inited = true;
+            Debug.Log("[UIFrame] Init 完成");
+        }
+
+        public void Shutdown(bool destroyRoot = true)
+        {
+            if (!_inited)
+            {
+                return;
+            }
+
+            _inited = false;
+            var failure = new CleanupFailure();
+
+            foreach (var req in _loading.Values)
+            {
+                req.Cancelled = true;
+                req.Completion.TrySetCanceled();
+            }
+
+            _loading.Clear();
+            foreach (var req in _toastLoading)
+            {
+                req.Cancelled = true;
+            }
+
+            _toastLoading.Clear();
+            var drained = new List<TipsWaitItem>(8);
+            _tips.ResetRuntime(drained);
+            CancelToastWaits(drained);
+            failure.Run(CancelAllToastTimers);
+            _windowStack.Clear();
+            _popupStack.Clear();
+
+            var closing = new List<UIPanel>(16);
+            foreach (var panel in _opened.Values)
+            {
+                closing.Add(panel);
+            }
+
+            foreach (var list in _toasts.Values)
+            {
+                for (var i = 0; i < list.Count; i++)
+                {
+                    closing.Add(list[i]);
+                }
+            }
+
+            for (var i = 0; i < closing.Count; i++)
+            {
+                var panel = closing[i];
+                failure.Run(() => ClosePanel(panel, destroy: true));
+            }
+
+            _opened.Clear();
+            _toasts.Clear();
+            foreach (var panel in new List<UIPanel>(_failedPanels.Keys))
+            {
+                _failedPanels.Remove(panel);
+                // 正在执行的关闭负责在回调退出后销毁，不能在这里重入其生命周期。
+                if (!_closingPanels.Contains(panel))
+                    failure.Run(() => DestroyPanel(panel));
+            }
+            var idle = new List<UIPanel>();
+            foreach (var list in _toastIdle.Values) idle.AddRange(list);
+            _toastIdle.Clear();
+            foreach (var panel in idle) failure.Run(() => DestroyPanel(panel));
+
+            closing.Clear();
+            foreach (var panel in _cached.Values)
+            {
+                closing.Add(panel);
+            }
+
+            _cached.Clear();
+            for (var i = 0; i < closing.Count; i++)
+            {
+                var panel = closing[i];
+                failure.Run(() => DestroyPanel(panel));
+            }
+
+            if (_root != null)
+            {
+                _root.MaskClicked -= OnMaskClicked;
+                var root = _root;
+                _root = null;
+                if (destroyRoot && root != null)
+                {
+                    UnityEngine.Object.Destroy(root.gameObject);
+                }
+            }
+
+            _loader = null;
+            failure.Run(ScreenOrientationManager.Shutdown);
+            failure.Run(ScreenSafeArea.Shutdown);
+            failure.Throw();
+            Debug.Log("[UIFrame] Shutdown 完成");
+        }
+
+        public void SetPackage(ResourcePackage package)
+        {
+            _loader.SetPackage(package);
+            Debug.Log($"[UIFrame] 已绑定 ResourcePackage: {package.PackageName}");
+        }
+
+        public void SetPackage(string packageName)
+        {
+            if (string.IsNullOrWhiteSpace(packageName))
+            {
+                throw new ArgumentException("[UIFrame] packageName 为空。", nameof(packageName));
+            }
+
+            var package = YooAssets.GetPackage(packageName);
+            if (package == null)
+            {
+                throw new InvalidOperationException(
+                    $"[UIFrame] ResourcePackage 不存在: {packageName}");
+            }
+
+            SetPackage(package);
+        }
+
+        internal UniTask<AssetHandle> LoadAsset<T>(
+            string location,
+            CancellationToken cancellationToken)
+            where T : UnityEngine.Object
+        {
+            if (!_inited || _loader == null)
+                throw new InvalidOperationException("[UIFrame] UI 尚未 Init。");
+            return _loader.LoadAsset<T>(location, cancellationToken);
+        }
+
+        public Camera ConfigureURPCameraStack(Camera baseCamera, Camera uiCamera, int uiLayer)
+        {
+            return _root.ConfigureURPCameraStack(baseCamera, uiCamera, uiLayer);
+        }
+
+        public void DisableURPCameraStack()
+        {
+            if (_root != null)
+            {
+                _root.DisableURPCameraStack();
+            }
+        }
+
+        public void ConfigureTips(int maxVisible, int maxQueued, float defaultDuration)
+        {
+            var dropped = new List<TipsWaitItem>(8);
+            _tips.Configure(maxVisible, maxQueued, defaultDuration, dropped);
+            RejectToastWaits(dropped);
+            TrimToastIdle();
+            if (_inited)
+            {
+                PumpToastQueue();
+            }
+        }
+
+        public UniTask<TPanel> Open<TPanel, TArgs>(UIOpenMode mode, TArgs args)
+            where TPanel : UIPanel<TArgs>
+        {
+            var type = typeof(TPanel);
+            RequireCanShow(type, mode);
+            if (mode == UIOpenMode.Toast)
+            {
+                return OpenToast<TPanel>(type, args, duration: null);
+            }
+
+            if (_loading.TryGetValue(type, out var inflight))
+            {
+                inflight.Args = args;
+                inflight.Mode = mode;
+                return AwaitInflight<TPanel>(inflight);
+            }
+
+            var bind = UIPanelCatalog.Resolve(type, mode);
+            if (TryReusePanel(type, bind, mode, args, out var reused))
+            {
+                return UniTask.FromResult(reused as TPanel);
+            }
+
+            return OpenCore<TPanel, TArgs>(type, bind, mode, args);
+        }
+
+        async UniTask<TPanel> AwaitInflight<TPanel>(UIOpenRequest inflight)
+            where TPanel : UIPanel
+        {
+            var merged = await inflight.Completion.Task;
+            return merged as TPanel;
+        }
+
+        bool TryReusePanel(
+            Type type,
+            UIPanelBind bind,
+            UIOpenMode mode,
+            object args,
+            out UIPanel panel)
+        {
+            if (_opened.TryGetValue(type, out panel))
+            {
+                ShowReusedPanel(bind, mode, args, panel);
+                return true;
+            }
+
+            if (!_cached.TryGetValue(type, out panel))
+            {
+                panel = null;
+                return false;
+            }
+
+            _cached.Remove(type);
+            if (!string.Equals(panel.Location, bind.Location, StringComparison.Ordinal))
+            {
+                DestroyPanelAndReport(panel);
+                throw new InvalidOperationException(
+                    $"[UIFrame] 缓存面板 {type.Name} 的 Location 与注册不一致。");
+            }
+
+            ShowReusedPanel(bind, mode, args, panel);
+            return true;
+        }
+
+        void ShowReusedPanel(
+            UIPanelBind bind,
+            UIOpenMode mode,
+            object args,
+            UIPanel panel)
+        {
+            try
+            {
+                ApplyBind(panel, bind);
+                ApplyAndShow(panel, mode, args);
+            }
+            catch
+            {
+                CleanupFailedOpen(panel);
+                throw;
+            }
+        }
+
+        async UniTask<TPanel> OpenCore<TPanel, TArgs>(
+            Type type,
+            UIPanelBind initialBind,
+            UIOpenMode mode,
+            TArgs args)
+            where TPanel : UIPanel<TArgs>
+        {
+            var req = new UIOpenRequest
+            {
+                Mode = mode,
+                Args = args,
+            };
+            _loading[type] = req;
+
+            UIPanel panel = null;
+            try
+            {
+                panel = await LoadPanel(type, initialBind, req);
+                if (req.Cancelled)
+                {
+                    throw new OperationCanceledException();
+                }
+
+                ApplyBind(panel, UIPanelCatalog.WithMode(initialBind, req.Mode));
+                ApplyAndShow(panel, req.Mode, req.Args);
+                if (req.Cancelled || !_inited)
+                {
+                    if (!_opened.TryGetValue(type, out var opened) || opened != panel)
+                    {
+                        panel = null;
+                    }
+
+                    throw new OperationCanceledException();
+                }
+
+                req.Completion.TrySetResult(panel);
+                return panel as TPanel;
+            }
+            catch (OperationCanceledException)
+            {
+                CleanupFailedOpen(panel);
+                req.Completion.TrySetCanceled();
+                throw;
+            }
+            catch (Exception ex)
+            {
+                CleanupFailedOpen(panel);
+                req.Completion.TrySetException(ex);
+                throw;
+            }
+            finally
+            {
+                _loading.Remove(type);
+            }
+        }
+
+        internal UniTask<TPanel> Toast<TPanel>(object args, float? duration)
+            where TPanel : UIPanel
+        {
+            return OpenToast<TPanel>(typeof(TPanel), args, duration);
+        }
+
+        async UniTask<TPanel> OpenToast<TPanel>(Type type, object args, float? duration)
+            where TPanel : UIPanel
+        {
+            RequireCanOpenType(type);
+            var resolved = _tips.ResolveDuration(duration);
+            if (!_tips.HasFreeSlot(CountVisibleToasts()))
+            {
+                if (_tips.Settings.MaxVisible <= 0 || _tips.Settings.MaxQueued <= 0)
+                {
+                    return null;
+                }
+
+                var wait = new TipsWaitItem
+                {
+                    PanelType = type,
+                    Args = args,
+                    Duration = resolved,
+                };
+                if (!_tips.TryEnqueue(wait, out var dropped))
+                {
+                    return null;
+                }
+
+                RejectToastWait(dropped);
+                var queued = await wait.Completion.Task;
+                return queued as TPanel;
+            }
+
+            var panel = await ShowToast(type, args, resolved);
+            return panel as TPanel;
+        }
+
+        async UniTask<UIPanel> ShowToast(Type type, object args, float duration)
+        {
+            UILoadRequest req = null;
+            UIPanel panel = null;
+            var slotHeld = false;
+            try
+            {
+                RequireCanOpenType(type);
+                var bind = UIPanelCatalog.Resolve(type, UIOpenMode.Toast);
+                _tips.BeginInFlight();
+                slotHeld = true;
+                panel = TakeToastIdle(type, bind);
+                if (panel == null)
+                {
+                    req = new UILoadRequest { PanelType = type };
+                    _toastLoading.Add(req);
+                    panel = await LoadPanel(type, bind, req);
+                    if (req.Cancelled)
+                    {
+                        throw new OperationCanceledException();
+                    }
+                }
+
+                PresentToast(panel, args, duration);
+                return panel;
+            }
+            catch
+            {
+                CleanupFailedOpen(panel);
+                throw;
+            }
+            finally
+            {
+                if (req != null)
+                {
+                    _toastLoading.Remove(req);
+                }
+
+                if (slotHeld)
+                {
+                    _tips.EndInFlight();
+                }
+
+                PumpToastQueue();
+            }
+        }
+
+        void PresentToast(UIPanel panel, object args, float duration)
+        {
+            // 异步加载期间，同类型的其它实例可能已经关闭失败。
+            RequireCanOpenType(panel.PanelType);
+            _openingTypes.Add(panel.PanelType);
+            try { PresentToastCore(panel, args, duration); }
+            finally { _openingTypes.Remove(panel.PanelType); }
+        }
+
+        void PresentToastCore(UIPanel panel, object args, float duration)
+        {
+            panel.OpenMode = UIOpenMode.Toast;
+            panel.ApplyArgs(args);
+            AttachToLayer(panel, _root.GetLayer(panel.Layer));
+            panel.transform.SetAsLastSibling();
+            panel.gameObject.SetActive(true);
+            AddVisibleToast(panel);
+            panel.DispatchOpen();
+            EnsureOpenCanContinue();
+            UI.RaisePanelShown(panel);
+            EnsureOpenCanContinue();
+            if (!IsVisibleToast(panel) || TipsChannel.IsSticky(duration))
+            {
+                return;
+            }
+
+            StartToastTimer(panel, duration);
+        }
+
+        async UniTask<UIPanel> LoadPanel(
+            Type type,
+            UIPanelBind bind,
+            UILoadRequest req = null)
+        {
+            var parent = _root.GetLayer(bind.Layer);
+            var panel = await _loader.Load(type, bind.Location, parent, req);
+            ApplyBind(panel, bind);
+            try
+            {
+                panel.DispatchCreate();
+            }
+            catch (Exception)
+            {
+                DestroyPanelAndReport(panel);
+                throw;
+            }
+
+            return panel;
+        }
+
+        static void ApplyBind(UIPanel panel, UIPanelBind bind)
+        {
+            panel.Layer = bind.Layer;
+            panel.Group = bind.Group;
+            panel.Location = bind.Location;
+            panel.CacheOnClose = bind.Cache;
+        }
+
+        void ApplyAndShow(UIPanel panel, UIOpenMode mode, object args)
+        {
+            RequireCanShow(panel.PanelType, mode);
+            _openingTypes.Add(panel.PanelType);
+            try { ApplyAndShowCore(panel, mode, args); }
+            finally { _openingTypes.Remove(panel.PanelType); }
+        }
+
+        void ApplyAndShowCore(UIPanel panel, UIOpenMode mode, object args)
+        {
+            var wasWindowTop = WindowTop == panel;
+            var wasWindow = _windowStack.Remove(panel);
+            _popupStack.Remove(panel);
+            _cached.Remove(panel.PanelType);
+
+            if (mode == UIOpenMode.Push)
+            {
+                CloseAllPopups(destroy: false);
+                EnsureOpenCanContinue();
+            }
+
+            panel.OpenMode = mode;
+            panel.ApplyArgs(args);
+
+            if (mode == UIOpenMode.Push)
+            {
+                var prev = WindowTop;
+                if (prev != null && prev != panel && prev.gameObject.activeSelf)
+                {
+                    PausePanel(prev);
+                    EnsureOpenCanContinue();
+                }
+
+                MoveToStackEnd(_windowStack, panel);
+            }
+            else
+            {
+                if (wasWindow && wasWindowTop)
+                {
+                    var next = WindowTop;
+                    if (next != null && !next.gameObject.activeSelf)
+                    {
+                        ResumePanel(next);
+                        EnsureOpenCanContinue();
+                    }
+                }
+
+                if (mode == UIOpenMode.Popup)
+                {
+                    MoveToStackEnd(_popupStack, panel);
+                }
+            }
+
+            _opened[panel.PanelType] = panel;
+            AttachToLayer(panel, _root.GetLayer(panel.Layer));
+            panel.transform.SetAsLastSibling();
+            panel.gameObject.SetActive(true);
+            panel.DispatchOpen();
+            EnsureOpenCanContinue();
+            UI.RaisePanelShown(panel);
+            EnsureOpenCanContinue();
+            RefreshMask();
+        }
+
+        void EnsureOpenCanContinue()
+        {
+            if (!_inited)
+            {
+                throw new OperationCanceledException(
+                    "[UIFrame] UI 已 Shutdown，面板打开已取消。");
+            }
+        }
+
+        public void Back()
+        {
+            if (_popupStack.Count > 0)
+            {
+                ClosePanel(PopupTop, destroy: false);
+                return;
+            }
+
+            if (_windowStack.Count > 0)
+            {
+                ClosePanel(WindowTop, destroy: false);
+            }
+        }
+
+        public void Close(Type panelType, bool destroy)
+        {
+            _toastSuppressPump++;
+            try
+            {
+                CloseCore(panelType, destroy);
+            }
+            finally
+            {
+                _toastSuppressPump--;
+            }
+            PumpToastQueue();
+        }
+
+        void CloseCore(Type panelType, bool destroy)
+        {
+            RequireNotClosingType(panelType);
+            if (destroy)
+            {
+                DestroyFailedPanels(panelType);
+            }
+            else
+            {
+                RequireHealthyType(panelType);
+            }
+
+            if (_loading.TryGetValue(panelType, out var req))
+            {
+                req.Cancelled = true;
+            }
+
+            CancelToastLoads(panelType);
+            var drained = new List<TipsWaitItem>(8);
+            _tips.DrainWhere(item => item.PanelType == panelType, drained);
+            RejectToastWaits(drained);
+
+            if (_toasts.TryGetValue(panelType, out var toasts) && toasts.Count > 0)
+            {
+                var closing = new List<UIPanel>(toasts.Count);
+                for (var i = 0; i < toasts.Count; i++)
+                {
+                    closing.Add(toasts[i]);
+                }
+
+                for (var i = 0; i < closing.Count; i++)
+                {
+                    ClosePanel(closing[i], destroy);
+                }
+            }
+
+            if (destroy)
+            {
+                DestroyToastIdle(panelType);
+            }
+
+            if (_opened.TryGetValue(panelType, out var opened))
+            {
+                ClosePanel(opened, destroy);
+                return;
+            }
+
+            if (destroy && _cached.TryGetValue(panelType, out var cached))
+            {
+                _cached.Remove(panelType);
+                DestroyPanel(cached);
+            }
+        }
+
+        public void CloseInstance(UIPanel panel, bool destroy)
+        {
+            var type = panel.PanelType;
+            var isOpened = _opened.TryGetValue(type, out var opened) && opened == panel;
+            if (!isOpened && !IsVisibleToast(panel) && !_failedPanels.ContainsKey(panel))
+            {
+                throw new InvalidOperationException(
+                    $"[UIFrame] {type.Name} 当前未打开，不能重复关闭。");
+            }
+
+            ClosePanel(panel, destroy);
+        }
+
+        public void CloseGroup(UIGroup group, bool destroy)
+        {
+            _toastSuppressPump++;
+            try
+            {
+                CloseGroupCore(group, destroy);
+            }
+            finally
+            {
+                _toastSuppressPump--;
+            }
+            PumpToastQueue();
+        }
+
+        void CloseGroupCore(UIGroup group, bool destroy)
+        {
+            // 批量操作先检查整个目标组，不能遗漏失败成员后报告成功。
+            foreach (var panel in _closingPanels)
+            {
+                if (panel.Group == group)
+                    RequireCanClose(panel, destroy);
+            }
+            foreach (var panel in _failedPanels.Keys)
+            {
+                if (panel.Group == group)
+                    RequireCanClose(panel, destroy);
+            }
+            foreach (var kv in _loading)
+            {
+                if (!UIPanelCatalog.TryResolve(kv.Key, kv.Value.Mode, out var bind))
+                {
+                    continue;
+                }
+
+                if (bind.Group == group)
+                {
+                    kv.Value.Cancelled = true;
+                }
+            }
+
+            foreach (var req in _toastLoading)
+            {
+                if (req.PanelType != null
+                    && UIPanelCatalog.TryResolve(req.PanelType, UIOpenMode.Toast, out var toastBind)
+                    && toastBind.Group == group)
+                {
+                    req.Cancelled = true;
+                }
+            }
+
+            var drained = new List<TipsWaitItem>(8);
+            _tips.DrainWhere(
+                item => UIPanelCatalog.TryResolve(item.PanelType, UIOpenMode.Toast, out var waitBind)
+                        && waitBind.Group == group,
+                drained);
+            RejectToastWaits(drained);
+
+            var buffer = new List<UIPanel>(16);
+            // 从栈底关闭到栈顶，避免恢复本组内接下来还要关闭的窗口。
+            CollectGroup(_windowStack, group, buffer);
+            CollectGroup(_opened.Values, group, buffer);
+            CollectGroup(_failedPanels.Keys, group, buffer);
+            foreach (var list in _toasts.Values)
+                CollectGroup(list, group, buffer);
+            for (var i = 0; i < buffer.Count; i++)
+            {
+                ClosePanel(buffer[i], destroy);
+            }
+
+            buffer.Clear();
+            CollectGroup(_cached.Values, group, buffer);
+            if (destroy)
+            {
+                for (var i = 0; i < buffer.Count; i++)
+                {
+                    var cached = buffer[i];
+                    _cached.Remove(cached.PanelType);
+                    DestroyPanel(cached);
+                }
+            }
+
+            if (destroy)
+            {
+                buffer.Clear();
+                foreach (var kv in _toastIdle)
+                {
+                    CollectGroup(kv.Value, group, buffer);
+                }
+
+                for (var i = 0; i < buffer.Count; i++)
+                {
+                    var idle = buffer[i];
+                    RemoveToastIdle(idle);
+                    DestroyPanel(idle);
+                }
+            }
+        }
+
+        public void ClearCache()
+        {
+            var buffer = new List<UIPanel>(16);
+            foreach (var kv in _cached)
+            {
+                buffer.Add(kv.Value);
+            }
+
+            for (var i = 0; i < buffer.Count; i++)
+            {
+                var panel = buffer[i];
+                if (_cached.TryGetValue(panel.PanelType, out var current) && current == panel)
+                {
+                    _cached.Remove(panel.PanelType);
+                    DestroyPanel(panel);
+                }
+            }
+
+            DestroyToastIdle();
+        }
+
+        public TPanel Get<TPanel>() where TPanel : UIPanel
+        {
+            var type = typeof(TPanel);
+            if (_opened.TryGetValue(type, out var panel))
+            {
+                return panel as TPanel;
+            }
+
+            if (_toasts.TryGetValue(type, out var toasts) && toasts.Count > 0)
+            {
+                return toasts[toasts.Count - 1] as TPanel;
+            }
+
+            return null;
+        }
+
+        public bool IsOpen<TPanel>() where TPanel : UIPanel
+        {
+            return Get<TPanel>() != null;
+        }
+
+        void RequireNotClosingType(Type type)
+        {
+            foreach (var panel in _closingPanels)
+            {
+                if (panel.PanelType == type)
+                    throw new InvalidOperationException($"[UIFrame] {type.FullName} 正在关闭，不能重入打开／关闭。");
+            }
+        }
+
+        void RequireCanOpenType(Type type)
+        {
+            if (_openingTypes.Contains(type))
+                throw new InvalidOperationException($"[UIFrame] {type.FullName} 正在打开，不能重入打开。");
+            RequireHealthyType(type);
+        }
+
+        void RequireHealthyType(Type type)
+        {
+            RequireNotClosingType(type);
+            foreach (var entry in _failedPanels)
+            {
+                if (entry.Key.PanelType == type)
+                    throw PanelFailure(entry.Key, entry.Value);
+            }
+        }
+
+        static InvalidOperationException PanelFailure(UIPanel panel, Exception failure)
+        {
+            var action = panel.DestroyDispatched
+                ? "销毁已失败，不能重试或继续导航；请排查异常并 Shutdown。"
+                : "关闭已失败；请排查异常后显式 Destroy，不能重试 OnClose。";
+            return new InvalidOperationException(
+                $"[UIFrame] {panel.PanelType.FullName} {action}Location={panel.Location}", failure);
+        }
+
+        bool RequireCanClose(UIPanel panel, bool destroy)
+        {
+            if (_closingPanels.Contains(panel))
+                throw new InvalidOperationException($"[UIFrame] {panel.PanelType.FullName} 正在关闭，不能重入关闭／销毁。");
+            if (!_failedPanels.TryGetValue(panel, out var failure))
+                return false;
+            if (!destroy || panel.DestroyDispatched)
+                throw PanelFailure(panel, failure);
+            return true;
+        }
+
+        void RequireCanShow(Type type, UIOpenMode mode)
+        {
+            RequireCanOpenType(type);
+            var changesNavigation = mode == UIOpenMode.Push || mode == UIOpenMode.Popup
+                || (_opened.TryGetValue(type, out var panel)
+                    && (_windowStack.Contains(panel) || _popupStack.Contains(panel)));
+            if (!changesNavigation)
+                return;
+            foreach (var window in _windowStack)
+                RequireCanClose(window, destroy: false);
+            foreach (var popup in _popupStack)
+                RequireCanClose(popup, destroy: false);
+        }
+
+        void DestroyFailedPanels(Type type)
+        {
+            var panels = new List<UIPanel>(_failedPanels.Keys);
+            foreach (var panel in panels)
+            {
+                if (panel.PanelType == type)
+                {
+                    ClosePanel(panel, destroy: true);
+                }
+            }
+        }
+
+        void ClosePanel(UIPanel panel, bool destroy)
+        {
+            bool pumpToasts;
+            try { pumpToasts = ClosePanelCore(panel, destroy); }
+            catch (Exception exception)
+            {
+                panel?.SettleClose(exception);
+                throw;
+            }
+            panel?.SettleClose(null);
+            if (pumpToasts) PumpToastQueue();
+        }
+
+        bool ClosePanelCore(UIPanel panel, bool destroy)
+        {
+            // 失败的销毁仍有诊断状态，不能被 Unity 对已销毁对象的 null 判断跳过。
+            if (ReferenceEquals(panel, null))
+                return false;
+            var failed = RequireCanClose(panel, destroy);
+            if (panel == null)
+                throw new InvalidOperationException($"[UIFrame] {panel.PanelType.FullName} 已被外部销毁，不能继续关闭。");
+
+            var type = panel.PanelType;
+            var isToast = panel.OpenMode == UIOpenMode.Toast;
+            var isOpened = isToast
+                ? IsVisibleToast(panel)
+                : _opened.TryGetValue(type, out var opened) && opened == panel;
+            if (!isOpened && !failed)
+            {
+                if (destroy)
+                {
+                    if (_cached.TryGetValue(type, out var cached) && cached == panel)
+                        _cached.Remove(type);
+                    RemoveToastIdle(panel);
+                    DestroyPanel(panel);
+                }
+                return false;
+            }
+
+            var wasWindowTop = WindowTop == panel;
+            _closingPanels.Add(panel);
+            if (isToast)
+            {
+                RemoveVisibleToast(panel);
+            }
+            else
+            {
+                _opened.Remove(type);
+            }
+
+            try
+            {
+                try
+                {
+                    if (isToast)
+                        CancelToastTimer(panel);
+                    if (!failed)
+                        panel.DispatchClose();
+                    if (!_inited || destroy || !panel.CacheOnClose)
+                        DestroyPanel(panel);
+                    else if (isToast)
+                        ReturnToastIdle(panel);
+                    else
+                    {
+                        panel.gameObject.SetActive(false);
+                        _cached[type] = panel;
+                    }
+                }
+                catch (Exception exception)
+                {
+                    if (_inited)
+                        _failedPanels[panel] = exception;
+                    else
+                    {
+                        // Shutdown 已接管最终收尾；仍向本次调用方抛出首次业务异常。
+                        _failedPanels.Remove(panel);
+                        DestroyPanelAndReport(panel);
+                    }
+                    throw;
+                }
+                // 普通关闭与失败后的显式销毁共用提交点；失败时导航关系保持原位。
+                _failedPanels.Remove(panel);
+                _windowStack.Remove(panel);
+                _popupStack.Remove(panel);
+                RefreshMask();
+                if (_inited && wasWindowTop && _windowStack.Count > 0)
+                {
+                    RequireCanClose(WindowTop, destroy: false);
+                    ResumePanel(WindowTop);
+                }
+            }
+            finally
+            {
+                _closingPanels.Remove(panel);
+            }
+            return isToast;
+        }
+
+        void PumpToastQueue()
+        {
+            if (!_inited || _toastPumping || _toastSuppressPump > 0)
+            {
+                return;
+            }
+
+            _toastPumping = true;
+            try
+            {
+                while (_tips.HasFreeSlot(CountVisibleToasts()) && _tips.TryDequeue(out var item))
+                {
+                    DispatchQueuedToast(item).Forget();
+                }
+            }
+            finally
+            {
+                _toastPumping = false;
+            }
+        }
+
+        async UniTaskVoid DispatchQueuedToast(TipsWaitItem item)
+        {
+            try
+            {
+                var panel = await ShowToast(item.PanelType, item.Args, item.Duration);
+                item.Completion.TrySetResult(panel);
+            }
+            catch (OperationCanceledException)
+            {
+                item.Completion.TrySetCanceled();
+            }
+            catch (Exception ex)
+            {
+                item.Completion.TrySetException(ex);
+            }
+            finally
+            {
+                PumpToastQueue();
+            }
+        }
+
+        int CountVisibleToasts()
+        {
+            var count = 0;
+            foreach (var list in _toasts.Values)
+            {
+                count += list.Count;
+            }
+
+            // 正在关闭或关闭失败不等于释放展示名额。
+            foreach (var panel in _failedPanels.Keys)
+                if (panel.OpenMode == UIOpenMode.Toast)
+                    count++;
+            foreach (var panel in _closingPanels)
+                if (panel.OpenMode == UIOpenMode.Toast && !_failedPanels.ContainsKey(panel))
+                    count++;
+
+            return count;
+        }
+
+        void AddVisibleToast(UIPanel panel)
+        {
+            var type = panel.PanelType;
+            if (!_toasts.TryGetValue(type, out var list))
+            {
+                list = new List<UIPanel>();
+                _toasts[type] = list;
+            }
+
+            list.Add(panel);
+        }
+
+        bool RemoveVisibleToast(UIPanel panel)
+        {
+            var type = panel.PanelType;
+            if (!_toasts.TryGetValue(type, out var list))
+            {
+                return false;
+            }
+
+            var removed = list.Remove(panel);
+            if (list.Count == 0)
+            {
+                _toasts.Remove(type);
+            }
+
+            return removed;
+        }
+
+        bool IsVisibleToast(UIPanel panel)
+        {
+            return panel != null
+                   && _toasts.TryGetValue(panel.PanelType, out var list)
+                   && list.Contains(panel);
+        }
+
+        UIPanel TakeToastIdle(Type type, UIPanelBind bind)
+        {
+            if (!_toastIdle.TryGetValue(type, out var list) || list.Count == 0)
+            {
+                return null;
+            }
+
+            var panel = list[list.Count - 1];
+            list.RemoveAt(list.Count - 1);
+            if (list.Count == 0)
+            {
+                _toastIdle.Remove(type);
+            }
+
+            if (!string.Equals(panel.Location, bind.Location, StringComparison.Ordinal))
+            {
+                DestroyPanelAndReport(panel);
+                throw new InvalidOperationException(
+                    $"[UIFrame] 闲置 Toast {type.Name} 的 Location 与注册不一致。");
+            }
+
+            ApplyBind(panel, bind);
+            return panel;
+        }
+
+        void ReturnToastIdle(UIPanel panel)
+        {
+            if (panel == null)
+            {
+                return;
+            }
+
+            var cap = _tips.Settings.MaxVisible;
+            if (cap <= 0)
+            {
+                DestroyPanel(panel);
+                return;
+            }
+
+            var type = panel.PanelType;
+            if (!_toastIdle.TryGetValue(type, out var list))
+            {
+                list = new List<UIPanel>();
+                _toastIdle[type] = list;
+            }
+
+            while (list.Count >= cap)
+            {
+                var oldest = list[0];
+                list.RemoveAt(0);
+                DestroyPanel(oldest);
+            }
+
+            panel.gameObject.SetActive(false);
+            list.Add(panel);
+        }
+
+        void RemoveToastIdle(UIPanel panel)
+        {
+            if (panel == null)
+            {
+                return;
+            }
+
+            if (!_toastIdle.TryGetValue(panel.PanelType, out var list))
+            {
+                return;
+            }
+
+            list.Remove(panel);
+            if (list.Count == 0)
+            {
+                _toastIdle.Remove(panel.PanelType);
+            }
+        }
+
+        void DestroyToastIdle(Type type = null)
+        {
+            var panels = new List<UIPanel>();
+            foreach (var entry in _toastIdle)
+            {
+                if (type == null || entry.Key == type)
+                    panels.AddRange(entry.Value);
+            }
+            foreach (var panel in panels)
+            {
+                if (!_toastIdle.TryGetValue(panel.PanelType, out var list) || !list.Contains(panel))
+                    continue;
+                RemoveToastIdle(panel);
+                DestroyPanel(panel);
+            }
+        }
+
+        void TrimToastIdle()
+        {
+            var cap = _tips.Settings.MaxVisible;
+            var types = new List<Type>(_toastIdle.Keys);
+            foreach (var type in types)
+            {
+                while (_toastIdle.TryGetValue(type, out var list) && list.Count > cap)
+                {
+                    var panel = list[list.Count - 1];
+                    RemoveToastIdle(panel);
+                    DestroyPanel(panel);
+                }
+            }
+        }
+
+        void StartToastTimer(UIPanel panel, float duration)
+        {
+            CancelToastTimer(panel);
+            var cts = new CancellationTokenSource();
+            _toastTimers[panel] = cts;
+            RunToastTimer(panel, duration, cts.Token).Forget();
+        }
+
+        async UniTaskVoid RunToastTimer(UIPanel panel, float duration, CancellationToken token)
+        {
+            var cancelled = await UniTask.Delay(
+                TimeSpan.FromSeconds(duration),
+                DelayType.UnscaledDeltaTime,
+                PlayerLoopTiming.Update,
+                token).SuppressCancellationThrow();
+            if (cancelled || !_inited)
+            {
+                return;
+            }
+
+            ClosePanel(panel, destroy: false);
+        }
+
+        void CancelToastTimer(UIPanel panel)
+        {
+            if (panel == null || !_toastTimers.TryGetValue(panel, out var cts))
+            {
+                return;
+            }
+
+            _toastTimers.Remove(panel);
+            try { cts.Cancel(); }
+            finally { cts.Dispose(); }
+        }
+
+        void CancelAllToastTimers()
+        {
+            var failure = new CleanupFailure();
+            foreach (var cts in _toastTimers.Values)
+            {
+                failure.Run(cts.Cancel);
+                failure.Run(cts.Dispose);
+            }
+            _toastTimers.Clear();
+            failure.Throw();
+        }
+
+        void CancelToastLoads(Type panelType)
+        {
+            if (panelType == null)
+            {
+                return;
+            }
+
+            foreach (var req in _toastLoading)
+            {
+                if (req.PanelType == panelType)
+                {
+                    req.Cancelled = true;
+                }
+            }
+        }
+
+        static void RejectToastWait(TipsWaitItem item)
+        {
+            item?.Completion.TrySetResult(null);
+        }
+
+        static void RejectToastWaits(List<TipsWaitItem> items)
+        {
+            if (items == null)
+            {
+                return;
+            }
+
+            for (var i = 0; i < items.Count; i++)
+            {
+                items[i]?.Completion.TrySetResult(null);
+            }
+
+            items.Clear();
+        }
+
+        static void CancelToastWaits(List<TipsWaitItem> items)
+        {
+            if (items == null)
+            {
+                return;
+            }
+
+            for (var i = 0; i < items.Count; i++)
+            {
+                items[i]?.Completion.TrySetCanceled();
+            }
+
+            items.Clear();
+        }
+
+        void CloseAllPopups(bool destroy)
+        {
+            while (_popupStack.Count > 0)
+            {
+                ClosePanel(_popupStack[_popupStack.Count - 1], destroy);
+            }
+        }
+
+        void CleanupFailedOpen(UIPanel panel)
+        {
+            if (panel == null)
+            {
+                return;
+            }
+
+            if (_failedPanels.ContainsKey(panel))
+                return;
+            try
+            {
+                var type = panel.PanelType;
+                if (_cached.TryGetValue(type, out var cached) && cached == panel)
+                    _cached.Remove(type);
+                RemoveToastIdle(panel);
+                if ((_opened.TryGetValue(type, out var opened) && opened == panel)
+                    || IsVisibleToast(panel))
+                {
+                    ClosePanel(panel, destroy: true);
+                }
+                else
+                {
+                    DestroyPanel(panel);
+                }
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception);
+            }
+        }
+
+        void DestroyPanelAndReport(UIPanel panel)
+        {
+            try
+            {
+                DestroyPanel(panel);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception);
+            }
+        }
+
+        void DestroyPanel(UIPanel panel)
+        {
+            if (panel == null || panel.DestroyDispatched)
+                return;
+
+            Exception failure = null;
+            try
+            {
+                panel.DispatchDestroy();
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+
+            var handle = panel.AssetHandle;
+            panel.AssetHandle = null;
+            try
+            {
+                UnityEngine.Object.Destroy(panel.gameObject);
+            }
+            catch (Exception exception)
+            {
+                if (failure == null)
+                    failure = exception;
+                else
+                    Debug.LogException(new InvalidOperationException(
+                        $"[UIFrame] 销毁对象时的次级错误: Panel={panel.PanelType.FullName}, Location={panel.Location}", exception));
+            }
+            try
+            {
+                UILoader.Release(handle);
+            }
+            catch (Exception exception)
+            {
+                if (failure == null)
+                    failure = exception;
+                else
+                    Debug.LogException(new InvalidOperationException(
+                        $"[UIFrame] 释放句柄时的次级错误: Panel={panel.PanelType.FullName}, Location={panel.Location}", exception));
+            }
+            if (failure != null)
+                ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+
+        void PausePanel(UIPanel panel)
+        {
+            if (panel == null)
+            {
+                return;
+            }
+
+            panel.DispatchPause();
+            panel.gameObject.SetActive(false);
+        }
+
+        void ResumePanel(UIPanel panel)
+        {
+            if (panel == null)
+            {
+                return;
+            }
+
+            panel.gameObject.SetActive(true);
+            panel.transform.SetAsLastSibling();
+            panel.DispatchResume();
+        }
+
+        static void MoveToStackEnd(List<UIPanel> stack, UIPanel panel)
+        {
+            stack.Remove(panel);
+            stack.Add(panel);
+        }
+
+        static void AttachToLayer(UIPanel panel, RectTransform parent)
+        {
+            if (panel == null || parent == null)
+            {
+                return;
+            }
+
+            var t = panel.transform;
+            var parentChanged = t.parent != parent;
+            if (parentChanged)
+            {
+                t.SetParent(parent, false);
+            }
+
+            var layer = parent.gameObject.layer;
+            if (!parentChanged && panel.gameObject.layer == layer)
+            {
+                return;
+            }
+
+            SetLayerRecursively(t, layer);
+        }
+
+        static void SetLayerRecursively(Transform root, int layer)
+        {
+            root.gameObject.layer = layer;
+            for (var i = 0; i < root.childCount; i++)
+            {
+                SetLayerRecursively(root.GetChild(i), layer);
+            }
+        }
+
+        static void CollectGroup(IEnumerable<UIPanel> source, UIGroup group, List<UIPanel> dest)
+        {
+            if (source == null)
+            {
+                return;
+            }
+
+            foreach (var panel in source)
+            {
+                if (panel != null && panel.Group == group && !dest.Contains(panel))
+                {
+                    dest.Add(panel);
+                }
+            }
+        }
+
+        void OnMaskClicked()
+        {
+            var top = PopupTop;
+            if (!ReferenceEquals(top, null))
+            {
+                RequireCanClose(top, destroy: false);
+                if (top.CloseOnMaskClick)
+                    Back();
+            }
+        }
+
+        void RefreshMask()
+        {
+            if (_root == null)
+            {
+                return;
+            }
+
+            _root.SetMaskVisible(_popupStack.Count > 0);
+        }
+
+        UIPanel WindowTop => _windowStack.Count > 0 ? _windowStack[_windowStack.Count - 1] : null;
+
+        UIPanel PopupTop => _popupStack.Count > 0 ? _popupStack[_popupStack.Count - 1] : null;
+    }
+}

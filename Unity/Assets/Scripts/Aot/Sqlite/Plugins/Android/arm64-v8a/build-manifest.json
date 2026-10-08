@@ -1,0 +1,34 @@
+{
+  "target": "android",
+  "sqlite": "3.53.4",
+  "source_id": "2026-07-24 19:02:57 bf7c7f30031888f4e796e429ab3978879485813aaca6f641c7b33e4e09459bcc",
+  "abi": 3,
+  "build_id": "d485f695fda5529bd7ae610ff823fc211c45cdd4aa28fa94b9456b82bccf10fd",
+  "sanitized": false,
+  "native_tests": "not-built",
+  "sources": {
+    "src/core.cpp": "10034d3fc3aa168e32bc3263d92b1439912de4956eee59308a6edcadd7fede93",
+    "include/ufsqlite.h": "49b6cc0a230f5a9ba120a7e0cb70dfd0dd434e564eeea7bc6a9ac9b37fc000f4",
+    "CMakeLists.txt": "fc9dae35ef47419f79f04883949776a94ea13ccdb4424ecae704f014e9d6c607",
+    "build/build.py": "33ed85d3f45663b5f302037091a2d55c30166c633fe38698ec1f119ddcec8ed4"
+  },
+  "artifacts": {
+    "libuiframe_sqlite.so": "ca34a1736dcc0a29e7f4621ed28e69b3512d39076c47c05b038243b74d8b9942"
+  },
+  "flags": [
+    "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+    "-DUFSQLITE_TESTS=OFF",
+    "-DUFSQLITE_SANITIZE=OFF",
+    "-DCMAKE_TOOLCHAIN_FILE=/Users/zzq/Library/Android/sdk/ndk/27.2.12479018/build/cmake/android.toolchain.cmake",
+    "-DANDROID_ABI=arm64-v8a",
+    "-DANDROID_PLATFORM=android-25",
+    "-DANDROID_STL=c++_static"
+  ],
+  "compiler_info": [
+    "C: Clang 18.0.3",
+    "CXX: Clang 18.0.3",
+    "System: Android aarch64"
+  ],
+  "cmake": "cmake version 3.22.1-g37088a8",
+  "compiler_cache": []
+}

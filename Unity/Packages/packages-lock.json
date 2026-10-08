@@ -244,9 +244,9 @@
       "url": "https://packages.unity.com"
     },
     "com.zzq.uiframe": {
-      "version": "https://github.com/ZZQzero/UIFrame.git",
+      "version": "file:com.zzq.uiframe@21c1bb14799e",
       "depth": 0,
-      "source": "git",
+      "source": "embedded",
       "dependencies": {
         "com.cysharp.unitask": "2.5.10",
         "com.tuyoogame.yooasset": "3.0.5",
@@ -256,8 +256,7 @@
         "com.unity.modules.audio": "1.0.0",
         "com.unity.modules.imageconversion": "1.0.0",
         "com.unity.modules.unitywebrequesttexture": "1.0.0"
-      },
-      "hash": "21c1bb14799e6ecc690ea60e99ce391ba52ddc52"
+      }
     },
     "com.unity.modules.accessibility": {
       "version": "1.0.0",

@@ -1,6 +1,0 @@
-{
-  "name": "GameFrame.Sqlite.Editor",
-  "references": ["GameFrame.Sqlite"],
-  "includePlatforms": ["Editor"],
-  "autoReferenced": true
-}

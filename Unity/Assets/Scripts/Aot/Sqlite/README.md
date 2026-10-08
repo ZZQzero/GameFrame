@@ -120,7 +120,7 @@ python3 Native~/tests/validate_managed.py \
   --native-directory /absolute/build/macos
 ```
 
-Unity Test Runner选择 `GameFrame.Sqlite.Tests.EditMode`。内存检查另用 `build.py --target macos --sanitize`，该产物不能安装到Unity。详见 [验证记录](Validation.md)、[ABI数据格式](Native~/include/WireFormat.md) 和 [第三方声明](ThirdPartyNotices.md)。
+Unity Test Runner 在 `GameFrame.Tests.EditMode` 中选择 Sqlite 测试。内存检查另用 `build.py --target macos --sanitize`，该产物不能安装到Unity。详见 [验证记录](Validation.md)、[ABI数据格式](Native~/include/WireFormat.md) 和 [第三方声明](ThirdPartyNotices.md)。
 
 独立工程 IL2CPP 验证（不会把测试脚本加入业务工程）：
 
@@ -143,4 +143,4 @@ py .\Native~\tests\prepare_unity_project.py --project C:\Build\SqliteSmoke --uni
 & "C:\Build\SqliteSmoke\Build\Windows\SqliteSmoke.exe" -batchmode -nographics -logFile C:\Build\windows-player.log
 ```
 
-成功需同时满足构建成功、Player退出码为0、Player日志出现上述成功标记及当前构建ID；单有EXE或退出码不足以证明验证通过。Windows Editor 中还需运行 `GameFrame.Sqlite.Tests.EditMode`，覆盖托管映射与异常传播。独立工程没有测试程序集，Editor测试在包含本包测试程序集的宿主工程执行。
+成功需同时满足构建成功、Player退出码为0、Player日志出现上述成功标记及当前构建ID；单有EXE或退出码不足以证明验证通过。Windows Editor 中还需运行 `GameFrame.Tests.EditMode` 内的 Sqlite 测试，覆盖托管映射与异常传播。独立工程没有测试程序集，Editor 测试在包含本包测试程序集的宿主工程执行。

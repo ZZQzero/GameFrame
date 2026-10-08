@@ -1,7 +1,0 @@
-{
-  "name": "GameFrame.Sqlite.Tests.EditMode",
-  "references": ["GameFrame.Sqlite"],
-  "optionalUnityReferences": ["TestAssemblies"],
-  "includePlatforms": ["Editor"],
-  "autoReferenced": false
-}

@@ -1,12 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using UnityEngine;
 using UnityEngine.InputSystem;
-
-[assembly: InternalsVisibleTo("Input.EditMode.Tests")]
-[assembly: InternalsVisibleTo("Input.PlayMode.Tests")]
 
 namespace Game.Input
 {

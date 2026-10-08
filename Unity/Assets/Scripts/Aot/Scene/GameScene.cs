@@ -1,13 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using YooAsset;
-
-[assembly: InternalsVisibleTo("Scene.EditMode.Tests")]
-[assembly: InternalsVisibleTo("Scene.PlayMode.Tests")]
 
 namespace Game.Scene
 {

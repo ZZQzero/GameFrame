@@ -4,8 +4,6 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("GameFrame.Tests.EditMode")]
-
 namespace UIFrame.Editor
 {
     [InitializeOnLoad]

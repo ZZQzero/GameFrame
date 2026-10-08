@@ -80,19 +80,13 @@ Runtime/Sqlite/
     build/               可复现构建脚本与配置
     tests/               原生契约、故障注入与 ABI 测试
   Plugins/               各目标原生构建产物及导入设置
-  Editor/
-    GameFrame.Sqlite.Editor.asmdef
-    平台链接与构建检查
-  Tests/Editor/
-    GameFrame.Sqlite.Tests.EditMode.asmdef
-    托管接口及跨语言集成测试
   Samples~/
     SaveRepository/
     InventoryRepository/
   ThirdPartyNotices.md
 ~~~
 
-GameFrame.Sqlite 使用独立 asmdef 和 noEngineReferences，不引用 GameFrame.Runtime、UniTask、YooAsset、UGUI 或照片模块。公开 Task / CancellationToken；Unity 调用方在自己的边界处理主线程切换。Editor 与测试采用独立程序集。
+GameFrame.Sqlite 使用独立 asmdef 和 noEngineReferences，不引用 GameFrame.Runtime、UniTask、YooAsset、UGUI 或照片模块。公开 Task / CancellationToken；Unity 调用方在自己的边界处理主线程切换。仓库内的构建检查并入 `GameFrame.Editor`，托管测试并入 `GameFrame.Tests.EditMode`；独立分发时由宿主工程提供这两个程序集。
 
 Native~ 中的源码通过固定工具链编译，Plugins 中的产物由构建记录追溯，不能只提交来源不明的二进制。当前保持 UIFrame 内部独立模块，不在已有 UPM 包内嵌套 package.json；独立发布从该目录生成包和依赖清单。
 

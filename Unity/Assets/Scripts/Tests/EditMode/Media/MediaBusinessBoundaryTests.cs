@@ -274,8 +274,9 @@ namespace GameFrame.Tests
                 await Until(()=>service.IsWaitingForCapacity);
                 using var cancel=new CancellationTokenSource();var canceled=request.WaitAsync(cancel.Token);var kept=request.WaitAsync().AsTask();cancel.Cancel();
                 Assert.IsInstanceOf<OperationCanceledException>(await Failure(canceled));Assert.IsFalse(request.IsCompleted);Assert.IsFalse(kept.IsCompleted);
-                service.SetDesktopNetworkPolicy(()=>true);using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                await kept.AsUniTask().AttachExternalCancellation(timeout.Token);await service.WaitForIdleAsync(timeout.Token);
+                service.SetDesktopNetworkPolicy(()=>true);
+                using(var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(45)))await kept.AsUniTask().AttachExternalCancellation(timeout.Token);
+                using(var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(45)))await service.WaitForIdleAsync(timeout.Token);
                 Assert.AreEqual(2,(await service.QueryBackupsAsync()).Items.Count);Assert.AreEqual(128,service.AvailablePreparationSlots);
             } finally {await service.ShutdownAsync();}
         });

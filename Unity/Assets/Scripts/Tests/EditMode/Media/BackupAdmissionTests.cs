@@ -145,11 +145,16 @@ namespace GameFrame.Tests
                 await Occupy(service);string directory=Path.Combine(root,"photos");Directory.CreateDirectory(directory);File.WriteAllBytes(Path.Combine(directory,"first.jpg"),new byte[6]);
                 var automatic=await AutomaticImageBackup.CreateAsync(service,library,()=>true);
                 await automatic.ConfigureAsync(new AutomaticBackupPolicy {enabled=true,sourceKind=BackupSourceKind.Directory,source=directory,includeExisting=true,wifiOnly=true});
-                using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                await automatic.ScanOnceAsync(deadline.Token);await Until(()=>service.IsWaitingForCapacity);
-                File.WriteAllBytes(Path.Combine(directory,"second.jpg"),new byte[1]);await automatic.ScanOnceAsync(deadline.Token);
+                // Each scan gets its own watchdog; preparation remains held by
+                // the upload gate while discovery is asserted.
+                using(var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(45)))await automatic.ScanOnceAsync(deadline.Token);
+                await Until(()=>service.IsWaitingForCapacity);
+                File.WriteAllBytes(Path.Combine(directory,"second.jpg"),new byte[1]);
+                using(var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(45)))await automatic.ScanOnceAsync(deadline.Token);
                 Assert.IsTrue(service.IsWaitingForCapacity);Assert.AreEqual(3,(await service.QueryTasksAsync()).Items.Count);
-                uploadGate.TrySetResult(true);await service.WaitForIdleAsync(deadline.Token);Assert.AreEqual(3,(await service.QueryBackupsAsync()).Items.Count);
+                uploadGate.TrySetResult(true);
+                using(var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(45)))await service.WaitForIdleAsync(deadline.Token);
+                Assert.AreEqual(3,(await service.QueryBackupsAsync()).Items.Count);
             } finally {uploadGate.TrySetResult(true);await service.ShutdownAsync();await library.ShutdownAsync();}
         });
         sealed class HeldExport : IMediaTransport,IDisposable

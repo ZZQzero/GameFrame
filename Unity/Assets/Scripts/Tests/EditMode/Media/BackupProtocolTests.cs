@@ -28,7 +28,7 @@ namespace GameFrame.Tests
         }
         static async UniTask<Exception> Observe(UniTask work){try{await work;return null;}catch(Exception error){return error;}}
         static async UniTask<Exception> Observe<T>(UniTask<T> work){try{await work;return null;}catch(Exception error){return error;}}
-        static async UniTask Wait(Func<bool> condition){using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(15));await UniTask.WaitUntil(condition,cancellationToken:deadline.Token);}
+        static async UniTask Wait(Func<bool> condition,TimeSpan? timeout=null){using var deadline=new CancellationTokenSource(timeout??TimeSpan.FromSeconds(15));await UniTask.WaitUntil(condition,cancellationToken:deadline.Token);}
         sealed class DisposeFailureFixture : BackupProtocolFixture
         {
             internal readonly Exception Error=new IOException("fixture transport disposal failed");
@@ -52,28 +52,35 @@ namespace GameFrame.Tests
             if(Application.platform==RuntimePlatform.WindowsEditor)
                 Assert.Ignore("This fault fixture replaces an open request file using POSIX unlink semantics.");
             var fixture=new BackupProtocolFixture {ConfirmOnPlan=true};
-            var service=await ImageBackupService.CreateAsync(Config(),NativeBackup.Call,false,fixture);string broken=null;
+            var service=await ImageBackupService.CreateAsync(Config(),NativeBackup.Call,false,fixture);
+            var broken=new System.Collections.Generic.List<string>();
             fixture.BeforeConfirm=item=>{
-                if(broken!=null)return;
-                broken=Directory.GetFiles(Path.Combine(service.RepositoryRoot,service.StoreId,"controls"),"*.json").Single();
-                File.Delete(broken);Directory.CreateDirectory(broken);File.WriteAllText(Path.Combine(broken,"blocker"),"x");
+                // Preparation may split the two photos into separate requests.
+                // Break every initial request, including a shared request only once.
+                var files=Directory.GetFiles(Path.Combine(service.RepositoryRoot,service.StoreId,"controls"),"*.json");
+                if(files.Length==0)return;
+                string path=files.Single();broken.Add(path);
+                LogAssert.Expect(LogType.Error,"Backup control file cleanup failed; its recorded item requires explicit cleanup retry.");
+                File.Delete(path);Directory.CreateDirectory(path);File.WriteAllText(Path.Combine(path,"blocker"),"x");
             };
             try {
-                LogAssert.Expect(LogType.Error,"Backup control file cleanup failed; its recorded item requires explicit cleanup retry.");
-                await service.SubmitPhotosAsync(new[]{Photo("one"),Photo("two")});await service.WaitForIdleAsync();
-                var failure=(await service.GetControlCleanupFailuresAsync()).Single();
-                Assert.IsNotEmpty(failure.Error);Assert.AreEqual(2,(await service.QueryBackupsAsync()).Items.Count);
+                var pinned=await service.SubmitPhotosAsync(new[]{Photo("one"),Photo("two")});await service.WaitForIdleAsync();
+                var failures=await service.GetControlCleanupFailuresAsync();
+                Assert.IsNotEmpty(failures);Assert.AreEqual(broken.Count,failures.Count);
+                Assert.IsTrue(failures.All(failure=>!string.IsNullOrEmpty(failure.Error)));Assert.AreEqual(2,(await service.QueryBackupsAsync()).Items.Count);
                 fixture.BeforeConfirm=null;
                 string independent=(await service.SubmitPhotosAsync(new[]{Photo("independent")}))[0];await service.WaitForIdleAsync();
                 var retention=new BackupRetentionPolicy {HistoryAge=TimeSpan.Zero,KeepHistoryCount=0,MaximumItems=1,TimeSlice=TimeSpan.FromSeconds(5)};
                 Assert.AreEqual(1,(await new BackupMaintenance(service).RunAsync(retention)).HistoryRemoved);
                 Assert.IsNull(await service.GetTaskAsync(independent));
                 Assert.AreEqual(2,(await service.QueryTasksAsync()).Items.Count);
-                Assert.IsInstanceOf<BackupRepositoryException>(await Observe(service.RetryControlCleanupAsync(failure.RequestId)));
-                Directory.Delete(broken,true);await service.RetryControlCleanupAsync(failure.RequestId);
+                foreach(string id in pinned)Assert.IsNotNull(await service.GetTaskAsync(id));
+                foreach(var failure in failures)Assert.IsInstanceOf<BackupRepositoryException>(await Observe(service.RetryControlCleanupAsync(failure.RequestId)));
+                foreach(string path in broken)Directory.Delete(path,true);
+                foreach(var failure in failures)await service.RetryControlCleanupAsync(failure.RequestId);
                 Assert.IsEmpty(await service.GetControlCleanupFailuresAsync());
                 Assert.AreEqual(3,(await service.QueryBackupsAsync()).Items.Count);
-            } finally {if(broken!=null && Directory.Exists(broken))Directory.Delete(broken,true);await service.ShutdownAsync();}
+            } finally {foreach(string path in broken)if(Directory.Exists(path))Directory.Delete(path,true);await service.ShutdownAsync();}
         });
         [UnityTest] public IEnumerator ConfirmationDeadlineCancelsRequestButWaitsForActualRelease()=>UniTask.ToCoroutine(async()=>{
             var canceled=Gate();var released=Gate();
@@ -88,7 +95,9 @@ namespace GameFrame.Tests
                 const System.Reflection.BindingFlags flags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
                 string owner=(string)typeof(ImageBackupService).GetField("owner",flags).GetValue(service);
                 string credential=(string)typeof(ImageBackupService).GetMethod("StoreDesktopCredential",flags).Invoke(service,new object[]{"secret"});
-                long past=DateTime.UtcNow.AddDays(-1).AddSeconds(4).Ticks;
+                // Leave enough room for the asynchronous seed and driver startup
+                // in EditMode, independently of the request-release gate below.
+                long past=DateTime.UtcNow.AddDays(-1).AddSeconds(30).Ticks;
                 await service.Db(BackupRepository.Command.Prepare,default,"aa",owner,past,1,"bb","file:fixture","v1","fixture.jpg","image/jpeg","",0L);
                 await service.Db(BackupRepository.Command.TryPrepare,default,"bb",owner,4L,4L,1024L,past);
                 File.WriteAllBytes(Path.Combine(service.RepositoryRoot,service.StoreId,"payloads/bb.payload"),new byte[]{1,2,3,4});
@@ -106,7 +115,7 @@ namespace GameFrame.Tests
                 // Public resume drives existing eligible work without resetting
                 // its already persisted confirmation deadline.
                 await service.ResumeAsync();await Wait(()=>fixture.Queries==1);
-                await Wait(()=>canceled.Task.IsCompleted);
+                await Wait(()=>canceled.Task.IsCompleted,TimeSpan.FromSeconds(45));
                 var active=(await service.Db(BackupRepository.Command.Controls,default,0,"")).Single;
                 Assert.IsFalse(active.Flag("released"));
                 Assert.IsInstanceOf<BackupRepositoryException>(await Observe(service.Db(BackupRepository.Command.ProtocolRelease,default,"bb",1)));

@@ -164,23 +164,67 @@ namespace GameFrame.Tests
             public override async System.Threading.Tasks.Task<int> ReadAsync(byte[] buffer,int offset,int count,CancellationToken token)
             { int n=await base.ReadAsync(buffer,offset,count,token); read+=n; return n; }
         }
+        async UniTask<ImageBackupService> CreateStalledDownloadService(ResponseHandler handler)
+        {
+            var config=Config();
+            var preparation=await ImageBackupService.CreateAsync(config,NativeBackup.Call,false,new ResponseHandler());
+            try
+            {
+                using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(45));
+                await preparation.SubmitPhotosAsync(new[]{ImageReference.FromFile(imagePath)},deadline.Token);
+                await preparation.WaitForIdleAsync(deadline.Token);
+                Assert.AreEqual("verified",(await preparation.QueryBackupsAsync()).Items.Single().BackupId);
+            }
+            finally { await preparation.ShutdownAsync(); }
+            // Reopen the durable receipt with a short deadline only for downloads.
+            // The deadline must leave time to observe reading before caller cancellation.
+            config.RequestTimeout=TimeSpan.FromSeconds(2);
+            return await ImageBackupService.CreateAsync(config,NativeBackup.Call,false,handler);
+        }
+        static async UniTask<Exception> ObserveStalledDownload(ImageBackupService service,ResponseHandler handler,string destination,bool cancelByCaller)
+        {
+            using var stream=new StalledStream();
+            using var cancellation=new CancellationTokenSource();
+            using var watchdog=new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            handler.respond=()=>new System.Net.Http.HttpResponseMessage {Content=new StreamResponse(stream)};
+            var pending=service.DownloadBackupAndVerifyAsync("verified",destination,cancellation.Token).AsTask();
+            try
+            {
+                // Observe an early download failure instead of waiting for a stream
+                // that will never be opened. Keep the watchdog below NUnit's timeout.
+                await UniTask.WaitUntil(()=>stream.reading || pending.IsCompleted,cancellationToken:watchdog.Token);
+                if(!stream.reading)
+                {
+                    await pending;
+                    Assert.Fail("Download completed without reading the stalled response stream.");
+                }
+                if(cancelByCaller)
+                {
+                    Assert.IsFalse(pending.IsCompleted,"The request deadline fired before caller cancellation could be tested.");
+                    cancellation.Cancel();
+                }
+                Exception observed=null;
+                try {await pending.AsUniTask().AttachExternalCancellation(watchdog.Token);}catch(Exception error){observed=error;}
+                Assert.IsTrue(stream.closed,"The production download must close its stream on cancellation.");
+                return observed;
+            }
+            finally
+            {
+                // Release even when a test assertion or its watchdog fails, so
+                // ShutdownAsync can finish before the test fixture deletes the store.
+                cancellation.Cancel();stream.Dispose();
+                try {await pending;}catch { }
+            }
+        }
         [UnityTest] public IEnumerator RequestDeadlineIncludesBodyAndPreservesCallerCancellation() => UniTask.ToCoroutine(async () =>
         {
-            var config=Config(); config.RequestTimeout=TimeSpan.FromMilliseconds(250);
             var handler=new ResponseHandler();
-            var service=await ImageBackupService.CreateAsync(config,NativeBackup.Call,false,handler);
+            var service=await CreateStalledDownloadService(handler);
             try {
-                await service.SubmitPhotosAsync(new[]{ImageReference.FromFile(imagePath)});await service.WaitForIdleAsync();
                 foreach(bool cancelByCaller in new[]{false,true})
                 {
-                    var stream=new StalledStream(); handler.respond=()=>new System.Net.Http.HttpResponseMessage { Content=new StreamResponse(stream) };
-                    using var cancellation=new CancellationTokenSource();
-                    var pending=service.DownloadBackupAndVerifyAsync("verified",Path.Combine(root,"deadline.png"),cancellation.Token);
-                    await UniTask.WaitUntil(()=>stream.reading || stream.closed);
-                    if(cancelByCaller)cancellation.Cancel();
-                    Exception observed=null;try{await pending;}catch(Exception error){observed=error;}
+                    Exception observed=await ObserveStalledDownload(service,handler,Path.Combine(root,"deadline.png"),cancelByCaller);
                     if(cancelByCaller)Assert.IsInstanceOf<OperationCanceledException>(observed);else Assert.IsInstanceOf<TimeoutException>(observed);
-                    Assert.IsTrue(stream.closed);
                 }
                 Assert.AreEqual(2,handler.requests);
             } finally {await service.ShutdownAsync();}
@@ -553,21 +597,18 @@ namespace GameFrame.Tests
 
         [UnityTest] public IEnumerator StalledDownloadTimesOutAndRemovesTemporaryFile() => UniTask.ToCoroutine(async () =>
         {
-            var config=Config(); config.RequestTimeout=TimeSpan.FromMilliseconds(250);
-            var handler=new ResponseHandler(); using var service=await ImageBackupService.CreateAsync(config,NativeBackup.Call,false,handler);
-            await service.SubmitPhotosAsync(new[]{ImageReference.FromFile(imagePath)});
-            var task=(await service.QueryTasksAsync()).Items.Single(); await ConfirmForDownload(service,task);
-            foreach(bool cancelByCaller in new[]{false,true})
+            var handler=new ResponseHandler();var service=await CreateStalledDownloadService(handler);
+            try
             {
-                var stream=new StalledStream(); handler.respond=()=>new System.Net.Http.HttpResponseMessage { Content=new StreamResponse(stream) };
-                string destination=Path.Combine(root,"restored.png"); using var cancellation=new CancellationTokenSource();
-                var pending=service.DownloadBackupAndVerifyAsync("verified",destination,cancellation.Token);
-                await UniTask.WaitUntil(()=>stream.reading || stream.closed);
-                if(cancelByCaller) cancellation.Cancel();
-                Exception observed=null; try { await pending; } catch(Exception error) { observed=error; }
-                if(cancelByCaller) Assert.IsInstanceOf<OperationCanceledException>(observed); else Assert.IsInstanceOf<TimeoutException>(observed);
-                Assert.IsTrue(stream.closed); Assert.IsFalse(File.Exists(destination)); Assert.IsEmpty(Directory.GetFiles(root,"*.part"));
+                foreach(bool cancelByCaller in new[]{false,true})
+                {
+                    string destination=Path.Combine(root,"restored.png");
+                    Exception observed=await ObserveStalledDownload(service,handler,destination,cancelByCaller);
+                    if(cancelByCaller)Assert.IsInstanceOf<OperationCanceledException>(observed);else Assert.IsInstanceOf<TimeoutException>(observed);
+                    Assert.IsFalse(File.Exists(destination));Assert.IsEmpty(Directory.GetFiles(root,"*.part"));
+                }
             }
+            finally {await service.ShutdownAsync();}
         });
 
         [UnityTest,Category("MediaIntegration"),Explicit("Requires integration_server.py")]

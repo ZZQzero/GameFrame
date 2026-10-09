@@ -80,7 +80,9 @@ namespace GameFrame.Tests.Sqlite
         [Test]
         public void DomainCleanupReclaimsResultWhoseWeakTargetWasCleared() => Run(async () =>
         {
+            var baseline = SqliteRuntime.GetDiagnostics();
             var owner = await OpenIsolated(Path.Combine(directory, "domain.sqlite"));
+            Assert.AreEqual(baseline.OpenDatabases + 1, SqliteRuntime.GetDiagnostics().OpenDatabases);
             var retained = await owner.database.ExecuteTransactionAsync(new SqliteBatch(
                 new SqliteQueryBudget(1, 128), new SqliteCommand("SELECT 23")));
             await owner.database.CloseAsync();
@@ -93,13 +95,15 @@ namespace GameFrame.Tests.Sqlite
             Assert.AreEqual(0, SqliteRuntime.GetDiagnostics().OutstandingOperations);
             Assert.AreEqual(0, SqliteRuntime.GetDiagnostics().ReservedBytes);
             retained.Dispose();
-            Assert.AreEqual(1, SqliteRuntime.GetDiagnostics().OpenDatabases);
+            Assert.AreEqual(baseline.OpenDatabases, SqliteRuntime.GetDiagnostics().OpenDatabases);
         });
         [Test]
         public void CompletionFaultClosesNativeStoreAndPreservesDeliveredResults() => Run(async () =>
         {
+            var baseline = SqliteRuntime.GetDiagnostics();
             string path = Path.Combine(directory, "fault.sqlite");
             var owner = await OpenIsolated(path);
+            Assert.AreEqual(baseline.OpenDatabases + 1, SqliteRuntime.GetDiagnostics().OpenDatabases);
             var completion = owner.dispatcher;
             var type = completion.GetType();
             var isolated = owner.database;
@@ -126,7 +130,7 @@ namespace GameFrame.Tests.Sqlite
             await reopened.CloseAsync();
             Assert.AreEqual(7, (await database.QueryPageAsync(new SqliteCommand("SELECT 7"),
                 new SqliteQueryBudget(1, 128), row => row.GetInt64(0)))[0]);
-            Assert.AreEqual(1, SqliteRuntime.GetDiagnostics().OpenDatabases);
+            Assert.AreEqual(baseline.OpenDatabases, SqliteRuntime.GetDiagnostics().OpenDatabases);
             Assert.AreEqual(0, SqliteRuntime.GetDiagnostics().OutstandingOperations);
             Assert.AreEqual(0, SqliteRuntime.GetDiagnostics().ReservedBytes);
         });

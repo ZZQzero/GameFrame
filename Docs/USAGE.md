@@ -1,4 +1,4 @@
-# UIFrame 各系统用法与注意点
+# GameFrame 各系统用法与注意点
 
 本文按系统说明用法，以及接入时必须遵守的边界。Audio、Input、Timer、Scene、对象池、
 Event、红点是并列模块，不要互相套门面或 Shutdown 顺序以外的依赖。
@@ -19,7 +19,43 @@ Event、红点是并列模块，不要互相套门面或 Shutdown 顺序以外�
 
 ### 用法
 
-推荐顺序：
+推荐通过 `GameRuntime` 统一启动和关闭（在 Unity 主线程调用）：
+
+```csharp
+await GameRuntime.InitAsync(new GameRuntimeConfig
+{
+    Package = package,             // 由业务提前初始化的 YooAsset 资源包
+    PersistRoot = persistRoot,     // 可省略，框架按需创建持久根节点
+    EnablePool = true,
+    EnableScene = true,
+    InputConfig = inputConfig,     // 可省略
+    AudioConfig = audioConfig,     // 可省略
+    LanguageTable = languageTable // 可省略
+}, cancellationToken);
+
+GameUI.ConfigureURPCameraStack();
+GameUI.Register<MainPanel>("MainPanel", UIGroup.Scene);
+await GameUI.Push<MainPanel>();
+
+// 先停止业务任务，等待业务持有的 Media / 数据库实例关闭。
+await GameRuntime.ShutdownAsync();
+// 最后由业务释放资源包，或调用 Application.Quit()。
+```
+
+默认启动 Timer 和 UI；对象池、场景通过开关启用，Input、Audio、多语言通过传入配置启用。
+Timer、Input、对象池共享持久根节点；Audio 和 UI 保留各自的根节点。多语言、Audio 在 UI 前初始化，
+屏幕方向和安全区继续由 UI 管理。
+
+启动失败立即抛出原异常，后续系统不再启动；不自动重试、不自动回滚，调用方不能继续打开首屏或启动业务。
+需要释放已启动的系统时显式调用 `ShutdownAsync()`，关闭完成后才允许再次初始化。
+关闭顺序为 UI → Scene → Audio → Input → Pool → Timer → 多语言 → 自建根节点。
+某个关闭步骤报错仍会执行其余清理，最后抛出第一个异常。借用的根节点不会被销毁，未选中的系统不受影响。
+
+`GameRuntime` 不加载或释放资源包，不清空全局 Event，也不接管业务持有的 Media / Sqlite 实例。
+`GameScene.ShutdownAsync()` 等待正在进行的场景操作并清空管理状态，场景卸载仍由业务安排。
+退出时必须先等待异步清理完成再调用 `Application.Quit()`，不要依赖 `OnApplicationQuit` 等待异步关闭。
+
+也可以按需单独初始化系统，同一个系统只选择一种入口：
 
 ```csharp
 GameUI.Init(package);                    // 或 Init() / Init(packageName)
@@ -40,11 +76,11 @@ GamePool.Shutdown();
 - 先 `Init`，再 `Register` / 打开面板。
 - `Push` / `Popup` / `Toast` / `SetPackage` / Camera Stack 不会代替业务自动 `Init`；漏掉或重复 `Init` 都会抛。
 - 未 Init 时 **`GameUI.Shutdown` 直接返回**（进程收尾）。`Close` / `Back` / `ClearCache` 未 Init 仍会抛。
-- 退出顺序必须是 **`GameUI.Shutdown()` → 再 `GamePool.Shutdown()`**。面板的 `OnDestroyPanel` 可能还要还池。若还用了场景 / 音频 / Timer，见 [Scene.md](Scene.md)、[Audio.md](Audio.md)、[Timer.md](Timer.md) 与 `Launch` 的 Teardown。
+- 退出顺序必须是 **`GameUI.Shutdown()` → 再 `GamePool.Shutdown()`**。面板的 `OnDestroyPanel` 可能还要还池。统一入口已处理该顺序；单独使用时还需参考 [Scene.md](Scene.md)、[Audio.md](Audio.md)、[Timer.md](Timer.md)。
 - `Shutdown` 会销毁 Root、打开中与缓存面板，并释放 YooAsset Handle；**注册表会保留**，可再次 `Init`。
 - 进行中的 `Push` / `Popup` / `Hud` 在 `Shutdown` 时以 **`OperationCanceledException`** 结束，不会返回 `null`。
 - 不要只检查“启动完成”日志：相机 Stack 配不上会抛，首屏 `Push` 失败也会抛。
-- 宿主需在退出 Play / `OnApplicationQuit` / `OnDestroy` 里主动 Teardown；框架本身不注册 Editor PlayMode 退出钩子。
+- 宿主需主动调用并等待关闭；框架本身不注册 Editor PlayMode 退出钩子，Unity 的退出 / 销毁回调不能保证异步清理完成。
 
 ---
 

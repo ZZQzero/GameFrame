@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Game.AOT;
 using HybridCLR.Editor;
+using HybridCLR.Editor.Commands;
 using UnityEditor;
 using UnityEngine;
 
@@ -11,7 +12,7 @@ namespace GameFrame.Editor
     /// <summary>将当前构建平台的 HybridCLR DLL 拷贝为 YooAsset 可采集的 TextAsset。</summary>
     public static class AssemblyTool
     {
-        const string GlobalConfigPath = "Assets/Resource/GlobalConfig.asset";
+        const string GlobalConfigPath = "Assets/Resources/GlobalConfig.asset";
         const string OutputDirectory = "Assets/Config/Code";
 
         [MenuItem("Tools/GameFrame/Loader/CopyAOTDlls", priority = 10)]
@@ -20,14 +21,14 @@ namespace GameFrame.Editor
             CopyConfiguredDlls(false, true);
         }
 
-        [MenuItem("Tools/GameFrame/Loader/CopyHotUpdateDlls", priority = 11)]
-        public static void CopyHotUpdateDlls()
+        [MenuItem("Tools/GameFrame/Loader/CompileAndCopyHotUpdateDlls", priority = 11)]
+        public static void CompileAndCopyHotUpdateDlls()
         {
             CopyConfiguredDlls(true, false);
         }
 
-        [MenuItem("Tools/GameFrame/Loader/CopyHotUpdateAndAOTDlls", priority = 12)]
-        public static void CopyHotUpdateAndAOTDlls()
+        [MenuItem("Tools/GameFrame/Loader/CompileAndCopyHotUpdateAndAOTDlls", priority = 12)]
+        public static void CompileAndCopyHotUpdateAndAOTDlls()
         {
             CopyConfiguredDlls(true, true);
         }
@@ -65,8 +66,9 @@ namespace GameFrame.Editor
                     }
                 }
 
-                AddSources(sources, assemblyNames, SettingsUtil.GetHotUpdateDllsOutputDirByTarget(target),
-                    config.HotUpdateAssemblies);
+                var sourceDirectory = SettingsUtil.GetHotUpdateDllsOutputDirByTarget(target);
+                AddSources(sources, assemblyNames, sourceDirectory, config.HotUpdateAssemblies);
+                CompileDllCommand.CompileDllActiveBuildTargetRelease();
             }
 
             if (copyAot)

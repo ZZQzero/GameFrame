@@ -23,7 +23,7 @@ GameEntry 将热更语言表转换后通过 LanguageManager.AddTable 补入，�
 
 ## 启动配置与资源服务
 
-Launch 引用 `Assets/Resource/GlobalConfig.asset`，该 ScriptableObject 随首场景进入安装包，
+Launch 引用 `Assets/Resources/GlobalConfig.asset`，该 ScriptableObject 随首场景进入安装包，
 不依赖待更新的资源包。可通过 `GameFrame/Global Config` 创建不同配置资产并绑定到 Launch。
 
 - `PlayMode` 明确选择 EditorSimulateMode、OfflinePlayMode、HostPlayMode 或 WebPlayMode。
@@ -35,7 +35,7 @@ Launch 引用 `Assets/Resource/GlobalConfig.asset`，该 ScriptableObject 随首
 `ResourceLoadManager` 由 Launch 创建，通过 Instance 供 GameEntry 使用。
 初始化包、更新清单与按标签下载分开执行，
 不会在启动时下载整个包。配置、DLL、元数据与入口 prefab 都需采集为 `boot`；
-当前 `Assets/Config` 与 `Assets/Prefab/LoadPrefab` 已带该标签。
+当前 `Assets/Config/Excel`、`Assets/Config/Code` 与 `Assets/Prefab/LoadPrefab` 已带该标签。
 
 - `LoadConfigByte` / `LoadBytes` / `LoadBytesAsync` 读取后释放 TextAsset 句柄。
 - `LoadAssetAsync<T>` 返回 AssetHandle，成功后由调用方负责 Release；不能只保存资源对象。
@@ -48,7 +48,9 @@ Launch 引用 `Assets/Resource/GlobalConfig.asset`，该 ScriptableObject 随首
 
 默认选择 `EditorSimulateMode`，使用 `DefaultPackage` 采集设置模拟资源包，
 并使用编辑器已经编译的 Hotfix 程序集。直接播放 Launch 场景即可验证启动。
-资源包按文件名（去掉最后一个扩展名）寻址，当前配置采集目录是 `Assets/Config`。
+资源包按文件名（去掉最后一个扩展名）寻址，当前配置采集目录是 `Assets/Config/Excel` 与
+`Assets/Config/Code`。Excel 按目录打包；Code 使用 `PackSeparately`，每个 DLL 单独打包，
+更新 Hotfix 时不使未变更的 AOT DLL Bundle 一起更新。新增其他配置目录时需添加对应采集器。
 
 语言服务、事件派发器和 UI 在资源初始化前启动；Timer、Pool、Scene 在 boot 下载完成后由 Launch 启动。
 Input / Audio 在 Launch 的 Inspector 绑定配置后才启用。GameEntry 在 Awake 中自动初始化热更配置和业务。
@@ -77,10 +79,16 @@ Launch 在清单加载成功后调用 GameUI.SetPackage；UIFrameRoot 只创建 
 
 ### DLL 拷贝工具
 
-`Tools/GameFrame/Loader` 提供 `CopyAOTDlls`、`CopyHotUpdateDlls` 和
-`CopyHotUpdateAndAOTDlls` 三个菜单，分别拷贝 AOT 补充元数据、热更 DLL 或两者。
-工具读取 `Assets/Resource/GlobalConfig.asset` 的 `AotMetadataAssemblies` 与
-`HotUpdateAssemblies`，程序集名不含 `.dll`；使用其他启动配置时需调整
+`Tools/GameFrame/Loader` 提供三个菜单：
+
+- `CopyAOTDlls`：拷贝已有的 AOT 补充元数据。
+- `CompileAndCopyHotUpdateDlls`：直接调用 HybridCLR 的 `CompileDllCommand.CompileDllActiveBuildTargetRelease()`，
+  以当前平台的 Release 配置编译，再拷贝 Hotfix DLL；输出目录使用 HybridCLR 设置。
+- `CompileAndCopyHotUpdateAndAOTDlls`：同样调用 HybridCLR 的当前平台 Release 编译，
+  再拷贝 Hotfix DLL 与已有的 AOT 补充元数据。
+
+工具按路径读取 `Assets/Resources/GlobalConfig.asset` 的 `AotMetadataAssemblies` 与
+`HotUpdateAssemblies`，程序集名不含 `.dll`；移动配置或使用另一份配置时需调整
 `AssemblyTool.GlobalConfigPath`，确保与 Launch 绑定的配置一致。
 
 源目录通过 HybridCLR Settings 获取，按当前 `activeBuildTarget` 选择平台：
@@ -88,12 +96,12 @@ Launch 在清单加载成功后调用 GameUI.SetPackage；UIFrameRoot 只创建 
 - 热更 DLL：默认 `HybridCLRData/HotUpdateDlls/<平台>`。
 - 裁剪后的 AOT DLL：默认 `HybridCLRData/AssembliesPostIl2CppStrip/<平台>`。
 - 两者均输出为 `Assets/Config/Code/<程序集名>.dll.bytes`，资源地址为 `<程序集名>.dll`，
-  由现有 `Assets/Config` 采集规则标记为 `boot`。
+  由 `Assets/Config/Code` 采集规则标记为 `boot`，每个 DLL 单独打包。
 
-先执行当前平台的 `HybridCLR/CompileDll/ActiveBuildTarget`；需要 AOT 元数据时，
-按 HybridCLR 流程生成当前平台的裁剪 DLL，并根据生成的 `AOTGenericReferences` 等分析结果
-填写 `AotMetadataAssemblies`，再执行拷贝，最后构建 YooAsset 资源包。
-拷贝工具只复制现有产物，不触发编译或 AOT 构建。
+日常更新 Hotfix 可直接执行 `CompileAndCopyHotUpdateDlls`，然后构建 YooAsset 资源包。
+需要同时准备 AOT 元数据时，按 HybridCLR 流程生成当前平台的热更 DLL 与裁剪后的 AOT DLL，
+结合项目实际需要填写 `AotMetadataAssemblies`，再执行 `CompileAndCopyHotUpdateAndAOTDlls`，最后构建资源包。
+`CopyAOTDlls` 不触发编译；两个编译并拷贝菜单只进行 Release Player 脚本编译，不生成裁剪后的 AOT DLL。
 
 工具在写入前检查全部源 DLL，缺少文件或热更程序集未登记到 HybridCLR 时抛出错误。
 AOT 列表为空时不拷贝 AOT DLL，并在完成日志中说明。

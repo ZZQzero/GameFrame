@@ -30,14 +30,22 @@ MonoBehaviour:
       AssetTags: 
       ActiveRuleName: EnableGroup
       Collectors:
-      - CollectPath: Assets/Config
-        CollectorGUID: 
+      - CollectPath: Assets/Config/Excel
+        CollectorGUID: 2e1b7743b1193442db4438d04ed86f22
         CollectorType: 0
         AddressRuleName: AddressByFileName
         PackRuleName: PackDirectory
         FilterRuleName: CollectAll
         AssetTags: boot
         UserData: 
+      - CollectPath: Assets/Config/Code
+        CollectorGUID: 3b0b1f6626bb441aca301f2fd07d37e6
+        CollectorType: 0
+        AddressRuleName: AddressByFileName
+        PackRuleName: PackSeparately
+        FilterRuleName: CollectAll
+        AssetTags: boot
+        UserData:
     - GroupName: LoadPrefab
       GroupDesc: 
       AssetTags: 

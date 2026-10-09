@@ -308,7 +308,8 @@ GameTimer.Shutdown();
 
 未初始化时调用调度 API 应抛出明确的 `InvalidOperationException`。重复 Init、绕过
 Shutdown 直接 Dispose 默认 Scheduler、重复 Shutdown、或关闭后继续调度也应报错。
-默认入口不提供静默兜底；Launch 已通过自身的 teardown guard 保证只执行一次关闭流程。
+默认入口不提供静默兜底；通过 `GameRuntime.ShutdownAsync` 统一关闭时由其管理所有权，
+未启动或已经关闭后再次调用为空操作。单独使用 `GameTimer` 时由宿主避免重复关闭。
 
 `ScheduleAt` 接收当前时钟域中的绝对单调 Deadline，适合大量任务已经拥有 Deadline
 的场景，可避免业务重复查询 Now 和自行处理加法溢出。Deadline 早于当前时间时属于
@@ -719,7 +720,7 @@ Dispose 或 Shutdown。销毁整个调度器必须在回调批次结束后执行
 
 默认 Scheduler 显式初始化，不通过访问属性自动创建 GameObject。
 `TimerSchedulerOptions.LargeGameDefault()` 按大游戏预留约 10 万槽，不要默认抄进小项目。
-宿主按实际规模传 options；本工程 `Launch` 使用：
+宿主按实际规模传 options；以下为容量配置示例：
 
 ```csharp
 GameTimer.Init(transform, new TimerSchedulerOptions
@@ -739,32 +740,33 @@ GameTimer.Init(transform, new TimerSchedulerOptions
 `UnityTimerRunner` 挂在宿主提供的常驻节点下，每帧只调用默认 Scheduler 的 Runtime
 Tick。Simulation Scheduler 由战斗循环主动驱动，不能由 Runner 自动推进。
 
-结合当前 `Launch` 的推荐顺序：
+使用 `GameRuntime` 时，业务先初始化资源包，再传入 `GameRuntimeConfig`。
+统一入口按以下顺序启动和关闭选中的模块：
 
 ```text
 启动：
-EventSystem.EnsureDispatcher
 GameTimer.Init
 GameInput.Init
-初始化资源包
+GamePool.Init
 GameScene.Init
+LanguageManager.Init
 GameAudio.InitAsync
 GameUI.Init
-GamePool.Init
 
 退出：
 GameUI.Shutdown
 GameScene.ShutdownAsync   // 只清静态，不走 YooAsset 卸场
 GameAudio.ShutdownAsync
-GameTimer.Shutdown
 GameInput.Shutdown
-EventSystem.ClearAll
-EventSystem.ShutdownDispatcher
 GamePool.Shutdown
+GameTimer.Shutdown
+LanguageManager.Shutdown
+销毁统一入口创建的持久根节点
 ```
 
-先关闭 UI，使面板有机会取消自己的 Timer；随后 Shutdown Timer，保证 Timer 不会在
-事件系统清理后继续投递业务事件。默认 Scheduler 的 Shutdown 应：
+退出前先停止业务任务、释放业务 Media / 数据库实例，再等待 `GameRuntime.ShutdownAsync`。
+完成后释放资源包。事件系统由业务单独管理，应在 Timer 关闭后清理事件及 Dispatcher。
+先关闭 UI 和 Pool，使它们有机会取消自己的 Timer。默认 Scheduler 的 Shutdown 应：
 
 1. 停止 Runner；
 2. 取消全部 UniTask 等待；
@@ -774,7 +776,7 @@ GamePool.Shutdown
 6. 销毁自身拥有的 Runner 对象。
 
 为兼容关闭 Domain Reload 的 Editor 配置，可以在 SubsystemRegistration 阶段只重置
-残留静态字段。该回调不得自动 Init，正式生命周期仍由 Launch 管理。
+残留静态字段。该回调不得自动 Init，正式生命周期仍由 `GameRuntime` 或宿主显式管理。
 
 ## 16. 性能策略
 
@@ -1013,7 +1015,7 @@ Development Build 复测，并区分 Scheduler 自身分配、业务委托分配
 6. 实现 SimulationClock 与确定性测试；
 7. 实现 Unity Runner、GameTimer 生命周期和主线程检查；
 8. 实现 UniTask Adapter；
-9. 接入 Launch，并补充 PlayMode 与目标设备性能验证。
+9. 接入 GameRuntime 或业务宿主，并补充 PlayMode 与目标设备性能验证。
 
 代码建议放置在：
 

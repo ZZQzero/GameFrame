@@ -47,7 +47,7 @@ namespace GameFrame.UI
         protected void CloseWithResult(TResult result, bool destroy = false)
         {
             if (_resultState != ResultState.Open || _hasResult)
-                throw new InvalidOperationException("[UIFrame] 当前没有可提交结果的打开周期。");
+                throw new InvalidOperationException("[GameFrame] 当前没有可提交结果的打开周期。");
             _hasResult = true;
             _submittedResult = result;
             try { CloseSelf(destroy); }
@@ -61,7 +61,7 @@ namespace GameFrame.UI
         internal UniTask<TResult> WaitResultAsync()
         {
             if (_resultState == ResultState.NotOpened)
-                throw new InvalidOperationException("[UIFrame] 当前没有结果等待通道。");
+                throw new InvalidOperationException("[GameFrame] 当前没有结果等待通道。");
             // 普通 Open 不消费结果；只为实际等待者创建任务，避免重复报告同步关闭错误。
             if (_result == null)
             {

@@ -5,7 +5,7 @@ namespace GameFrame.UI.Editor
 {
     static class UIContextMenus
     {
-        [MenuItem("Assets/UIFrame/生成脚本", false, 2000)]
+        [MenuItem("Assets/GameFrame/生成脚本", false, 2000)]
         static void GenerateFromProject()
         {
             var go = Selection.activeGameObject;
@@ -23,13 +23,13 @@ namespace GameFrame.UI.Editor
             Generate(go);
         }
 
-        [MenuItem("Assets/UIFrame/生成脚本", true)]
+        [MenuItem("Assets/GameFrame/生成脚本", true)]
         static bool GenerateFromProjectValidate()
         {
             return CanGenerate(GetSelectedPrefabRoot());
         }
 
-        [MenuItem("CONTEXT/RectTransform/UIFrame 生成脚本", false, 2100)]
+        [MenuItem("CONTEXT/RectTransform/GameFrame 生成脚本", false, 2100)]
         static void GenerateFromRectTransform(MenuCommand command)
         {
             var rect = command.context as RectTransform;
@@ -47,7 +47,7 @@ namespace GameFrame.UI.Editor
             UIGenerateGui.OpenGenerateWindow(go);
         }
 
-        [MenuItem("CONTEXT/RectTransform/UIFrame 生成脚本", true)]
+        [MenuItem("CONTEXT/RectTransform/GameFrame 生成脚本", true)]
         static bool GenerateFromRectTransformValidate(MenuCommand command)
         {
             var rect = command.context as RectTransform;
@@ -60,7 +60,7 @@ namespace GameFrame.UI.Editor
             var component = command.context as Component;
             if (!UIBindActions.TryAddComponent(component, out var error))
             {
-                EditorUtility.DisplayDialog("UIFrame", error, "确定");
+                EditorUtility.DisplayDialog("GameFrame", error, "确定");
             }
         }
 
@@ -76,7 +76,7 @@ namespace GameFrame.UI.Editor
             var component = command.context as Component;
             if (!UIBindActions.TryAddGameObject(component, out var error))
             {
-                EditorUtility.DisplayDialog("UIFrame", error, "确定");
+                EditorUtility.DisplayDialog("GameFrame", error, "确定");
             }
         }
 
@@ -93,7 +93,7 @@ namespace GameFrame.UI.Editor
             var panel = UICodeGenUtil.FindOuterPanel(component);
             if (!UIBindActions.TryAddComponent(component, panel, out var error))
             {
-                EditorUtility.DisplayDialog("UIFrame", error, "确定");
+                EditorUtility.DisplayDialog("GameFrame", error, "确定");
             }
         }
 

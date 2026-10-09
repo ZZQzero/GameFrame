@@ -9,7 +9,9 @@
         "YooAsset.Editor",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
-        "GameFrame.Runtime"
+        "GameFrame.Runtime",
+        "GameFrame.AOT",
+        "GameFrame.Hotfix"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

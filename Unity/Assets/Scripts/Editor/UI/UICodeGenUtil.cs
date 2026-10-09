@@ -193,11 +193,6 @@ namespace GameFrame.UI.Editor
             return t.gameObject;
         }
 
-        public static UIPanel FindNearestPanel(Component component)
-        {
-            return FindNearestBindHost(component) as UIPanel;
-        }
-
         /// <summary>向上找最近的绑定宿主，包含组件所在节点（Item 子节点绑到 Item）。</summary>
         public static MonoBehaviour FindNearestBindHost(Component component)
         {

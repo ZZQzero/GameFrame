@@ -17,7 +17,7 @@ namespace GameFrame.Editor.Excel
         {
             if (running)
             {
-                Debug.LogError("[UIFrame] Excel 生成正在进行，不能重复启动。");
+                Debug.LogError("[GameFrame] Excel 生成正在进行，不能重复启动。");
                 return;
             }
 

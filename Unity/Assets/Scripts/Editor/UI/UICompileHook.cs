@@ -75,7 +75,7 @@ namespace GameFrame.UI.Editor
         static void RequireFile(string path)
         {
             if (string.IsNullOrEmpty(path) || !File.Exists(UIScriptWriter.ToFullPath(path)))
-                throw new FileNotFoundException($"[UIFrame] 生成文件不存在: {path}", path);
+                throw new FileNotFoundException($"[GameFrame] 生成文件不存在: {path}", path);
         }
 
         static bool TryAttach(UIPrefabBindState state)
@@ -106,7 +106,7 @@ namespace GameFrame.UI.Editor
                     return false;
                 }
 
-                Debug.LogWarning($"[UIFrame] 已挂载 {type.Name} 到 Prefab Stage，请保存 Prefab 以写入资产。");
+                Debug.LogWarning($"[GameFrame] 已挂载 {type.Name} 到 Prefab Stage，请保存 Prefab 以写入资产。");
                 return true;
             }
 
@@ -137,7 +137,7 @@ namespace GameFrame.UI.Editor
                 PrefabUtility.UnloadPrefabContents(root);
             }
 
-            Debug.Log($"[UIFrame] 已挂载 {type.Name}");
+            Debug.Log($"[GameFrame] 已挂载 {type.Name}");
             return true;
         }
 
@@ -172,7 +172,7 @@ namespace GameFrame.UI.Editor
             }
 
             EditorUtility.SetDirty(go);
-            Debug.Log($"[UIFrame] 已挂载 {type.Name}");
+            Debug.Log($"[GameFrame] 已挂载 {type.Name}");
             return true;
         }
 
@@ -202,7 +202,7 @@ namespace GameFrame.UI.Editor
                 if (ok)
                 {
                     EditorSceneManager.MarkSceneDirty(stage.scene);
-                    Debug.LogWarning("[UIFrame] 已在 Prefab Stage 回填引用，请保存 Prefab 以写入资产。");
+                    Debug.LogWarning("[GameFrame] 已在 Prefab Stage 回填引用，请保存 Prefab 以写入资产。");
                 }
 
                 return ok;
@@ -305,18 +305,18 @@ namespace GameFrame.UI.Editor
                 var prop = so.FindProperty(bind.FieldName);
                 if (prop == null)
                 {
-                    throw new System.InvalidOperationException($"[UIFrame] 回填失败: Host={host.GetType().FullName}, Field={bind.FieldName}: 找不到序列化字段。");
+                    throw new System.InvalidOperationException($"[GameFrame] 回填失败: Host={host.GetType().FullName}, Field={bind.FieldName}: 找不到序列化字段。");
                 }
 
                 if (bind.HierarchyPath == null && bind.LocalFileId == 0)
                 {
-                    throw new System.InvalidOperationException($"[UIFrame] 回填失败: Host={host.GetType().FullName}, Field={bind.FieldName}: 缺少节点路径和 LocalFileId，请显式重新绑定。");
+                    throw new System.InvalidOperationException($"[GameFrame] 回填失败: Host={host.GetType().FullName}, Field={bind.FieldName}: 缺少节点路径和 LocalFileId，请显式重新绑定。");
                 }
 
                 var node = UICodeGenUtil.FindBindNode(host.transform, bind);
                 if (node == null)
                 {
-                    throw new System.InvalidOperationException($"[UIFrame] 找不到节点: {bind.HierarchyPath ?? bind.FieldName}");
+                    throw new System.InvalidOperationException($"[GameFrame] 找不到节点: {bind.HierarchyPath ?? bind.FieldName}");
                 }
 
                 if (bind.IsGameObject)
@@ -329,7 +329,7 @@ namespace GameFrame.UI.Editor
                 var found = FindComponent(node, bind.TypeName);
                 if (found == null)
                 {
-                    throw new System.InvalidOperationException($"[UIFrame] 找不到组件 {bind.TypeName}: {bind.HierarchyPath ?? bind.FieldName}");
+                    throw new System.InvalidOperationException($"[GameFrame] 找不到组件 {bind.TypeName}: {bind.HierarchyPath ?? bind.FieldName}");
                 }
 
                 props.Add(prop);
@@ -356,7 +356,7 @@ namespace GameFrame.UI.Editor
             var target = ResolveHostObject(root, state.HostPath);
             if (target == null)
             {
-                Debug.LogWarning($"[UIFrame] 找不到绑定宿主路径: {state.HostPath}");
+                Debug.LogWarning($"[GameFrame] 找不到绑定宿主路径: {state.HostPath}");
                 return null;
             }
 
@@ -372,7 +372,7 @@ namespace GameFrame.UI.Editor
                 }
             }
 
-            Debug.LogWarning($"[UIFrame] 找不到绑定宿主: {state.ClassName}");
+            Debug.LogWarning($"[GameFrame] 找不到绑定宿主: {state.ClassName}");
             return null;
         }
 

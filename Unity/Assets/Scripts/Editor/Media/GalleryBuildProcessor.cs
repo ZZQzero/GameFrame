@@ -41,11 +41,11 @@ namespace GameFrame.Media.Editor
         {
             if ((report.summary.platform == BuildTarget.Android || report.summary.platform == BuildTarget.iOS)
                 && EditorUserBuildSettings.activeBuildTarget != report.summary.platform)
-                throw new BuildFailedException("UIFrame media: switch the active build target to the mobile target before building so native configuration callbacks are compiled.");
+                throw new BuildFailedException("GameFrame media: switch the active build target to the mobile target before building so native configuration callbacks are compiled.");
             VerifyBackupArtifact(report.summary.platform);
             var settings = GalleryBuildSettings.instance;
             if (report.summary.platform == BuildTarget.iOS && settings.enableLibraryRead && string.IsNullOrWhiteSpace(settings.photoLibraryUsageDescription))
-                throw new BuildFailedException("UIFrame: photo library usage description is required.");
+                throw new BuildFailedException("GameFrame: photo library usage description is required.");
         }
         [System.Serializable] sealed class SourceHash {public string path,sha256;}
         [System.Serializable] sealed class BackupArtifact {public int abi;public string binary,sha256,sqlite_build_id;public SourceHash[] sources;}

@@ -52,11 +52,6 @@ namespace GameFrame.Input
 
         public int Count => layers.Count;
 
-        public InputLayerHandle TopHandle =>
-            layers.Count == 0
-                ? InputLayerHandle.Invalid
-                : new InputLayerHandle(layers[layers.Count - 1]);
-
         public void Clear()
         {
             layers.Clear();

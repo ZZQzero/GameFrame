@@ -9,7 +9,7 @@ namespace GameFrame.Display
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(RectTransform))]
-    [AddComponentMenu("UIFrame/Safe Area Fitter")]
+    [AddComponentMenu("GameFrame/Safe Area Fitter")]
     public sealed class SafeAreaFitter : MonoBehaviour
     {
         const DrivenTransformProperties DrivenProperties =
@@ -189,7 +189,7 @@ namespace GameFrame.Display
             }
 
             Debug.LogWarning(
-                "[UIFrame] SafeAreaFitter 的父节点不是铺满 Canvas 的 Stretch，可能套两次安全区。",
+                "[GameFrame] SafeAreaFitter 的父节点不是铺满 Canvas 的 Stretch，可能套两次安全区。",
                 this);
         }
 #endif

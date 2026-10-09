@@ -1,6 +1,8 @@
 # GameInput
 
-入口：`GameFrame.Input.GameInput`。绑定：`Assets/InputSystem_Actions.inputactions`。配置：`Assets/Input/Config/DefaultInputRuntimeConfig.asset`。生命周期由 `Launch` 的 `Init` / `Shutdown` 管理。
+入口：`GameFrame.Input.GameInput`。项目提供 `Assets/InputSystem_Actions.inputactions`，
+使用前需创建 `InputRuntimeConfig` 并设置 Action Asset 与 Map。
+统一启动时将配置传给 `GameRuntimeConfig.InputConfig`，由 `GameRuntime` 管理初始化与关闭。
 
 ```csharp
 using GameFrame.Input;
@@ -9,6 +11,8 @@ using GameFrame.Input;
 ---
 
 ## Init / Shutdown
+
+以下是单独使用输入系统的方式；通过 `GameRuntime` 启动后，不要重复调用：
 
 ```csharp
 GameInput.Init(transform, inputConfig);
@@ -19,7 +23,7 @@ if (GameInput.IsInited)
 }
 ```
 
-不走 Launch 时可用 Asset 重载（默认 Player / UI Map，保留 UI Map，灵敏度 1）：
+单独使用 `GameInput` 时也可用 Asset 重载（默认 Player / UI Map，保留 UI Map，灵敏度 1）：
 
 ```csharp
 GameInput.Init(persistRoot, inputActionAsset);

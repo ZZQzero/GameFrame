@@ -11,6 +11,8 @@
 /[Oo]bj/
 /[Bb]uild/
 /[Bb]uilds/
+# YooAsset generated resource bundles
+/Bundles/
 /[Ll]ogs/
 /[Uu]ser[Ss]ettings/
 *.log

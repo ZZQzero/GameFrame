@@ -6,7 +6,7 @@ using UnityEngine;
 namespace GameFrame.Timing
 {
     /// <summary>
-    /// 进程内默认 Timer 入口。必须由 Launch 显式 Init/Shutdown。
+    /// 进程内默认 Timer 入口。由 GameRuntime 管理，或由宿主显式 Init/Shutdown。
     /// </summary>
     public static class GameTimer
     {
@@ -254,7 +254,7 @@ namespace GameFrame.Timing
             unavailable.enabled = false;
             failure ??= new TimerStateException(
                 $"[GameTimer] UnityTimerRunner {reason}。禁止直接禁用或销毁 [GameTimer]，" +
-                "请修复调用方生命周期，并由 Launch 调用 GameTimer.Shutdown。");
+                "请修复调用方生命周期，由 GameRuntime.ShutdownAsync 或宿主调用 GameTimer.Shutdown。");
             Debug.LogException(failure);
             scheduler.FailPendingDelays(failure);
         }

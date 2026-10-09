@@ -7,7 +7,7 @@ using UnityEngine.InputSystem;
 namespace GameFrame.Input
 {
     /// <summary>
-    /// 进程内输入入口。Launch 显式 Init / Shutdown。
+    /// 进程内输入入口。由 GameRuntime 管理，或由宿主显式 Init / Shutdown。
     /// 玩法轮询走 Player，开界面 PushUi，暂停 SetGameplayEnabled。
     /// </summary>
     public static class GameInput

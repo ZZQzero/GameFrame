@@ -679,9 +679,6 @@ namespace GameFrame.Timing
             }
         }
 
-        internal bool IsOwnerThread =>
-            Thread.CurrentThread.ManagedThreadId == ownerThreadId;
-
         internal void ValidateShutdown()
         {
             EnsureUsable();

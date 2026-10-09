@@ -5,7 +5,7 @@
 - `ManagedObjectPool<T>`：纯托管对象池，支持工厂和生命周期回调。
 - `GameObjectPoolService`：按 YooAsset location 分桶的 Prefab 实例池。
 
-对象池不负责初始化 YooAsset，也不会替代 UIFrame 已有的 `UIPanel`
+对象池不负责初始化 YooAsset，也不会替代 UI 系统已有的 `UIPanel`
 缓存。建议用于 `UIItem`、循环列表项、特效、弹道等多实例对象。
 
 进程内默认入口是静态类 `GamePool`（避免和 `UILoopScrollBase.Pool` 撞名）。
@@ -22,7 +22,7 @@ GamePool.Shutdown();
 
 已 Init、或上次直接 `Dispose` 了 `Service` 还没 `Shutdown` 时再 `Init` 会抛。未 Init 时读 `GamePool.Service` 也会抛。不要绕过 `Shutdown` 去 `Dispose` 默认池。未 Init 时 `GamePool.Shutdown` 是空操作。
 
-`persistRoot` 由宿主提供常驻节点（例如 `DontDestroyOnLoad` 的 Launch）。不要把池根
+`persistRoot` 由宿主提供常驻节点（例如 `DontDestroyOnLoad` 的业务启动节点）。不要把池根
 挂在 UIFrameRoot 下：退出顺序是先 `GameUI.Shutdown`（面板 `OnDestroyPanel` 还要还池），
 再 `GamePool.Shutdown`。
 
@@ -173,9 +173,9 @@ Development 打开，Release 关闭。要在正式包里打开检查，在创建
 如果未传入 `poolRoot`，服务会创建 `[GameObjectPool]` 根节点，并在释放服务时
 销毁。跨场景使用时，应由调用方提供自己的常驻根节点并管理其生命周期。
 
-## UIFrame 边界
+## UI 系统边界
 
-UIFrame 的 `UILoader` 已经负责 `UIPanel` 的 YooAsset 句柄，`UIManager` 也会在
+UI 系统的 `UILoader` 已经负责 `UIPanel` 的 YooAsset 句柄，`UIManager` 也会在
 面板关闭时缓存实例。Toast 关掉后走 Tips 自己的按类型闲置列表，不要再将
 `UIPanel` 放入本对象池，否则会产生双重所有权。
 

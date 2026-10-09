@@ -67,7 +67,7 @@ namespace GameFrame.UI.Editor
 
             EditorGUILayout.BeginVertical();
             GUILayout.Space(4);
-            EditorGUILayout.LabelField("UIFrame", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("GameFrame", EditorStyles.boldLabel);
 
             if (state != null && state.PendingAttach)
             {
@@ -156,14 +156,14 @@ namespace GameFrame.UI.Editor
 
             if (_isItem)
             {
-                EditorGUILayout.HelpBox("将生成 UIItem + .Gen.cs，不注册到 UIFrame。绑定列表在脚本 Inspector 上。", MessageType.Info);
+                EditorGUILayout.HelpBox("将生成 UIItem + .Gen.cs，不注册到 GameUI。绑定列表在脚本 Inspector 上。", MessageType.Info);
             }
 
             if (GUILayout.Button("生成脚本"))
             {
                 if (!UIBindActions.TryGenerate(go, _className, _folder, _namespaceName, _isItem, out var error))
                 {
-                    EditorUtility.DisplayDialog("UIFrame", error, "确定");
+                    EditorUtility.DisplayDialog("GameFrame", error, "确定");
                 }
                 else
                 {
@@ -184,7 +184,7 @@ namespace GameFrame.UI.Editor
 
             if (!UIBindActions.TryNormalizeScriptFolder(picked, out var folder, out var error))
             {
-                EditorUtility.DisplayDialog("UIFrame", error, "确定");
+                EditorUtility.DisplayDialog("GameFrame", error, "确定");
                 return;
             }
 
@@ -220,7 +220,7 @@ namespace GameFrame.UI.Editor
                 {
                     if (!UIBindActions.TryAddComponent(component, host, out var error))
                     {
-                        EditorUtility.DisplayDialog("UIFrame", error, "确定");
+                        EditorUtility.DisplayDialog("GameFrame", error, "确定");
                     }
                 }
 
@@ -228,7 +228,7 @@ namespace GameFrame.UI.Editor
                 {
                     if (!UIBindActions.TryAddGameObject(component, host, out var error))
                     {
-                        EditorUtility.DisplayDialog("UIFrame", error, "确定");
+                        EditorUtility.DisplayDialog("GameFrame", error, "确定");
                     }
                 }
 

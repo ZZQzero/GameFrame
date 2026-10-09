@@ -65,8 +65,6 @@ namespace GameFrame.UI
 
         public TipsSettings Settings { get; private set; } = TipsSettings.Default;
 
-        public int InFlight => _inFlight;
-
         public int Queued => _queue.Count;
 
         public void Configure(

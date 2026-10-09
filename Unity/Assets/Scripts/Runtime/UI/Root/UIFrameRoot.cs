@@ -53,7 +53,7 @@ namespace GameFrame.UI
             if (existing.Length != 0)
             {
                 throw new InvalidOperationException(
-                    $"[UIFrame] 初始化失败：场景已有 EventSystem ({existing[0].name})。UIFrame 管理自己的 EventSystem，请显式解决所有权冲突。");
+                    $"[GameFrame] 初始化失败：场景已有 EventSystem ({existing[0].name})。GameUI 管理自己的 EventSystem，请显式解决所有权冲突。");
             }
 
             var go = new GameObject("UIFrameRoot");
@@ -94,13 +94,13 @@ namespace GameFrame.UI
             if (baseCamera == null)
             {
                 throw new InvalidOperationException(
-                    "[UIFrame] 配置 URP Camera Stack 失败：未找到 Base Camera。");
+                    "[GameFrame] 配置 URP Camera Stack 失败：未找到 Base Camera。");
             }
 
             if (uiCamera == baseCamera)
             {
                 throw new InvalidOperationException(
-                    "[UIFrame] 配置 URP Camera Stack 失败：Base Camera 与 UI Camera 不能相同。");
+                    "[GameFrame] 配置 URP Camera Stack 失败：Base Camera 与 UI Camera 不能相同。");
             }
 
             ResolveUiLayer(ref uiLayer);
@@ -109,7 +109,7 @@ namespace GameFrame.UI
             if (cameraStack == null)
             {
                 throw new InvalidOperationException(
-                    "[UIFrame] 配置 URP Camera Stack 失败：Base Camera 的 Renderer 不支持 Camera Stack。");
+                    "[GameFrame] 配置 URP Camera Stack 失败：Base Camera 的 Renderer 不支持 Camera Stack。");
             }
 
             DetachFromBaseCamera();
@@ -347,14 +347,14 @@ namespace GameFrame.UI
             }
 
             throw new InvalidOperationException(
-                $"[UIFrame] 配置 URP Camera Stack 失败：无效 UI Layer {uiLayer}。");
+                $"[GameFrame] 配置 URP Camera Stack 失败：无效 UI Layer {uiLayer}。");
         }
 
         static int ResolveDefaultUiLayer()
         {
             var layer = LayerMask.NameToLayer("UI");
             if (layer < 0)
-                throw new InvalidOperationException("[UIFrame] 缺少 UI Layer 配置。");
+                throw new InvalidOperationException("[GameFrame] 缺少 UI Layer 配置。");
             return layer;
         }
 

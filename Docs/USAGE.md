@@ -4,6 +4,7 @@
 Event、红点是并列模块，不要互相套门面或 Shutdown 顺序以外的依赖。
 
 - UI / Tips / 循环列表：本文
+- Launch / 资源更新与配置初始化：[Launch.md](Launch.md)
 - 场景：[Scene.md](Scene.md)
 - Timer：[Timer.md](Timer.md)
 - 音频：[Audio.md](Audio.md)

@@ -59,19 +59,7 @@ namespace GameFrame.UI
         /// <summary>创建 Root 并按包名绑定 YooAsset 包。</summary>
         public static void Init(string packageName)
         {
-            if (string.IsNullOrWhiteSpace(packageName))
-            {
-                throw new ArgumentException("[UIFrame] packageName 为空。", nameof(packageName));
-            }
-
-            var package = YooAssets.GetPackage(packageName);
-            if (package == null)
-            {
-                throw new InvalidOperationException(
-                    $"[UIFrame] ResourcePackage 不存在: {packageName}");
-            }
-
-            CreateManager(package);
+            CreateManager(UILoader.ResolvePackage(packageName));
         }
 
         /// <summary>资源系统就绪后绑定 YooAsset 包。可在 <see cref="Init()"/> 之后再调用。</summary>
@@ -120,7 +108,7 @@ namespace GameFrame.UI
         }
 
         /// <summary>
-        /// 完整关闭 UIFrame：取消加载、销毁已打开与缓存面板、释放 Handle，并销毁 Root。
+        /// 完整关闭 UI 系统：取消加载、销毁已打开与缓存面板、释放 Handle，并销毁 Root。
         /// 注册目录会保留，之后可再次调用 Init。未 Init 时直接返回。
         /// </summary>
         public static void Shutdown()
@@ -363,7 +351,7 @@ namespace GameFrame.UI
             if (packages.Count > 1)
             {
                 throw new InvalidOperationException(
-                    "[UIFrame] 存在多个 ResourcePackage，请调用 GameUI.Init(package) 指定。");
+                    "[GameFrame] 存在多个 ResourcePackage，请调用 GameUI.Init(package) 指定。");
             }
 
             return packages[0];
@@ -373,7 +361,7 @@ namespace GameFrame.UI
         {
             if (_manager != null)
             {
-                throw new InvalidOperationException("[UIFrame] 已经 Init，请勿重复初始化。");
+                throw new InvalidOperationException("[GameFrame] 已经 Init，请勿重复初始化。");
             }
 
             var manager = new UIManager();
@@ -394,7 +382,7 @@ namespace GameFrame.UI
                 if (!ReferenceEquals(_manager, manager) || !manager.IsInited)
                 {
                     throw new OperationCanceledException(
-                        "[UIFrame] RootReady 回调期间 UI 已关闭或替换，本次 Init 已取消。");
+                        "[GameFrame] RootReady 回调期间 UI 已关闭或替换，本次 Init 已取消。");
                 }
             }
             catch (Exception exception)
@@ -412,7 +400,7 @@ namespace GameFrame.UI
         {
             if (!IsInited)
             {
-                throw new InvalidOperationException("[UIFrame] 请先调用 GameUI.Init()。");
+                throw new InvalidOperationException("[GameFrame] 请先调用 GameUI.Init()。");
             }
         }
 

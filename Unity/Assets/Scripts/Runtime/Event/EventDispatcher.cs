@@ -4,7 +4,7 @@ using UnityEngine;
 namespace GameFrame.Event
 {
     /// <summary>
-    /// 主线程 Drain Post 队列。由 Launch 调用 EnsureDispatcher 创建。
+    /// 主线程 Drain Post 队列。由宿主调用 EnsureDispatcher 创建。
     /// </summary>
     [AddComponentMenu("")]
     sealed class EventDispatcher : MonoBehaviour

@@ -54,11 +54,11 @@ namespace GameFrame.UI
             UIFrameScope scope)
         {
             if (string.IsNullOrWhiteSpace(location))
-                throw new ArgumentException("[UIFrame] 图片资源地址为空。", nameof(location));
+                throw new ArgumentException("[GameFrame] 图片资源地址为空。", nameof(location));
 
             Image target = Target;
             if (target == null)
-                throw new InvalidOperationException("[UIFrame] UIImageLoader 缺少 Image 目标。");
+                throw new InvalidOperationException("[GameFrame] UIImageLoader 缺少 Image 目标。");
 
             CancelRequest();
             ReleaseCurrent();
@@ -79,7 +79,7 @@ namespace GameFrame.UI
                 Sprite sprite = handle.GetAssetObject<Sprite>();
                 if (sprite == null)
                     throw new InvalidOperationException(
-                        $"[UIFrame] 图片资源不是有效 Sprite: {location}");
+                        $"[GameFrame] 图片资源不是有效 Sprite: {location}");
                 if (!IsCurrent(version, requestCts))
                     return;
 

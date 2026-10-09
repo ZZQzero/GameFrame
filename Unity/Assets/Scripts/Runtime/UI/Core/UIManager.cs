@@ -48,7 +48,7 @@ namespace GameFrame.UI
             _root = UIFrameRoot.Create();
             _root.MaskClicked += OnMaskClicked;
             _inited = true;
-            Debug.Log("[UIFrame] Init 完成");
+            Debug.Log("[GameFrame] Init 完成");
         }
 
         public void Shutdown(bool destroyRoot = true)
@@ -143,30 +143,18 @@ namespace GameFrame.UI
             failure.Run(ScreenOrientationManager.Shutdown);
             failure.Run(ScreenSafeArea.Shutdown);
             failure.Throw();
-            Debug.Log("[UIFrame] Shutdown 完成");
+            Debug.Log("[GameFrame] Shutdown 完成");
         }
 
         public void SetPackage(ResourcePackage package)
         {
             _loader.SetPackage(package);
-            Debug.Log($"[UIFrame] 已绑定 ResourcePackage: {package.PackageName}");
+            Debug.Log($"[GameFrame] 已绑定 ResourcePackage: {package.PackageName}");
         }
 
         public void SetPackage(string packageName)
         {
-            if (string.IsNullOrWhiteSpace(packageName))
-            {
-                throw new ArgumentException("[UIFrame] packageName 为空。", nameof(packageName));
-            }
-
-            var package = YooAssets.GetPackage(packageName);
-            if (package == null)
-            {
-                throw new InvalidOperationException(
-                    $"[UIFrame] ResourcePackage 不存在: {packageName}");
-            }
-
-            SetPackage(package);
+            SetPackage(UILoader.ResolvePackage(packageName));
         }
 
         internal UniTask<AssetHandle> LoadAsset<T>(
@@ -175,7 +163,7 @@ namespace GameFrame.UI
             where T : UnityEngine.Object
         {
             if (!_inited || _loader == null)
-                throw new InvalidOperationException("[UIFrame] UI 尚未 Init。");
+                throw new InvalidOperationException("[GameFrame] UI 尚未 Init。");
             return _loader.LoadAsset<T>(location, cancellationToken);
         }
 
@@ -261,7 +249,7 @@ namespace GameFrame.UI
             {
                 DestroyPanelAndReport(panel);
                 throw new InvalidOperationException(
-                    $"[UIFrame] 缓存面板 {type.Name} 的 Location 与注册不一致。");
+                    $"[GameFrame] 缓存面板 {type.Name} 的 Location 与注册不一致。");
             }
 
             ShowReusedPanel(bind, mode, args, panel);
@@ -554,7 +542,7 @@ namespace GameFrame.UI
             if (!_inited)
             {
                 throw new OperationCanceledException(
-                    "[UIFrame] UI 已 Shutdown，面板打开已取消。");
+                    "[GameFrame] UI 已 Shutdown，面板打开已取消。");
             }
         }
 
@@ -647,7 +635,7 @@ namespace GameFrame.UI
             if (!isOpened && !IsVisibleToast(panel) && !_failedPanels.ContainsKey(panel))
             {
                 throw new InvalidOperationException(
-                    $"[UIFrame] {type.Name} 当前未打开，不能重复关闭。");
+                    $"[GameFrame] {type.Name} 当前未打开，不能重复关闭。");
             }
 
             ClosePanel(panel, destroy);
@@ -798,14 +786,14 @@ namespace GameFrame.UI
             foreach (var panel in _closingPanels)
             {
                 if (panel.PanelType == type)
-                    throw new InvalidOperationException($"[UIFrame] {type.FullName} 正在关闭，不能重入打开／关闭。");
+                    throw new InvalidOperationException($"[GameFrame] {type.FullName} 正在关闭，不能重入打开／关闭。");
             }
         }
 
         void RequireCanOpenType(Type type)
         {
             if (_openingTypes.Contains(type))
-                throw new InvalidOperationException($"[UIFrame] {type.FullName} 正在打开，不能重入打开。");
+                throw new InvalidOperationException($"[GameFrame] {type.FullName} 正在打开，不能重入打开。");
             RequireHealthyType(type);
         }
 
@@ -825,13 +813,13 @@ namespace GameFrame.UI
                 ? "销毁已失败，不能重试或继续导航；请排查异常并 Shutdown。"
                 : "关闭已失败；请排查异常后显式 Destroy，不能重试 OnClose。";
             return new InvalidOperationException(
-                $"[UIFrame] {panel.PanelType.FullName} {action}Location={panel.Location}", failure);
+                $"[GameFrame] {panel.PanelType.FullName} {action}Location={panel.Location}", failure);
         }
 
         bool RequireCanClose(UIPanel panel, bool destroy)
         {
             if (_closingPanels.Contains(panel))
-                throw new InvalidOperationException($"[UIFrame] {panel.PanelType.FullName} 正在关闭，不能重入关闭／销毁。");
+                throw new InvalidOperationException($"[GameFrame] {panel.PanelType.FullName} 正在关闭，不能重入关闭／销毁。");
             if (!_failedPanels.TryGetValue(panel, out var failure))
                 return false;
             if (!destroy || panel.DestroyDispatched)
@@ -885,7 +873,7 @@ namespace GameFrame.UI
                 return false;
             var failed = RequireCanClose(panel, destroy);
             if (panel == null)
-                throw new InvalidOperationException($"[UIFrame] {panel.PanelType.FullName} 已被外部销毁，不能继续关闭。");
+                throw new InvalidOperationException($"[GameFrame] {panel.PanelType.FullName} 已被外部销毁，不能继续关闭。");
 
             var type = panel.PanelType;
             var isToast = panel.OpenMode == UIOpenMode.Toast;
@@ -1078,7 +1066,7 @@ namespace GameFrame.UI
             {
                 DestroyPanelAndReport(panel);
                 throw new InvalidOperationException(
-                    $"[UIFrame] 闲置 Toast {type.Name} 的 Location 与注册不一致。");
+                    $"[GameFrame] 闲置 Toast {type.Name} 的 Location 与注册不一致。");
             }
 
             ApplyBind(panel, bind);
@@ -1344,7 +1332,7 @@ namespace GameFrame.UI
                     failure = exception;
                 else
                     Debug.LogException(new InvalidOperationException(
-                        $"[UIFrame] 销毁对象时的次级错误: Panel={panel.PanelType.FullName}, Location={panel.Location}", exception));
+                        $"[GameFrame] 销毁对象时的次级错误: Panel={panel.PanelType.FullName}, Location={panel.Location}", exception));
             }
             try
             {
@@ -1356,7 +1344,7 @@ namespace GameFrame.UI
                     failure = exception;
                 else
                     Debug.LogException(new InvalidOperationException(
-                        $"[UIFrame] 释放句柄时的次级错误: Panel={panel.PanelType.FullName}, Location={panel.Location}", exception));
+                        $"[GameFrame] 释放句柄时的次级错误: Panel={panel.PanelType.FullName}, Location={panel.Location}", exception));
             }
             if (failure != null)
                 ExceptionDispatchInfo.Capture(failure).Throw();

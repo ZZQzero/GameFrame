@@ -43,7 +43,7 @@ namespace GameFrame.UI
             if (string.IsNullOrWhiteSpace(location))
             {
                 throw new ArgumentException(
-                    $"[UIFrame] Register 失败：{panelType.Name} 的 Location 为空。",
+                    $"[GameFrame] Register 失败：{panelType.Name} 的 Location 为空。",
                     nameof(location));
             }
 
@@ -61,7 +61,7 @@ namespace GameFrame.UI
                 }
 
                 throw new InvalidOperationException(
-                    $"[UIFrame] 重复注册 {panelType.Name}：{existing.Location} -> {entry.Location}");
+                    $"[GameFrame] 重复注册 {panelType.Name}：{existing.Location} -> {entry.Location}");
             }
 
             Map[panelType] = entry;
@@ -72,7 +72,7 @@ namespace GameFrame.UI
             if (!Map.TryGetValue(panelType, out var entry))
             {
                 throw new InvalidOperationException(
-                    $"[UIFrame] 未注册 {panelType.Name}，请先 GameUI.Register<{panelType.Name}>(location)。");
+                    $"[GameFrame] 未注册 {panelType.Name}，请先 GameUI.Register<{panelType.Name}>(location)。");
             }
 
             return new UIPanelBind(entry.Location, InferLayer(mode), entry.Group, entry.Cache);

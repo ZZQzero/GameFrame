@@ -35,7 +35,7 @@ namespace GameFrame.UI
         /// <summary>当前打开周期的作用域，关闭或重新打开时释放。</summary>
         protected UIFrameScope OpenScope =>
             _openScope ?? throw new InvalidOperationException(
-                $"[UIFrame] {PanelType.FullName} 当前没有打开作用域。");
+                $"[GameFrame] {PanelType.FullName} 当前没有打开作用域。");
 
         /// <summary>面板实例的作用域，销毁时释放。</summary>
         protected UIFrameScope LifetimeScope =>
@@ -137,7 +137,7 @@ namespace GameFrame.UI
             catch (Exception exception) when (failure != null)
             {
                 Debug.LogException(new InvalidOperationException(
-                    $"[UIFrame] {PanelType.FullName} LifetimeScope 收尾失败；调用方仍收到首次异常。Location={Location}", exception));
+                    $"[GameFrame] {PanelType.FullName} LifetimeScope 收尾失败；调用方仍收到首次异常。Location={Location}", exception));
             }
             catch (Exception exception)
             {
@@ -185,7 +185,7 @@ namespace GameFrame.UI
             catch (Exception exception) when (failure != null)
             {
                 Debug.LogException(new InvalidOperationException(
-                    $"[UIFrame] {PanelType.FullName} 收尾失败；调用方仍收到首次异常。Location={Location}", exception));
+                    $"[GameFrame] {PanelType.FullName} 收尾失败；调用方仍收到首次异常。Location={Location}", exception));
             }
 
             if (failure != null)
@@ -216,7 +216,7 @@ namespace GameFrame.UI
             if (!DestroyDispatched)
             {
                 Debug.LogError(
-                    $"[UIFrame] 面板 {GetType().Name} 被外部 Destroy，未经过 GameUI.Close/Shutdown。");
+                    $"[GameFrame] 面板 {GetType().Name} 被外部 Destroy，未经过 GameUI.Close/Shutdown。");
             }
 
             var handle = AssetHandle;

@@ -9,15 +9,18 @@
 
 ## 1. 启动与关闭
 
+统一启动时，在资源包就绪后将 `GameRuntimeConfig.EnableScene` 设为 `true` 并传入
+`Package`，退出调用 `GameRuntime.ShutdownAsync()`。单独使用场景系统时：
+
 ```csharp
 GameScene.Init(package);
 
-await GameScene.SwitchAsync("Home");
+await GameScene.LoadAsync("Home", LoadSceneMode.Single);
 
 await GameScene.ShutdownAsync();
 ```
 
-`Launch` 在资源包装好之后 `Init`。退出时先看 `IsInited` 再 `ShutdownAsync`：未 Init 会抛，
+单独管理生命周期时，在资源包就绪后 `Init`。退出时先看 `IsInited` 再 `ShutdownAsync`：未 Init 会抛，
 和 `GameUI.Shutdown`（未 Init 直接返回）不同。
 
 ### 注意

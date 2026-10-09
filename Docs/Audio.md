@@ -3,9 +3,10 @@
 进程内音频入口是 `GameAudio`。业务只通过它播放、停、调音量；不要直接创建
 `AudioSource`，也不要销毁 `[GameAudio]` 节点。
 
-YooAsset location 按文件名寻址。项目配置在
-`Assets/Config/AudioConfig/AudioRuntimeConfig.asset`，Mixer 在同目录。业务 ID 写在
-`GameAudioIds`。
+YooAsset location 使用业务资源包配置的地址。使用前需创建 `AudioRuntimeConfig` 和
+AudioMixer，配置总线、暴露参数及音频条目。业务 ID 由业务定义；
+`Assets/Scripts/Hotfix/GameAudioIds.cs` 提供飞行棋业务 ID，属于 `GameFrame.Hotfix` 程序集；
+使用这些 ID 前仍需配置对应音频资源。
 
 ---
 
@@ -13,12 +14,20 @@ YooAsset location 按文件名寻址。项目配置在
 
 ### 用法
 
-`Launch` 里的顺序：
+推荐通过 `GameRuntime` 统一启动。业务先准备好已初始化的资源包与音频配置：
 
 ```csharp
-GameTimer.Init(
-    transform,
-    new TimerSchedulerOptions
+using GameFrame;
+using GameFrame.Timing;
+
+await GameRuntime.InitAsync(new GameRuntimeConfig
+{
+    Package = package,
+    PersistRoot = persistRoot,
+    EnableScene = true,
+    EnablePool = true,
+    AudioConfig = audioConfig,
+    TimerOptions = new TimerSchedulerOptions
     {
         InitialCapacity = 1024,
         MaxCapacity = 4096,
@@ -29,36 +38,22 @@ GameTimer.Init(
         FastForwardThresholdTicks = 4096,
         RuntimeBudget = TimerBudget.RuntimeDefault,
         SimulationBudget = TimerBudget.SimulationDefault
-    });
-var package = await ResourcesLoadManager.Instance.CreatePackageAsync();
-GameScene.Init(package);
-
-await GameAudio.InitAsync(
-    package,
-    audioConfig,          // Launch 上的 AudioRuntimeConfig
-    startupCancellation.Token);
-
-GameUI.Init(package);
-GamePool.Init(package, transform);
+    }
+}, startupCancellation.Token);
 ```
 
 退出：
 
 ```csharp
-GameUI.Shutdown();
-if (GameScene.IsInited)
-{
-    await GameScene.ShutdownAsync(); // 只清静态，不卸场
-}
-if (GameAudio.IsInited)
-{
-    await GameAudio.ShutdownAsync();
-}
-GameTimer.Shutdown();
-GamePool.Shutdown();
+// 先停止业务任务，释放业务持有的 Media / 数据库实例。
+await GameRuntime.ShutdownAsync();
+// 完成后再由业务释放资源包或退出程序。
 ```
 
-`InitAsync` 会校验 Mixer、目录和 YooAsset location，并预加载 `Resident` 条目。
+只使用音频系统时，也可以直接调用 `GameAudio.InitAsync(package, audioConfig, token)`
+和 `GameAudio.ShutdownAsync()`。同一系统应使用同一个生命周期入口。
+
+`GameAudio.InitAsync` 会校验 Mixer、目录和 YooAsset location，并预加载 `Resident` 条目。
 音频节点自己 `DontDestroyOnLoad`，不要把它当成父节点去挂。
 
 ### 注意
@@ -206,8 +201,9 @@ float bgm = GameAudio.GetBusVolume(AudioBus.Bgm);
 
 ## 6. 配表
 
-在 `AudioRuntimeConfig` 里加条目，并在 `GameAudioIds` 增加同名常量。`id` 必须唯一；
-`location` 必须是 YooAsset 里已有的地址（当前为文件名，如 `DiceSound`）。
+在 `AudioRuntimeConfig` 里加条目，并在业务代码中定义对应的 `AudioId` 常量，
+可参考 Hotfix 中的 `GameAudioIds`。`id` 必须唯一；
+`location` 必须是 YooAsset 里已有的地址（如 `DiceSound`）。
 
 | 字段 | 含义 |
 |------|------|
@@ -238,7 +234,7 @@ float bgm = GameAudio.GetBusVolume(AudioBus.Bgm);
 
 同一 `location` 不能配两种 `loadMode`。
 
-当前项目的 Ludo 目录（场景级加载，场景卸载后释放）：
+飞行棋配置示例（需自行准备对应资源；场景级加载，场景卸载后释放）：
 
 | ID | 资源 | 总线 | 加载 |
 |----|------|------|------|

@@ -15,7 +15,7 @@ namespace GameFrame.UI
 
             var actual = args == null ? "null" : args.GetType().Name;
             throw new System.InvalidOperationException(
-                $"[UIFrame] 打开参数类型不匹配: {PanelType.Name}, 期望 {typeof(TArgs).Name}, 实际 {actual}");
+                $"[GameFrame] 打开参数类型不匹配: {PanelType.Name}, 期望 {typeof(TArgs).Name}, 实际 {actual}");
         }
 
         internal sealed override void DispatchOpenCore()

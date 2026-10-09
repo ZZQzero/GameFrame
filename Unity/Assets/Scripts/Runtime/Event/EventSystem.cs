@@ -13,7 +13,7 @@ namespace GameFrame.Event
     }
 
     /// <summary>
-    /// 宿主事件总线。与 UIFrame 无关。热路径 Publish 零分配；跨线程用 Post。
+    /// 宿主事件总线，独立于 UI 系统。热路径 Publish 零分配；跨线程用 Post。
     /// 同类型派发中禁止再次 Publish / Clear；需要再发用 Post。Dispatcher 由启动代码 EnsureDispatcher。
     /// </summary>
     public static class EventSystem

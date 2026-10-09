@@ -22,7 +22,7 @@ namespace GameFrame.UI.Editor
             }
 
             EditorGUILayout.Space(4);
-            EditorGUILayout.LabelField("UIFrame 绑定", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("GameFrame 绑定", EditorStyles.boldLabel);
 
             if (state != null && state.PendingAssign)
             {
@@ -42,7 +42,7 @@ namespace GameFrame.UI.Editor
                 {
                     if (!UIBindActions.TryRefreshBinds(host, out var error))
                     {
-                        EditorUtility.DisplayDialog("UIFrame", error, "确定");
+                        EditorUtility.DisplayDialog("GameFrame", error, "确定");
                     }
                 }
 
@@ -50,7 +50,7 @@ namespace GameFrame.UI.Editor
                 {
                     if (!UIBindActions.TryWriteGen(host, out var error))
                     {
-                        EditorUtility.DisplayDialog("UIFrame", error, "确定");
+                        EditorUtility.DisplayDialog("GameFrame", error, "确定");
                     }
                 }
             }

@@ -13,6 +13,23 @@ namespace GameFrame.UI
     {
         ResourcePackage _package;
 
+        internal static ResourcePackage ResolvePackage(string packageName)
+        {
+            if (string.IsNullOrWhiteSpace(packageName))
+            {
+                throw new ArgumentException("[GameFrame] packageName 为空。", nameof(packageName));
+            }
+
+            var package = YooAssets.GetPackage(packageName);
+            if (package == null)
+            {
+                throw new InvalidOperationException(
+                    $"[GameFrame] ResourcePackage 不存在: {packageName}");
+            }
+
+            return package;
+        }
+
         public void SetPackage(ResourcePackage package)
         {
             _package = package;
@@ -27,7 +44,7 @@ namespace GameFrame.UI
             if (_package == null)
             {
                 throw new InvalidOperationException(
-                    $"[UIFrame] ResourcePackage 为空，无法加载 {location}。请先 GameUI.SetPackage。");
+                    $"[GameFrame] ResourcePackage 为空，无法加载 {location}。请先 GameUI.SetPackage。");
             }
 
             AssetHandle handle = null;
@@ -39,7 +56,7 @@ namespace GameFrame.UI
                 if (handle.Status != EOperationStatus.Succeeded)
                 {
                     throw new InvalidOperationException(
-                        $"[UIFrame] 加载失败: Package={_package.PackageName}, Panel={panelType.FullName}, Location={location}, Status={handle.Status}, Error={handle.Error}");
+                        $"[GameFrame] 加载失败: Package={_package.PackageName}, Panel={panelType.FullName}, Location={location}, Status={handle.Status}, Error={handle.Error}");
                 }
 
                 if (req is { Cancelled: true })
@@ -53,7 +70,7 @@ namespace GameFrame.UI
                 if (instance == null)
                 {
                     throw new InvalidOperationException(
-                        $"[UIFrame] InstantiateAsync 失败: {location}");
+                        $"[GameFrame] InstantiateAsync 失败: {location}");
                 }
 
                 if (req is { Cancelled: true })
@@ -67,7 +84,7 @@ namespace GameFrame.UI
                 if (panel == null || panel.GetType() != panelType)
                 {
                     throw new InvalidOperationException(
-                        $"[UIFrame] Prefab 根节点缺少精确面板类型 {panelType.FullName}: {location}");
+                        $"[GameFrame] Prefab 根节点缺少精确面板类型 {panelType.FullName}: {location}");
                 }
 
                 panel.AssetHandle = handle;
@@ -105,11 +122,11 @@ namespace GameFrame.UI
             if (_package == null)
             {
                 throw new InvalidOperationException(
-                    $"[UIFrame] ResourcePackage 为空，无法加载 {location}。请先 GameUI.SetPackage。");
+                    $"[GameFrame] ResourcePackage 为空，无法加载 {location}。请先 GameUI.SetPackage。");
             }
 
             if (string.IsNullOrWhiteSpace(location))
-                throw new ArgumentException("[UIFrame] 资源地址为空。", nameof(location));
+                throw new ArgumentException("[GameFrame] 资源地址为空。", nameof(location));
 
             cancellationToken.ThrowIfCancellationRequested();
             AssetHandle handle = _package.LoadAssetAsync<T>(location);
@@ -120,7 +137,7 @@ namespace GameFrame.UI
                 if (handle.Status != EOperationStatus.Succeeded)
                 {
                     throw new InvalidOperationException(
-                        $"[UIFrame] 图片加载失败: Package={_package.PackageName}, Location={location}, Status={handle.Status}, Error={handle.Error}");
+                        $"[GameFrame] 图片加载失败: Package={_package.PackageName}, Location={location}, Status={handle.Status}, Error={handle.Error}");
                 }
 
                 return handle;

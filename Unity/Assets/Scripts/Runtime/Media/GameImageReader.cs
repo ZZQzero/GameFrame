@@ -191,7 +191,7 @@ namespace GameFrame.Media
             float scale = Math.Min(1f, edge / (float)Math.Max(w, h));
             int width = Math.Max(1, (int)(w * scale)), height = Math.Max(1, (int)(h * scale));
             if (transformShader == null) transformShader = Resources.Load<Shader>("UIFrameImageTransform");
-            if (transformShader == null || !transformShader.isSupported) throw new PlatformNotSupportedException("UIFrame image transform shader unavailable.");
+            if (transformShader == null || !transformShader.isSupported) throw new PlatformNotSupportedException("GameFrame image transform shader unavailable.");
             var previous = RenderTexture.active;
             var target = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
             Material material = null; Texture2D result = null;

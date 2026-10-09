@@ -111,7 +111,7 @@ namespace GameFrame.UI.Editor
             AssetDatabase.ImportAsset(genPath, ImportAssetOptions.ForceUpdate);
             EditorApplication.delayCall += UICompileHook.ProcessJobs;
             var kind = isItem ? "Item/Cell" : "Panel";
-            Debug.Log($"[UIFrame] 已生成 {kind} {className}，编译完成后会自动挂到 Prefab。");
+            Debug.Log($"[GameFrame] 已生成 {kind} {className}，编译完成后会自动挂到 Prefab。");
             return true;
         }
 
@@ -212,7 +212,7 @@ namespace GameFrame.UI.Editor
             });
             state.BindsClearedByUser = false;
             UIBindStore.instance.Persist();
-            Debug.Log($"[UIFrame] 已记录绑定 {host.GetType().Name}.{field}（待写入脚本）");
+            Debug.Log($"[GameFrame] 已记录绑定 {host.GetType().Name}.{field}（待写入脚本）");
             return true;
         }
 
@@ -281,7 +281,7 @@ namespace GameFrame.UI.Editor
             UIBindStore.instance.Persist();
             AssetDatabase.ImportAsset(state.GenPath, ImportAssetOptions.ForceUpdate);
             EditorApplication.delayCall += UICompileHook.ProcessJobs;
-            Debug.Log($"[UIFrame] 已写入 {state.GenPath}，编译完成后会回填引用。");
+            Debug.Log($"[GameFrame] 已写入 {state.GenPath}，编译完成后会回填引用。");
             return true;
         }
 
@@ -317,7 +317,7 @@ namespace GameFrame.UI.Editor
 
             ReconcileBinds(state, host, addFromGen: true);
             UIBindStore.instance.Persist();
-            Debug.Log("[UIFrame] 已刷新绑定。");
+            Debug.Log("[GameFrame] 已刷新绑定。");
             return true;
         }
 
@@ -402,11 +402,6 @@ namespace GameFrame.UI.Editor
                 var dir = Path.GetDirectoryName(scriptPath)?.Replace('\\', '/') ?? "Assets";
                 state.GenPath = dir + "/" + type.Name + ".Gen.cs";
             }
-        }
-
-        public static void EnsureStateFromPanel(UIPrefabBindState state, UIPanel panel)
-        {
-            EnsureStateFromHost(state, panel);
         }
 
         public static void CancelPendingAttach(UIPrefabBindState state)
@@ -755,7 +750,7 @@ namespace GameFrame.UI.Editor
                 || !HasNamespaceDeclaration(text, namespaceName)
                 || !HasPartialClassDeclaration(text, className))
             {
-                error = $"已有 .Gen.cs 不是匹配的 UIFrame 生成文件: {genPath}";
+                error = $"已有 .Gen.cs 不是匹配的 GameFrame UI 生成文件: {genPath}";
                 return false;
             }
 

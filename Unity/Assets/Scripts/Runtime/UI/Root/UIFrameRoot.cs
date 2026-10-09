@@ -70,7 +70,6 @@ namespace GameFrame.UI
                 failure.Capture(exception);
                 failure.Run(() => go.SetActive(false));
                 failure.Run(() => Destroy(go));
-                failure.Throw();
                 throw;
             }
         }

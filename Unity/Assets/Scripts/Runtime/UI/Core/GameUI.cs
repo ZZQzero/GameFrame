@@ -397,18 +397,13 @@ namespace GameFrame.UI
                         "[UIFrame] RootReady 回调期间 UI 已关闭或替换，本次 Init 已取消。");
                 }
             }
-            catch
+            catch (Exception exception)
             {
                 if (ReferenceEquals(_manager, manager))
                     _manager = null;
-                try
-                {
-                    manager.Shutdown();
-                }
-                catch (Exception cleanupException)
-                {
-                    Debug.LogException(cleanupException);
-                }
+                var failure = new CleanupFailure();
+                failure.Capture(exception);
+                failure.Run(() => manager.Shutdown());
                 throw;
             }
         }

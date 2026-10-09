@@ -66,14 +66,54 @@ Launch 在清单加载成功后调用 GameUI.SetPackage；UIFrameRoot 只创建 
 - 离线运行时选择 OfflinePlayMode，需先构建并复制资源包到 StreamingAssets。
 - WebGL 选择 WebPlayMode 并配置 HTTP(S) 资源服务器目录。
 - `Game.Hotfix` 已登记在 HybridCLR 热更新程序集列表中。
-  使用 HybridCLR 构建工具生成对应平台的 Hotfix DLL，将其复制成
+  使用 HybridCLR 构建工具生成对应平台的 Hotfix DLL，再用下述 DLL 拷贝工具复制成
   `Assets/Config/Code/Game.Hotfix.dll.bytes`，并随资源包发布；默认地址为 `Game.Hotfix.dll`。
 - 正式包统一使用 IL2CPP，按 HybridCLR 生成结果准备裁剪后的 AOT 补充元数据 DLL，
   也作为 `.dll.bytes` 资源发布，在 `AotMetadataAssemblies` 填写不含 `.dll` 的程序集名。
   元数据在 Hotfix DLL 前加载，生成、构建和发布顺序遵循 HybridCLR 工具要求。
 - 正式包必须选择平台支持的模式，不能使用 EditorSimulateMode。
 
-目前没有配置资源服务器或生成正式平台 DLL；编辑器模拟启动不依赖它们。
+资源服务器需要单独配置；编辑器模拟启动不依赖正式平台 DLL。
+
+### DLL 拷贝工具
+
+`Tools/GameFrame/Loader` 提供 `CopyAOTDlls`、`CopyHotUpdateDlls` 和
+`CopyHotUpdateAndAOTDlls` 三个菜单，分别拷贝 AOT 补充元数据、热更 DLL 或两者。
+工具读取 `Assets/Resource/GlobalConfig.asset` 的 `AotMetadataAssemblies` 与
+`HotUpdateAssemblies`，程序集名不含 `.dll`；使用其他启动配置时需调整
+`AssemblyTool.GlobalConfigPath`，确保与 Launch 绑定的配置一致。
+
+源目录通过 HybridCLR Settings 获取，按当前 `activeBuildTarget` 选择平台：
+
+- 热更 DLL：默认 `HybridCLRData/HotUpdateDlls/<平台>`。
+- 裁剪后的 AOT DLL：默认 `HybridCLRData/AssembliesPostIl2CppStrip/<平台>`。
+- 两者均输出为 `Assets/Config/Code/<程序集名>.dll.bytes`，资源地址为 `<程序集名>.dll`，
+  由现有 `Assets/Config` 采集规则标记为 `boot`。
+
+先执行当前平台的 `HybridCLR/CompileDll/ActiveBuildTarget`；需要 AOT 元数据时，
+按 HybridCLR 流程生成当前平台的裁剪 DLL，并根据生成的 `AOTGenericReferences` 等分析结果
+填写 `AotMetadataAssemblies`，再执行拷贝，最后构建 YooAsset 资源包。
+拷贝工具只复制现有产物，不触发编译或 AOT 构建。
+
+工具在写入前检查全部源 DLL，缺少文件或热更程序集未登记到 HybridCLR 时抛出错误。
+AOT 列表为空时不拷贝 AOT DLL，并在完成日志中说明。
+覆盖已有 `.bytes` 时保留 `.meta` 和 GUID，不清空目录；移除程序集后需手动删除对应的旧资源。
+切换平台后应重新生成、拷贝 DLL，再构建资源包；输出目录不按平台分开。
+
+### 生成产物与 Git
+
+以下可重新生成的目录及对应生成资产的 `.meta` 由 `Unity/.gitignore` 忽略：
+
+- `HybridCLRData/`：HybridCLR 安装的本地工具链、仓库副本、DLL 与构建缓存。
+- `Assets/HybridCLRGenerate/`：生成的 `link.xml` 和 AOT 泛型引用代码。
+- `Bundles/`：YooAsset AB 包构建产物。
+
+`Assets/Config/Code/` 中拷贝后的 DLL、`Assets/StreamingAssets/` 中的内置资源及其 `.meta`
+保留在版本控制中。`ProjectSettings/HybridCLRSettings.asset`、YooAsset 设置与采集配置、
+程序集定义及源码仍需提交。
+新检出项目后，使用 HybridCLR Installer 安装工具链；需要更新 DLL 或资源包时，执行当前平台的
+HybridCLR 生成流程、拷贝 DLL、构建 YooAsset 资源包，离线包还需将构建产物复制到 StreamingAssets。
+忽略规则不会自动取消已跟踪文件的跟踪；取消跟踪仅修改 Git 索引，不删除本地构建产物。
 
 ## 退出
 

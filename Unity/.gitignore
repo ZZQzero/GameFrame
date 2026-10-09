@@ -13,6 +13,12 @@
 /[Bb]uilds/
 # YooAsset generated resource bundles
 /Bundles/
+
+# HybridCLR installed toolchain, build caches and generated files
+/HybridCLRData/
+/Assets/HybridCLRGenerate/
+/Assets/HybridCLRGenerate.meta
+
 /[Ll]ogs/
 /[Uu]ser[Ss]ettings/
 *.log
@@ -87,7 +93,6 @@ InitTestScene*.unity*
 
 # Addressables default ignores, before user customizations
 /ServerData
-/[Aa]ssets/StreamingAssets/aa*
 /[Aa]ssets/AddressableAssetsData/link.xml*
 /[Aa]ssets/Addressables_Temp*
 # By default, Addressables content builds will generate addressables_content_state.bin

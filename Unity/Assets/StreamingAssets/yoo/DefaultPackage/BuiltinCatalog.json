@@ -1,0 +1,19 @@
+{
+    "FileVersion": 1,
+    "PackageName": "DefaultPackage",
+    "PackageVersion": "V1.0.0",
+    "Entries": [
+        {
+            "BundleGuid": "0a47bbd6b6328cc9798124837f99180b",
+            "FileName": "0a47bbd6b6328cc9798124837f99180b.bundle"
+        },
+        {
+            "BundleGuid": "51906bc2b981e6d5339805dba6c96ee4",
+            "FileName": "51906bc2b981e6d5339805dba6c96ee4.bundle"
+        },
+        {
+            "BundleGuid": "7cf37226dfcf90f0992115b88cd9095e",
+            "FileName": "7cf37226dfcf90f0992115b88cd9095e.bundle"
+        }
+    ]
+}

@@ -1,21 +1,25 @@
 # Launch 启动入口
 
 `Assets/Scenes/Launch.unity` 是 Build Settings 中的首场景。
-根节点 `Launch` 挂载 `GameFrame.AOT.Launch`，启动后保留到进程退出。
+根节点 `Launch` 挂载 `Game.AOT.Launch`，启动后保留到进程退出。
 
-启动顺序：读取 GlobalConfig → 初始化 YooAsset → 获取版本与清单 → 下载 boot 资源 →
-加载 AOT 元数据与 Hotfix DLL → 实例化 GameEntry prefab → 读取 Luban 配置 → 启动 GameRuntime。
-Launch 只负责资源准备与实例化，GameEntry 在 Awake 中自行初始化，完成后 IsReady 为 true。
+启动顺序：初始化语言服务与事件派发器 → 初始化 UI → 绑定主相机 Stack → 初始化 YooAsset → 获取版本与清单 →
+GameUI.SetPackage → 下载 boot 资源 → 启动其余框架系统 →
+加载 AOT 元数据与 Hotfix DLL → 实例化 GameEntry prefab → 读取热更配置并补入翻译 → 启动热更业务。
+Launch 负责框架初始化、选择相机和准备资源。GameEntry 仅在 Awake 中初始化 Hotfix 配置与业务，
+完成后 IsReady 为 true。Launch 启动 GameRuntime 时 EnableUI 为 false，语言服务也不重复初始化。
 任一步失败直接抛出并终止后续启动，不重试、不回退旧资源、不自动回滚。
 
-`GameFrame.AOT` 引用框架、UniTask、YooAsset、HybridCLR 和 Luban.Runtime，不引用 Hotfix。
-`GameFrame.Hotfix.GameEntry` 直接继承 MonoBehaviour，挂在
+`Game.AOT` 程序集使用 `Game.AOT` 命名空间，引用框架、UniTask、YooAsset、HybridCLR 和 Luban.Runtime，不引用 Hotfix。
+`Game.Hotfix` 程序集使用 `Game.Hotfix` 命名空间。`Game.Hotfix.GameEntry` 直接继承 MonoBehaviour，挂在
 `Assets/Prefab/LoadPrefab/GameEntry.prefab` 根节点，由 Unity 调用生命周期方法。
 Launch 没有单例或对外接口，也不调用 Hotfix 入口。DLL 必须在加载 prefab 前装载。
 
 `TableConfigManager.Init` 使用 `new Tables(resources.LoadConfigByte)` 同类的加载回调，
-表名由生成代码维护。业务通过 `GameFrame.Hotfix.TableConfig.TableConfigManager.Tables` 访问配置。
-语言表由 GameEntry 转成框架使用的配置，再启动 GameRuntime。
+表名由生成代码维护。生成配置通过 Luban 的 topModule 统一到 `Game.Hotfix.TableConfig`。
+业务通过 `Game.Hotfix.TableConfig.TableConfigManager.Tables` 访问配置。
+语言服务在 Launch 中先用空表初始化，读取已保存的语言设置。
+GameEntry 将热更语言表转换后通过 LanguageManager.AddTable 补入，保留当前语言并刷新已注册的文本。
 
 ## 启动配置与资源服务
 
@@ -46,9 +50,14 @@ Launch 引用 `Assets/Resource/GlobalConfig.asset`，该 ScriptableObject 随首
 并使用编辑器已经编译的 Hotfix 程序集。直接播放 Launch 场景即可验证启动。
 资源包按文件名（去掉最后一个扩展名）寻址，当前配置采集目录是 `Assets/Config`。
 
-Timer、Pool、Scene、Language 和 UI 会启动；Input / Audio 在 GameEntry prefab 的 Inspector
-绑定配置后才启用。GameEntry 在 Awake 中自动启动。
+语言服务、事件派发器和 UI 在资源初始化前启动；Timer、Pool、Scene 在 boot 下载完成后由 Launch 启动。
+Input / Audio 在 Launch 的 Inspector 绑定配置后才启用。GameEntry 在 Awake 中自动初始化热更配置和业务。
 场景尚未配置业务首界面或内容场景，启动完成后停留在 Launch，后续导航由业务接入。
+
+最早显示的启动界面应直接放在 Launch 场景或引用安装包内置 prefab，不依赖待更新资源或 Hotfix。
+UI 根节点创建不依赖 YooAsset，但通过 GameUI 加载面板仍需要 Package 就绪。
+热更语言表在 GameEntry 加载后才可用，最早的启动界面翻译需要使用场景或安装包内置数据。
+Launch 在清单加载成功后调用 GameUI.SetPackage；UIFrameRoot 只创建 UI 相机，Stack 由 Launch 显式配置。
 
 ## 正式包
 
@@ -56,9 +65,9 @@ Timer、Pool、Scene、Language 和 UI 会启动；Input / Audio 在 GameEntry p
   该目录需提供 YooAsset 构建输出的版本文件、清单和 Bundle。默认不使用下载重试。
 - 离线运行时选择 OfflinePlayMode，需先构建并复制资源包到 StreamingAssets。
 - WebGL 选择 WebPlayMode 并配置 HTTP(S) 资源服务器目录。
-- `GameFrame.Hotfix` 已登记在 HybridCLR 热更新程序集列表中。
+- `Game.Hotfix` 已登记在 HybridCLR 热更新程序集列表中。
   使用 HybridCLR 构建工具生成对应平台的 Hotfix DLL，将其复制成
-  `Assets/Config/Code/GameFrame.Hotfix.dll.bytes`，并随资源包发布；默认地址为 `GameFrame.Hotfix.dll`。
+  `Assets/Config/Code/Game.Hotfix.dll.bytes`，并随资源包发布；默认地址为 `Game.Hotfix.dll`。
 - 正式包统一使用 IL2CPP，按 HybridCLR 生成结果准备裁剪后的 AOT 补充元数据 DLL，
   也作为 `.dll.bytes` 资源发布，在 `AotMetadataAssemblies` 填写不含 `.dll` 的程序集名。
   元数据在 Hotfix DLL 前加载，生成、构建和发布顺序遵循 HybridCLR 工具要求。
@@ -77,12 +86,13 @@ UnityEngine.Application.Quit();
 正式包不拦截退出，也不等待初始化或异步关闭，不逐项释放资源包；进程结束后由系统回收资源。
 入口按每个进程启动一次设计，不通过销毁 GameEntry 来重启框架。
 
-运行期间需要主动关闭时，先停止业务任务、释放业务持有的资源，再显式等待
-`GameRuntime.ShutdownAsync()`；随后清空配置和事件，最后按需调用
+运行期间需要主动关闭时，先停止业务任务、释放业务持有的资源，
+调用 `GameUI.Shutdown()`，再等待 `GameRuntime.ShutdownAsync()`；随后关闭语言服务、清空配置和事件，最后按需调用
 `ResourceLoadManager.Instance.ShutdownAsync()`。这些接口不属于进程退出流程。
 
-Editor 与正式包共用 GameEntry.OnApplicationQuit / OnDestroy 的简单清理：
-发起框架关闭、清空配置和事件，不等待异步完成。两次生命周期回调不会重复清理。
+Launch.OnApplicationQuit / OnDestroy 负责关闭 UI、发起其余框架系统关闭、关闭语言服务并清空事件；不等待异步完成。
+GameEntry.OnApplicationQuit / OnDestroy 仅清空自己初始化的热更配置，不关闭框架。
+Editor 与正式包共用这些简单清理，两次生命周期回调不会重复清理。
 Editor 停止播放时，资源系统由 YooAsset 自己的 Editor 驱动关闭。
 GameEntry 创建之前启动失败时，不执行额外的退出回滚；正式包退出由系统回收资源，
 Editor 重新播放使用默认 Domain Reload 重置静态状态。

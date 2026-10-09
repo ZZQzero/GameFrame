@@ -10,7 +10,8 @@
 using Luban;
 
 
-
+namespace Game.Hotfix.TableConfig
+{
 public sealed partial class AIRobotTable : Luban.BeanBase
 {
     public AIRobotTable(ByteBuf _buf) 
@@ -72,5 +73,5 @@ public sealed partial class AIRobotTable : Luban.BeanBase
         + "}";
     }
 }
-
+}
 

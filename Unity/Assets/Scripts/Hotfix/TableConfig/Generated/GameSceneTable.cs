@@ -10,7 +10,8 @@
 using Luban;
 
 
-
+namespace Game.Hotfix.TableConfig
+{
 public sealed partial class GameSceneTable : Luban.BeanBase
 {
     public GameSceneTable(ByteBuf _buf) 
@@ -54,5 +55,5 @@ public sealed partial class GameSceneTable : Luban.BeanBase
         + "}";
     }
 }
-
+}
 

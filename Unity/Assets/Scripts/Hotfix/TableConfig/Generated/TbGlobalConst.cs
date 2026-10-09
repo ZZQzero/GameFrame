@@ -10,7 +10,8 @@
 using Luban;
 
 
-
+namespace Game.Hotfix.TableConfig
+{
 public partial class TbGlobalConst
 {
 
@@ -22,7 +23,7 @@ public partial class TbGlobalConst
     {
         int n = _buf.ReadSize();
         if (n != 1) throw new SerializationException("table mode=one, but size != 1");
-        _data = global::GlobalConstTable.DeserializeGlobalConstTable(_buf);
+        _data = global::Game.Hotfix.TableConfig.GlobalConstTable.DeserializeGlobalConstTable(_buf);
     }
 
 
@@ -45,5 +46,5 @@ public partial class TbGlobalConst
     }
 }
 
-
+}
 

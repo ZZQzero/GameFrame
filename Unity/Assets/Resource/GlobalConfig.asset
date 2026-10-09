@@ -11,12 +11,12 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 2c03a54e3e190497ea9bf0ef5ea4b752, type: 3}
   m_Name: GlobalConfig
-  m_EditorClassIdentifier: GameFrame.AOT::GameFrame.AOT.GlobalConfig
+  m_EditorClassIdentifier: Game.AOT::Game.AOT.GlobalConfig
   PlayMode: 1
   PackageName: DefaultPackage
   ServerUrl: 
   BootTag: boot
   GameEntryLocation: GameEntry
   HotUpdateAssemblies:
-  - GameFrame.Hotfix
+  - Game.Hotfix
   AotMetadataAssemblies: []

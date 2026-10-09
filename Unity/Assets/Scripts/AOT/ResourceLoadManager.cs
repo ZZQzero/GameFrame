@@ -9,7 +9,7 @@ using Luban;
 using UnityEngine;
 using YooAsset;
 
-namespace GameFrame.AOT
+namespace Game.AOT
 {
     /// <summary>Launch 创建的资源服务；运行期间需要关闭时由调用方显式释放。</summary>
     public sealed class ResourceLoadManager

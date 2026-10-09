@@ -3,6 +3,7 @@
     "rootNamespace": "GameFrame.Tests",
     "references": [
         "Unity.TextMeshPro",
+        "Unity.RenderPipelines.Universal.Runtime",
         "UniTask",
         "Unity.InputSystem",
         "YooAsset",
@@ -10,8 +11,8 @@
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
         "GameFrame.Runtime",
-        "GameFrame.AOT",
-        "GameFrame.Hotfix"
+        "Game.AOT",
+        "Game.Hotfix"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

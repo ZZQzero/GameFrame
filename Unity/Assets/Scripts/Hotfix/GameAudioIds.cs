@@ -1,4 +1,6 @@
-namespace GameFrame.Audio
+using GameFrame.Audio;
+
+namespace Game.Hotfix.Audio
 {
     /// <summary>业务音效 ID，需在业务的 AudioRuntimeConfig 中配置对应条目。</summary>
     public static class GameAudioIds

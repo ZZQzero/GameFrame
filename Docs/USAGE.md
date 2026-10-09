@@ -34,7 +34,7 @@ await GameRuntime.InitAsync(new GameRuntimeConfig
     LanguageTable = languageTable // 可省略
 }, cancellationToken);
 
-GameUI.ConfigureURPCameraStack();
+GameUI.ConfigureURPCameraStack(Camera.main);
 GameUI.Register<MainPanel>("MainPanel", UIGroup.Scene);
 await GameUI.Push<MainPanel>();
 
@@ -54,13 +54,18 @@ Timer、Input、对象池共享持久根节点；Audio 和 UI 保留各自的根
 
 `GameRuntime` 不加载或释放资源包，不清空全局 Event，也不接管业务持有的 Media / Sqlite 实例。
 `GameScene.ShutdownAsync()` 等待正在进行的场景操作并清空管理状态，场景卸载仍由业务安排。
-退出时必须先等待异步清理完成再调用 `Application.Quit()`，不要依赖 `OnApplicationQuit` 等待异步关闭。
+需保存的业务数据应在 `Application.Quit()` 前处理完成；进程退出不等待框架异步清理。
+运行中主动关闭或重启框架时才需要等待 `ShutdownAsync()`，不要依赖 `OnApplicationQuit` 等待异步关闭。
+
+本项目的 Launch 分阶段启动：语言服务、事件派发器和 UI 先于 YooAsset 初始化，
+资源清单就绪后给 UI 绑定 Package，boot 下载完成后再由 GameRuntime 启动其余框架系统。
+GameEntry 只初始化 Hotfix 配置与业务，并向已就绪的语言服务补入翻译；不重复启动框架。
 
 也可以按需单独初始化系统，同一个系统只选择一种入口：
 
 ```csharp
 GameUI.Init(package);                    // 或 Init() / Init(packageName)
-GameUI.ConfigureURPCameraStack();        // 失败会抛
+GameUI.ConfigureURPCameraStack(Camera.main);
 
 GameUI.Register<MainPanel>("MainPanel", UIGroup.Scene);
 GamePool.Init(package, persistRoot); // persistRoot 须比 GameUI.Shutdown 更久，不要用 UIFrameRoot
@@ -221,8 +226,8 @@ protected override void OnOpen(ItemArgs args)
 
 ```csharp
 GameUI.Init(package);
-GameUI.ConfigureURPCameraStack();                 // Base = Camera.main
-// 或
+GameUI.ConfigureURPCameraStack(Camera.main);
+// 或由业务选择指定相机；切换场景主相机时也显式重新配置：
 GameUI.ConfigureURPCameraStack(baseCamera, uiCamera, uiLayer);
 
 GameUI.DisableURPCameraStack();                   // 仅从 Stack 移除
@@ -231,6 +236,8 @@ GameUI.DisableURPCameraStack();                   // 仅从 Stack 移除
 ### 设计约定（不要当成 bug）
 
 - UI Camera 固定为 Overlay。
+- UI 根节点不选择主相机，由 Launch 或业务调用 ConfigureURPCameraStack，并保留 Stack 中已有的其它相机。
+- Launch 在 YooAsset 初始化前创建 UI、绑定 Camera.main 的 Stack，在资源包和清单就绪后调用 SetPackage。
 - 只负责加入 / 移出 Base Camera Stack。
 - **不修改** Base Camera 的其它配置。
 - `Disable` 后 Overlay 不再独立渲染，界面会消失；这是预期行为。
@@ -459,7 +466,7 @@ UIFrameSafety.CollectionChecks = true;  // 池重复归还检查
 ```csharp
 GameScene.Init(package);             // 资源包装好后；见 Scene.md
 GameUI.Init(package);
-GameUI.ConfigureURPCameraStack();
+GameUI.ConfigureURPCameraStack(Camera.main);
 
 GameUI.Register<MainHud>("MainHud", UIGroup.Hud);
 GameUI.Register<HomePanel>("Home", UIGroup.Scene);

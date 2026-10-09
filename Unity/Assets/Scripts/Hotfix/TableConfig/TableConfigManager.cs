@@ -1,8 +1,8 @@
 using System;
 using System.Threading;
-using GameFrame.AOT;
+using Game.AOT;
 
-namespace GameFrame.Hotfix.TableConfig
+namespace Game.Hotfix.TableConfig
 {
     /// <summary>Luban 配置的显式生命周期；表名由生成的 Tables 决定。</summary>
     public static class TableConfigManager

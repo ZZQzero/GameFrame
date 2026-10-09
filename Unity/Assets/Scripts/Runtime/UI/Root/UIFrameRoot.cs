@@ -9,7 +9,7 @@ using UnityEngine.UI;
 
 namespace GameFrame.UI
 {
-    /// <summary>UI 根节点。默认 Screen Space Camera + UI Camera，可挂入 URP Camera Stack。</summary>
+    /// <summary>UI 根节点。默认 Screen Space Camera + UI Camera，由调用方配置 URP Camera Stack。</summary>
     sealed class UIFrameRoot : MonoBehaviour
     {
         const int CanvasSortingOrder = 100;

@@ -10,7 +10,8 @@
 using Luban;
 
 
-
+namespace Game.Hotfix.TableConfig
+{
 public partial class TbLanguage
 {
     private readonly System.Collections.Generic.Dictionary<string, LanguageTable> _dataMap;
@@ -24,7 +25,7 @@ public partial class TbLanguage
         for(int i = n ; i > 0 ; --i)
         {
             LanguageTable _v;
-            _v = global::LanguageTable.DeserializeLanguageTable(_buf);
+            _v = global::Game.Hotfix.TableConfig.LanguageTable.DeserializeLanguageTable(_buf);
             _dataList.Add(_v);
             _dataMap.Add(_v.Key, _v);
         }
@@ -47,5 +48,5 @@ public partial class TbLanguage
 
 }
 
-
+}
 

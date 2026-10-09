@@ -7,6 +7,7 @@ using GameFrame.Pooling;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.TestTools;
 using UnityEngine.UI;
 
@@ -211,6 +212,56 @@ namespace GameFrame.Tests
                 ScreenOrientationManager.CanvasLayoutChanged -= failLayout;
                 GameUI.Shutdown();
                 ScreenOrientationManager.Shutdown();
+            }
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator CameraStackIsConfiguredByCallerAndReinitializationDoesNotLeaveDuplicates()
+        {
+            var cameraObject = new GameObject("camera-stack-test") { tag = "MainCamera" };
+            var baseCamera = cameraObject.AddComponent<Camera>();
+            var baseData = baseCamera.GetUniversalAdditionalCameraData();
+            baseData.renderType = CameraRenderType.Base;
+            var overlayObject = new GameObject("existing-overlay-test");
+            var existingOverlay = overlayObject.AddComponent<Camera>();
+            existingOverlay.GetUniversalAdditionalCameraData().renderType = CameraRenderType.Overlay;
+            var stack = baseData.cameraStack;
+            stack.Add(existingOverlay);
+            var originalMask = baseCamera.cullingMask;
+            Action rootReady = () =>
+            {
+                CollectionAssert.AreEqual(new[] { existingOverlay }, stack, "UI 根节点不应替调用方选择主相机。");
+                Assert.AreSame(GameUI.UICamera, GameUI.CanvasRoot.GetComponent<Canvas>().worldCamera);
+            };
+            GameUI.RootReady += rootReady;
+            try
+            {
+                for (var i = 0; i < 2; i++)
+                {
+                    GameUI.Init();
+                    var uiCamera = GameUI.UICamera;
+                    CollectionAssert.AreEqual(new[] { existingOverlay }, stack);
+                    GameUI.ConfigureURPCameraStack(baseCamera);
+                    Assert.AreEqual(CameraRenderType.Overlay, uiCamera.GetUniversalAdditionalCameraData().renderType);
+                    CollectionAssert.AreEqual(new[] { existingOverlay, uiCamera }, stack);
+                    Assert.AreEqual(originalMask, baseCamera.cullingMask);
+                    Assert.Throws<InvalidOperationException>(() => GameUI.Init());
+                    GameUI.ConfigureURPCameraStack();
+                    CollectionAssert.AreEqual(new[] { existingOverlay, uiCamera }, stack);
+
+                    GameUI.Shutdown();
+                    yield return null;
+                    CollectionAssert.AreEqual(new[] { existingOverlay }, stack);
+                    Assert.IsTrue(uiCamera == null);
+                }
+            }
+            finally
+            {
+                GameUI.RootReady -= rootReady;
+                GameUI.Shutdown();
+                UnityEngine.Object.Destroy(cameraObject);
+                UnityEngine.Object.Destroy(overlayObject);
             }
             yield return null;
         }

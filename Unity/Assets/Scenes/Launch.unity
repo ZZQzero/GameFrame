@@ -147,8 +147,10 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7db059f010c2414fabfefa1cd5c19b38, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: GameFrame.AOT::GameFrame.AOT.Launch
+  m_EditorClassIdentifier: Game.AOT::Game.AOT.Launch
   globalConfig: {fileID: 11400000, guid: e919f0f8871934251a912b2b969e987d, type: 2}
+  inputConfig: {fileID: 0}
+  audioConfig: {fileID: 0}
 --- !u!4 &282740284
 Transform:
   m_ObjectHideFlags: 0

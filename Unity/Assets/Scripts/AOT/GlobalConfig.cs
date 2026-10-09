@@ -2,7 +2,7 @@ using System;
 using UnityEngine;
 using YooAsset;
 
-namespace GameFrame.AOT
+namespace Game.AOT
 {
     /// <summary>随安装包提供的启动配置，在资源包初始化前可用。</summary>
     [CreateAssetMenu(menuName = "GameFrame/Global Config", fileName = "GlobalConfig")]
@@ -18,7 +18,7 @@ namespace GameFrame.AOT
 
         [Header("HybridCLR")]
         [Tooltip("不含 .dll 的程序集名，按被依赖者优先的顺序加载。")]
-        public string[] HotUpdateAssemblies = { "GameFrame.Hotfix" };
+        public string[] HotUpdateAssemblies = { "Game.Hotfix" };
         [Tooltip("对应平台裁剪后的 AOT 程序集名，不含 .dll；资源地址为 名称.dll。")]
         public string[] AotMetadataAssemblies = Array.Empty<string>();
 

@@ -10,7 +10,8 @@
 using Luban;
 
 
-
+namespace Game.Hotfix.TableConfig
+{
 public partial class TbAIRobot
 {
     private readonly System.Collections.Generic.Dictionary<int, AIRobotTable> _dataMap;
@@ -24,7 +25,7 @@ public partial class TbAIRobot
         for(int i = n ; i > 0 ; --i)
         {
             AIRobotTable _v;
-            _v = global::AIRobotTable.DeserializeAIRobotTable(_buf);
+            _v = global::Game.Hotfix.TableConfig.AIRobotTable.DeserializeAIRobotTable(_buf);
             _dataList.Add(_v);
             _dataMap.Add(_v.Id, _v);
         }
@@ -47,5 +48,5 @@ public partial class TbAIRobot
 
 }
 
-
+}
 

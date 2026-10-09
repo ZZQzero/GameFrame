@@ -10,7 +10,8 @@
 using Luban;
 
 
-
+namespace Game.Hotfix.TableConfig
+{
 public partial class TbGameScene
 {
     private readonly System.Collections.Generic.Dictionary<string, GameSceneTable> _dataMap;
@@ -24,7 +25,7 @@ public partial class TbGameScene
         for(int i = n ; i > 0 ; --i)
         {
             GameSceneTable _v;
-            _v = global::GameSceneTable.DeserializeGameSceneTable(_buf);
+            _v = global::Game.Hotfix.TableConfig.GameSceneTable.DeserializeGameSceneTable(_buf);
             _dataList.Add(_v);
             _dataMap.Add(_v.GameId, _v);
         }
@@ -47,5 +48,5 @@ public partial class TbGameScene
 
 }
 
-
+}
 

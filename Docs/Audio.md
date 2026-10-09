@@ -5,7 +5,8 @@
 
 YooAsset location 使用业务资源包配置的地址。使用前需创建 `AudioRuntimeConfig` 和
 AudioMixer，配置总线、暴露参数及音频条目。业务 ID 由业务定义；
-`Assets/Scripts/Hotfix/GameAudioIds.cs` 提供飞行棋业务 ID，属于 `GameFrame.Hotfix` 程序集；
+`Assets/Scripts/Hotfix/GameAudioIds.cs` 提供飞行棋业务 ID，属于 `Game.Hotfix` 程序集，
+命名空间为 `Game.Hotfix.Audio`；
 使用这些 ID 前仍需配置对应音频资源。
 
 ---

@@ -9,7 +9,8 @@
 
 using Luban;
 
-
+namespace Game.Hotfix.TableConfig
+{
 public partial class Tables
 {
     public TbGlobalConst TbGlobalConst {get; }
@@ -35,4 +36,4 @@ public partial class Tables
     }
 }
 
-
+}

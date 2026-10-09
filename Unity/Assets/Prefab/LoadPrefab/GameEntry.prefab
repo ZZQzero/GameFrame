@@ -43,6 +43,4 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 04cf4213030e46afb4bae7244f94e0bc, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: GameFrame.Hotfix::GameFrame.Hotfix.GameEntry
-  inputConfig: {fileID: 0}
-  audioConfig: {fileID: 0}
+  m_EditorClassIdentifier: Game.Hotfix::Game.Hotfix.GameEntry

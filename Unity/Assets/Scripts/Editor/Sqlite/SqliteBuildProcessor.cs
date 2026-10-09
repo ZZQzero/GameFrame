@@ -50,7 +50,8 @@ namespace GameFrame.Sqlite.Editor
                                                report.summary.platform);
             }
             string root = LocateRoot();
-            string directory = Path.Combine(root, "Plugins", platform);
+            string directory = Path.Combine(Path.GetFullPath("Assets"),
+                "Plugins/GameFrame/Native/Sqlite", platform);
             var manifest =
                 JsonUtility.FromJson<Artifact>(File.ReadAllText(Path.Combine(directory, "artifact.json")));
             if (manifest == null || manifest.abi != Internal.NativeMethods.Abi || manifest.sanitized ||

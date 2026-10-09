@@ -54,9 +54,9 @@ namespace GameFrame.Media.Editor
         {
             string folder=target==BuildTarget.Android?"Android/arm64-v8a":target==BuildTarget.iOS?"iOS":target==BuildTarget.StandaloneOSX?"macOS":target==BuildTarget.StandaloneWindows64?"Windows/x86_64":null;
             if(folder==null)throw new BuildFailedException("No backup repository artifact for "+target);
-            string root=LocateRoot(),native=Path.Combine(root,"Runtime/MediaBackup/Native~"),plugins=Path.Combine(root,"Runtime/MediaBackup/Plugins",folder);
+            string root=LocateRoot(),assetRoot=Path.GetFullPath("Assets"),native=Path.Combine(root,"Runtime/MediaBackup/Native~"),plugins=Path.Combine(assetRoot,"Plugins/GameFrame/Native/MediaBackup",folder);
             var artifact=UnityEngine.JsonUtility.FromJson<BackupArtifact>(File.ReadAllText(Path.Combine(plugins,"artifact.json")));
-            var core=UnityEngine.JsonUtility.FromJson<CoreArtifact>(File.ReadAllText(Path.Combine(root,"Runtime/Sqlite/Plugins",folder,"artifact.json")));
+            var core=UnityEngine.JsonUtility.FromJson<CoreArtifact>(File.ReadAllText(Path.Combine(assetRoot,"Plugins/GameFrame/Native/Sqlite",folder,"artifact.json")));
             if(artifact.abi!=4 || artifact.sqlite_build_id!=core.build_id || artifact.sources==null || Path.GetFileName(artifact.binary)!=artifact.binary)throw new BuildFailedException("Backup repository artifact/dependency mismatch.");
             VerifyHash(Path.Combine(plugins,artifact.binary),artifact.sha256);
             foreach(var source in artifact.sources)VerifyHash(Path.Combine(native,source.path),source.sha256);

@@ -31,9 +31,17 @@ namespace GameFrame.Tests
         void IPrebuildSetup.Setup()
         {
             AssetDatabase.Refresh();
-            string assetPath = UnityEditor.PackageManager.PackageInfo
-                .FindForAssembly(typeof(UIImageLoaderPackageSetup).Assembly).assetPath
-                + "/Tests/PlayMode/Fixtures/UIImageLoaderTestSprite.png";
+            string assetPath = null;
+            foreach (string guid in AssetDatabase.FindAssets("GameFrame.Tests.PlayMode t:AssemblyDefinitionAsset"))
+            {
+                string assemblyPath = AssetDatabase.GUIDToAssetPath(guid);
+                if (Path.GetFileName(assemblyPath) != "GameFrame.Tests.PlayMode.asmdef") continue;
+                assetPath = Path.Combine(Path.GetDirectoryName(assemblyPath),
+                    "Fixtures/UIImageLoaderTestSprite.png").Replace('\\', '/');
+                break;
+            }
+            if (string.IsNullOrEmpty(assetPath) || AssetDatabase.LoadAssetAtPath<Sprite>(assetPath) == null)
+                throw new InvalidOperationException("UIImageLoader test fixture could not be located.");
             EditorPrefs.SetBool(SettingExistedKey, BundleCollectorSettingData.HasSettingAsset());
 
             string packageName = $"UIFrameImageTests_{Guid.NewGuid():N}";

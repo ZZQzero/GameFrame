@@ -1,0 +1,6 @@
+# Native source directories must survive a clean checkout despite global *~ rules.
+!Unity/Assets/Scripts/Runtime/Sqlite/Native~/
+!Unity/Assets/Scripts/Runtime/Sqlite/Native~/**
+!Unity/Assets/Scripts/Runtime/MediaBackup/Native~/
+!Unity/Assets/Scripts/Runtime/MediaBackup/Native~/**
+**/__pycache__/

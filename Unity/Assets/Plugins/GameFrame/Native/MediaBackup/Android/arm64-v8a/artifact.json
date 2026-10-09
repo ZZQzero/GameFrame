@@ -6,7 +6,7 @@
   "sources": [
     {
       "path": "CMakeLists.txt",
-      "sha256": "eb5b1264b53a211a8f239c1e509408e1d9123266eb2c710f66512fc4b25a28e0"
+      "sha256": "f83025dda90282ab6f96a0095e40304f54295abf8e8d300520f56a428555311a"
     },
     {
       "path": "src/android.cpp",
@@ -38,7 +38,7 @@
     },
     {
       "path": "build/install.py",
-      "sha256": "850a89911863411002aa50293d3e861e4a8325398d00677b9f208608f390dcb2"
+      "sha256": "0847835cf94e7b1f6e5edfeede39a9fb1d54bcebbb16a60ff9610c8eec993b04"
     },
     {
       "path": "build/schema.py",
@@ -52,5 +52,24 @@
       "path": "../../Sqlite/Native~/include/ufsqlite.h",
       "sha256": "49b6cc0a230f5a9ba120a7e0cb70dfd0dd434e564eeea7bc6a9ac9b37fc000f4"
     }
-  ]
+  ],
+  "layout_migration": {
+    "version": 1,
+    "kind": "repackaged-not-rebuilt",
+    "original_manifest_sha256": "251650ce66c2382aa702ce24101b074d3ebadb57b4c00ea35e4d5d19b42711b2",
+    "original_binary_sha256": "a3a731f14b5c724a9b9eb2cd32991dbe8d6ef7e046c5f4f6c8d8823e0599892b",
+    "source_changes": [
+      {
+        "path": "CMakeLists.txt",
+        "original_sha256": "eb5b1264b53a211a8f239c1e509408e1d9123266eb2c710f66512fc4b25a28e0",
+        "installed_sha256": "f83025dda90282ab6f96a0095e40304f54295abf8e8d300520f56a428555311a"
+      },
+      {
+        "path": "build/install.py",
+        "original_sha256": "850a89911863411002aa50293d3e861e4a8325398d00677b9f208608f390dcb2",
+        "installed_sha256": "0847835cf94e7b1f6e5edfeede39a9fb1d54bcebbb16a60ff9610c8eec993b04"
+      }
+    ],
+    "binary_operations": []
+  }
 }

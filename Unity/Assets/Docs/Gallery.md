@@ -320,7 +320,7 @@ python3 Tools~/BackupServer/server.py serve --root /absolute/private/backup-v2
 
 上传授权默认24小时，到期后再过24小时由有界维护关闭未完成尝试；尚未关闭的尝试允许显式 Plan 续期，续期与过期关闭原子仲裁，旧候选不会清理续期后的文件；无引用发布对象另有24小时保留期。每轮最多64个清理候选，单文件故障持久隔离后继续其余工作，失败由 `--retry-failed-cleanup` 显式重试。已确认和仍有引用的内容不被临时TTL删除。参考服务不代表生产容量或正式认证方案。
 
-`Runtime/MediaBackup/Native~/build/build.py` 依赖对应目标的已验证 SQLite 构建；`install.py` 校验来源及依赖后安装。二进制位于 `Runtime/MediaBackup/Plugins/{macOS,Windows/x86_64,Android/arm64-v8a,iOS}`。构建处理器检查来源哈希、核心版本，自动复制iOS头文件并配置链接、框架和Android keep规则，无需另建原生App。
+`Assets/Scripts/Runtime/MediaBackup/Native~/build/build.py` 依赖对应目标的已验证 SQLite 构建；`install.py` 校验来源及依赖后安装。二进制位于 `Assets/Plugins/GameFrame/Native/MediaBackup/{macOS,Windows/x86_64,Android/arm64-v8a,iOS}`，SQLite 产物位于同级 `Sqlite` 目录。构建处理器检查来源哈希、核心版本，自动复制iOS头文件并配置链接、框架和Android keep规则，无需另建原生App。
 
 服务初始化时创建仅当前用户可读的 `credentials.json`，包含测试账号与随机令牌；通过运行时配置提供令牌，不写入场景、日志或 Git。一个数据目录只允许一个服务进程持有；重启沿用同一目录，`.backup-owner` 持久锁文件不要手工删除。修复磁盘问题后可显式重试已隔离的清理故障：
 

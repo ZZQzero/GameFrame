@@ -86,7 +86,7 @@ Android 使用 `--target android --ndk /absolute/path/to/ndk`；iOS设备使用 
 
 ### Windows x86_64
 
-产物位于 `Plugins/Windows/x86_64/uiframe_sqlite.dll`，供 Windows x64 Editor 和 x64 Player 使用，不启用 Win32 或 ARM64。使用与其他平台相同的 SQLite 3.53.4 源码和共享核心，不需要另外放入官方 `sqlite3.dll`。当前 DLL 面向 Windows 10/11（同时遵守宿主 Unity 的最低系统要求），C++运行库静态链接，仅依赖 Windows 系统 DLL。
+产物位于 `Assets/Plugins/GameFrame/Native/Sqlite/Windows/x86_64/uiframe_sqlite.dll`，供 Windows x64 Editor 和 x64 Player 使用，不启用 Win32 或 ARM64。使用与其他平台相同的 SQLite 3.53.4 源码和共享核心，不需要另外放入官方 `sqlite3.dll`。当前 DLL 面向 Windows 10/11（同时遵守宿主 Unity 的最低系统要求），C++运行库静态链接，仅依赖 Windows 系统 DLL。
 
 Windows 本机构建需要 Python 3、CMake 3.22+、Visual Studio 2022 的“使用 C++ 的桌面开发”和 Windows SDK。在本目录运行：
 

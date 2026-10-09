@@ -13,6 +13,7 @@ Event、红点是并列模块，不要互相套门面或 Shutdown 顺序以外�
 - FSM：[Fsm.md](Fsm.md)
 - 红点：[RedDot.md](RedDot.md)
 - 对象池：[Pool.md](Pool.md)
+- Sqlite：[Sqlite.md](Sqlite.md)，[设计与实施计划](SqliteDesign.md)，[验证记录](SqliteValidation.md)
 
 ---
 

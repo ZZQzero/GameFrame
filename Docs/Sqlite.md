@@ -1,8 +1,8 @@
 # Sqlite 通用本地存储模块
 
-位于 `Runtime/Sqlite`，程序集为 `GameFrame.Sqlite`，命名空间为 `GameFrame.Sqlite`。不依赖 Unity、UniTask、GameFrame.Runtime 或照片模块。使用官方 SQLite 3.53.4、一份共享 C++ 执行核心和 C ABI 3；数据库实际工作在原生线程池中执行。
+源码位于 `Unity/Assets/Scripts/Runtime/Sqlite`，程序集为 `GameFrame.Sqlite`，命名空间为 `GameFrame.Sqlite`。不依赖 Unity、UniTask、GameFrame.Runtime 或照片模块。使用官方 SQLite 3.53.4、一份共享 C++ 执行核心和 C ABI 3；数据库实际工作在原生线程池中执行。
 
-目前已实现通用核心、托管接口和桌面行为验证。已构建 macOS universal、Android ARM64、iOS ARM64 和 Windows x86_64 原生产物；Windows DLL 已通过交叉编译、架构、接口导出与依赖检查，Windows Editor / Player 的实际运行尚待验证。移动端已有独立 IL2CPP 构建记录，真机后台运行及商业性能门槛尚未验收；iOS Simulator 未提供已验收产物。照片业务已接入：图库索引使用托管门面，C# / Android / iOS 备份共用原生 BackupRepository 和本模块核心；两库 schema 已用于当前实现。完整状态见 [Validation.md](Validation.md) 和 [实施计划](ImplementationPlan.md)。
+目前已实现通用核心、托管接口和桌面行为验证。已构建 macOS universal、Android ARM64、iOS ARM64 和 Windows x86_64 原生产物；Windows DLL 已通过交叉编译、架构、接口导出与依赖检查，Windows Editor / Player 的实际运行尚待验证。移动端已有独立 IL2CPP 构建记录，真机后台运行及商业性能门槛尚未验收；iOS Simulator 未提供已验收产物。照片业务已接入：图库索引使用托管门面，C# / Android / iOS 备份共用原生 BackupRepository 和本模块核心；两库 schema 已用于当前实现。完整状态见 [验证记录](SqliteValidation.md) 和 [实施计划](SqliteDesign.md)。
 
 ## 使用
 
@@ -28,7 +28,7 @@ finally { await db.CloseAsync(); }
 
 应用最终退出前释放所有批次结果并调用 `await SqliteRuntime.ShutdownAsync()`。该调用结束当前进程中的托管模块寿命，不是用于每次切换界面的重置接口。关闭与查询映射都不访问 Unity；调用方在使用 Unity 对象之前切回主线程。Editor 自动在域重载、退出播放模式和退出时清理，重新进入编辑模式开启新的编辑器寿命。
 
-业务自己定义 application_id、schema、账号归属、参数校验、索引和操作回执。参考 [游戏存档与背包示例说明](Samples~/README.md) 和 [代码](Samples~/GameRepositories.cs)：存档拒绝旧版或同版覆盖；购买、合成、奖励将完整资源增减与操作回执放在同一事务中，提交后才更新内存背包。UI 可直接读取内存数量。重复 OperationId 会使整个事务失败，调用方显式查询原回执核对，不会自动重放。示例 schema 为 2，旧示例库须由业务显式迁移；照片库结构和通用 SQLite API 不变。
+业务自己定义 application_id、schema、账号归属、参数校验、索引和操作回执。参考 [游戏存档与背包示例说明](../Unity/Assets/Scripts/Runtime/Sqlite/Samples~/README.md) 和 [代码](../Unity/Assets/Scripts/Runtime/Sqlite/Samples~/GameRepositories.cs)：存档拒绝旧版或同版覆盖；购买、合成、奖励将完整资源增减与操作回执放在同一事务中，提交后才更新内存背包。UI 可直接读取内存数量。重复 OperationId 会使整个事务失败，调用方显式查询原回执核对，不会自动重放。示例 schema 为 2，旧示例库须由业务显式迁移；照片库结构和通用 SQLite API 不变。
 
 ## 接口与所有权
 
@@ -74,6 +74,8 @@ finally { await db.CloseAsync(); }
 
 源码、SQLite锁文件、稳定ABI和测试放在 `Native~`。`Plugins` 只接收有可核对来源的产物，构建前校验产物和核心源码哈希。SDK / NDK / CMake 路径由使用方明确提供；脚本不会下载工具链。
 
+本节所有命令在 `Unity/Assets/Scripts/Runtime/Sqlite` 目录执行，`Native~` 路径相对于该目录，不相对于本说明所在的 `Docs`。插件安装到 `Unity/Assets/Plugins/GameFrame/Native/Sqlite`。
+
 ```sh
 python3 Native~/build/build.py --cmake /absolute/path/to/cmake \
   --target macos --output /absolute/build/macos
@@ -88,7 +90,7 @@ Android 使用 `--target android --ndk /absolute/path/to/ndk`；iOS设备使用 
 
 产物位于 `Assets/Plugins/GameFrame/Native/Sqlite/Windows/x86_64/uiframe_sqlite.dll`，供 Windows x64 Editor 和 x64 Player 使用，不启用 Win32 或 ARM64。使用与其他平台相同的 SQLite 3.53.4 源码和共享核心，不需要另外放入官方 `sqlite3.dll`。当前 DLL 面向 Windows 10/11（同时遵守宿主 Unity 的最低系统要求），C++运行库静态链接，仅依赖 Windows 系统 DLL。
 
-Windows 本机构建需要 Python 3、CMake 3.22+、Visual Studio 2022 的“使用 C++ 的桌面开发”和 Windows SDK。在本目录运行：
+Windows 本机构建需要 Python 3、CMake 3.22+、Visual Studio 2022 的“使用 C++ 的桌面开发”和 Windows SDK。在上述 Sqlite 源码目录运行：
 
 ```powershell
 py .\Native~\build\build.py --cmake "C:\Program Files\CMake\bin\cmake.exe" --target windows-x64 --output C:\Build\UIFrameSqlite\windows-x64
@@ -120,7 +122,7 @@ python3 Native~/tests/validate_managed.py \
   --native-directory /absolute/build/macos
 ```
 
-Unity Test Runner 在 `GameFrame.Tests.EditMode` 中选择 Sqlite 测试。内存检查另用 `build.py --target macos --sanitize`，该产物不能安装到Unity。详见 [验证记录](Validation.md)、[ABI数据格式](Native~/include/WireFormat.md) 和 [第三方声明](ThirdPartyNotices.md)。
+Unity Test Runner 在 `GameFrame.Tests.EditMode` 中选择 Sqlite 测试。内存检查另用 `build.py --target macos --sanitize`，该产物不能安装到Unity。详见 [验证记录](SqliteValidation.md)、[ABI数据格式](../Unity/Assets/Scripts/Runtime/Sqlite/Native~/include/WireFormat.md) 和 [第三方声明](../Unity/Assets/Scripts/Runtime/Sqlite/ThirdPartyNotices.md)。
 
 独立工程 IL2CPP 验证（不会把测试脚本加入业务工程）：
 

@@ -5,11 +5,13 @@ description: Designs Luban schema (beans, enums, polymorphism, collections, grou
 
 # Luban: Schema 设计
 
+先阅读 [项目上下文](../luban-project.md)，以 `Unity/Config/Excel` 现有 Schema 和 `luban.conf` 为基础设计；不要把通用示例目录直接用于本项目。
+
 ## 原则
 
 - 程序维护 Schema；策划填 Data。
 - 复杂 GamePlay（技能/行为树）优先 OOP 继承/多态，而不是塞字符串。
-- 客户端敏感字段用 `s` group，不要泄漏到 `c`。
+- 服务端字段按需求使用 `s` group，并检查实际生成目标；当前 `all` 包含 `s`，仅标记 group 不能保证不下发。
 
 ## 选型
 
@@ -25,15 +27,13 @@ description: Designs Luban schema (beans, enums, polymorphism, collections, grou
 - 容器：`list,T` / `map,K,V`；**元素不可写 `list,int?`**
 - 可空：`T?`；多态非空必须给具体子类
 - 引用：`int#ref=module.TbX`
-- 字段名建议 `snake_case`，生成时按语言转风格
+- 字段名沿用现有 Schema 约定，不为风格偏好批量改名
 
 ## 检查清单
 
 1. 主键与 `mode`（map/list/one）是否匹配
 2. group 是否覆盖 client/server 需求
 3. 多态子类是否都已定义且可区分
-4. 用 `-c schema-json` 或 MCP `GetSchema` 复核结构
+4. 用实际 Schema、无输出数据校验和生成类型复核结构；额外 schema 输出目标或 MCP `GetSchema` 需先确认可用。
 
-## 参考
-
-- 类型系统、XML Schema、多态、分组 targets
+Schema 变更后重新生成 C# 和 bytes，并检查受影响的业务读取；不要手改生成类型以绕过 Schema 问题。

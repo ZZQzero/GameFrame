@@ -7,9 +7,9 @@ description: Diagnoses Luban generation and validation failures. Use when gen.ba
 
 ## 优先动作
 
-1. 用同一命令加 `--errorFormat json`，解析 `errors[]`。
-2. 看 `category`：`schema` / `data` / `validation` / `codegen` / `cli`。
-3. 有 `file` + `location` + `fieldPath` 时先修对应单元格/字段。
+1. 阅读 [项目上下文](../luban-project.md)，确认失败来自 dotnet/脚本环境还是 Luban 本身。`dotnet: command not found` 先检查可执行文件和 Unity/Hub 的 PATH，不先改资源目录。
+2. 用当前主 CLI 做无输出校验，解析 JSON 报告的 `ok`、`errors[]` 和进程退出码；诊断请求只确认原因，修复须符合用户请求。
+3. 看 `category`：`schema` / `data` / `validation` / `codegen` / `cli`。有 `file` + `location` + `fieldPath` 时定位对应单元格/字段。
 
 ## 排查顺序
 
@@ -22,16 +22,14 @@ description: Diagnoses Luban generation and validation failures. Use when gen.ba
 ## 有用命令
 
 ```bash
-# 只校验（推荐 Agent CLI）
-dotnet Luban.Agent.dll validate --conf luban.conf -t all
+# 从仓库根目录校验，不生成代码或数据
+dotnet Unity/Config/Luban/Luban.dll --conf Unity/Config/luban.conf -t all -f --strict --errorFormat json
 
-# 或主 CLI
-dotnet Luban.dll --conf luban.conf -t all -f --strict --errorFormat json -x outputSaver=null
-
-# 导出 / 查询 schema
-dotnet Luban.Agent.dll schema --conf luban.conf -t all
-dotnet Luban.dll --conf luban.conf -t all -c schema-json -x outputCodeDir=./schema-out
+# 检查当前版本支持的参数
+dotnet Unity/Config/Luban/Luban.dll --help
 ```
+
+只校验不涵盖 codegen；若失败属于生成阶段，按原目标复现到独立临时输出目录。Agent CLI、MCP 和额外代码目标只能在确认可用后使用。
 
 ## 常见坑
 

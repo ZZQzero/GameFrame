@@ -5,7 +5,7 @@ description: Writes Luban field validators (ref, range, path, size, set, regex, 
 
 # Luban: 校验器
 
-校验在生成期执行。发布建议 `--strict`。
+先阅读 [项目上下文](../luban-project.md)。校验在生成期执行，语法以当前 Luban 版本和现有字段为准；先使用无输出的 `--strict` 校验确认规则。
 
 ## 常用写法
 
@@ -24,9 +24,9 @@ description: Writes Luban field validators (ref, range, path, size, set, regex, 
 
 ## 步骤
 
-1. 确认被引用表全名（可用 schema-json / MCP）。
+1. 从 `Unity/Config/Excel/__tables__.xlsx` 和实际 Schema 确认被引用表全名；额外 schema 工具或 MCP 需先确认可用。
 2. 改字段类型字符串，保留原有 group/注释。
-3. `dotnet Luban.dll ... -f --strict --errorFormat json` 验证。
+3. 从仓库根目录运行 `dotnet Unity/Config/Luban/Luban.dll --conf Unity/Config/luban.conf -t all -f --strict --errorFormat json`，保留字段定位和失败原因；规则变化应验证受约束的数据和相邻有效数据。
 
 ## 注意
 

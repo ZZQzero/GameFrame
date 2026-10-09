@@ -1,0 +1,4 @@
+interface:
+  display_name: "GameFrame 变更验证"
+  short_description: "按变更范围验证 Unity 编译、回归测试、启动流程并恢复测试设置"
+  default_prompt: "使用 $gameframe-validate 验证当前 GameFrame 修改，说明通过结果与未验证部分。"

@@ -6,6 +6,7 @@ using System.IO;
 using System.Threading;
 using System.Text.RegularExpressions;
 using Cysharp.Threading.Tasks;
+using GameFrame.Audio;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -193,6 +194,33 @@ namespace GameFrame.Tests
             UIImageLoaderPackageSetup.CleanupCollectorSetting();
         }
 #endif
+
+        [Test]
+        public void InvalidAudioConfigCreatesNoRootAndLeavesAudioUninitialized()
+        {
+            // 复用该 fixture 已就绪的真实资源包，确保失败来自配置而非资源包校验。
+            var config = ScriptableObject.CreateInstance<AudioRuntimeConfig>();
+            int CountRoots()
+            {
+                int count = 0;
+                foreach (var obj in Resources.FindObjectsOfTypeAll<GameObject>())
+                    if (obj.name == "[GameAudio]") count++;
+                return count;
+            }
+            try
+            {
+                int before = CountRoots();
+                for (int attempt = 0; attempt < 2; attempt++)
+                {
+                    var error = Assert.Throws<InvalidOperationException>(() =>
+                        GameAudio.InitAsync(_package, config).GetAwaiter().GetResult());
+                    StringAssert.Contains("AudioMixer", error.Message);
+                    Assert.IsFalse(GameAudio.IsInited);
+                    Assert.AreEqual(before, CountRoots(), "无效配置不应创建 Audio 根节点");
+                }
+            }
+            finally { UnityEngine.Object.Destroy(config); }
+        }
 
         [UnityTest]
         public IEnumerator LoadingUsesPlaceholderThenAssignsSprite()

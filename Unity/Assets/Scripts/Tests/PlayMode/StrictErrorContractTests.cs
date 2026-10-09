@@ -217,6 +217,26 @@ namespace GameFrame.Tests
             finally { RedDot.Unbind(path, callback); RedDot.Remove(path); }
         }
 
+        [UnityTest] public IEnumerator InvalidTimerConfigCreatesNoRootAndDoesNotBlockNextInit()
+        {
+            var root = new GameObject("invalid-timer-config-root");
+            try
+            {
+                Assert.Throws<ArgumentOutOfRangeException>(() => GameTimer.Init(root.transform,
+                    new TimerSchedulerOptions { InitialCapacity = 0 }));
+                Assert.IsFalse(GameTimer.IsInited);
+                Assert.AreEqual(0, root.transform.childCount, "配置失败不应创建待销毁的 Timer 根节点");
+                GameTimer.Init(root.transform, new TimerSchedulerOptions());
+                Assert.IsTrue(GameTimer.IsInited);
+            }
+            finally
+            {
+                if (GameTimer.IsInited) GameTimer.Shutdown();
+                UnityEngine.Object.Destroy(root);
+            }
+            yield return null;
+        }
+
         [UnityTest] public IEnumerator RuntimeTimerFailureStopsOnlyTheFailedTask()
         {
             var root = new GameObject("contract-timer-root");

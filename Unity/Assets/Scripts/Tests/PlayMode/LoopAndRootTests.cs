@@ -180,6 +180,41 @@ namespace GameFrame.Tests
             finally { UnityEngine.Object.DestroyImmediate(root); }
         }
 
+        [UnityTest] public IEnumerator FailedRootBuildReleasesObjectsAndAllowsExplicitRestart()
+        {
+            var primary = new InvalidOperationException("root-build-failure");
+            Action<GameScreenOrientation> failLayout = _ => throw primary;
+            ScreenOrientationManager.Shutdown();
+            ScreenOrientationManager.CanvasLayoutChanged += failLayout;
+            try
+            {
+                int before = UnityEngine.Object.FindObjectsByType<UIFrameRoot>(
+                    FindObjectsInactive.Include, FindObjectsSortMode.None).Length;
+                Assert.AreSame(primary, Assert.Throws<InvalidOperationException>(() => GameUI.Init()));
+                Assert.IsFalse(GameUI.IsInited);
+                Assert.IsEmpty(UnityEngine.Object.FindObjectsByType<EventSystem>(FindObjectsSortMode.None),
+                    "失败根节点应立即停用，不能继续处理输入");
+                yield return null;
+                Assert.AreEqual(before, UnityEngine.Object.FindObjectsByType<UIFrameRoot>(
+                    FindObjectsInactive.Include, FindObjectsSortMode.None).Length,
+                    "管理器尚未接管的根节点也必须被销毁");
+                Assert.IsEmpty(UnityEngine.Object.FindObjectsByType<EventSystem>(
+                    FindObjectsInactive.Include, FindObjectsSortMode.None));
+
+                ScreenOrientationManager.CanvasLayoutChanged -= failLayout;
+                ScreenOrientationManager.Shutdown();
+                GameUI.Init();
+                Assert.IsTrue(GameUI.IsInited);
+            }
+            finally
+            {
+                ScreenOrientationManager.CanvasLayoutChanged -= failLayout;
+                GameUI.Shutdown();
+                ScreenOrientationManager.Shutdown();
+            }
+            yield return null;
+        }
+
         [UnityTest] public IEnumerator ExistingEventSystemIsRejectedBeforeCreatingRoot()
         {
             var existing = new GameObject("external-event-system");

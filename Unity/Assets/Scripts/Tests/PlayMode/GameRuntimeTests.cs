@@ -45,6 +45,7 @@ namespace GameFrame.Tests
             if (rootReady != null) GameUI.RootReady -= rootReady;
             await GameRuntime.ShutdownAsync();
             GameUI.Shutdown();
+            if (GameInput.IsInited) GameInput.Shutdown();
             if (GameTimer.IsInited) GameTimer.Shutdown();
             LanguageManager.Shutdown();
             foreach (var obj in objects)
@@ -52,6 +53,46 @@ namespace GameFrame.Tests
             objects.Clear();
             await UniTask.Yield();
         });
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void InputEntriesRejectInvalidAssetAndKeepSourceAssetUnchanged(bool useConfig)
+        {
+            var root = Track(new GameObject("input-validation-root"));
+            var actions = Track(ScriptableObject.CreateInstance<InputActionAsset>());
+            var config = Track(InputRuntimeConfig.Create(actions));
+            void Init()
+            {
+                if (useConfig) GameInput.Init(root.transform, config);
+                else GameInput.Init(root.transform, actions);
+            }
+            Assert.Throws<InvalidOperationException>(Init);
+            Assert.IsFalse(GameInput.IsInited);
+            var player = actions.AddActionMap("Player");
+            player.AddAction("Move", InputActionType.Value);
+            actions.AddActionMap("UI");
+            Init();
+            Assert.IsTrue(GameInput.IsInited);
+            Assert.IsFalse(player.enabled, "运行时必须使用克隆，不能开启原始资产");
+            Assert.Throws<InputStateException>(Init);
+            Assert.IsTrue(GameInput.IsInited, "重复初始化不能破坏已有输入状态");
+            GameInput.Shutdown();
+            Assert.IsFalse(player.enabled);
+        }
+
+        [Test]
+        public void InvalidInputSensitivityIsRejectedBeforeCreatingRuntimeAsset()
+        {
+            var root = Track(new GameObject("input-validation-root"));
+            var actions = Track(ScriptableObject.CreateInstance<InputActionAsset>());
+            actions.AddActionMap("Player").AddAction("Move", InputActionType.Value);
+            actions.AddActionMap("UI");
+            var config = Track(InputRuntimeConfig.Create(actions, lookSensitivity: float.NaN));
+            Assert.Throws<InvalidOperationException>(() => GameInput.Init(root.transform, config));
+            Assert.IsFalse(GameInput.IsInited);
+            GameInput.Init(root.transform, actions);
+            Assert.IsTrue(GameInput.IsInited);
+        }
 
         [UnityTest]
         public IEnumerator StartsSelectedSystemsAndPreservesBorrowedRoot() => UniTask.ToCoroutine(async () =>

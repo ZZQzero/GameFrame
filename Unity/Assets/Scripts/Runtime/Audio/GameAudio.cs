@@ -57,18 +57,18 @@ namespace GameFrame.Audio
             }
 
             cancellationToken.ThrowIfCancellationRequested();
+            ResolvedAudioConfig resolved = runtimeConfig.Resolve();
             state = RuntimeState.Initializing;
-
-            var rootObject = new GameObject(RootName);
-            if (Application.isPlaying)
-            {
-                UnityEngine.Object.DontDestroyOnLoad(rootObject);
-            }
-
+            GameObject rootObject = null;
             bool driverInitialized = false;
             try
             {
-                ResolvedAudioConfig resolved = runtimeConfig.Resolve();
+                rootObject = new GameObject(RootName);
+                if (Application.isPlaying)
+                {
+                    UnityEngine.Object.DontDestroyOnLoad(rootObject);
+                }
+
                 var createdCache = new AudioClipCache(
                     package,
                     resolved.CacheRetentionSeconds);

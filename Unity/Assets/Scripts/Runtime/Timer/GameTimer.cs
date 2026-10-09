@@ -51,13 +51,13 @@ namespace GameFrame.Timing
                     "GameTimer.Init 重复调用或上次未按流程 Shutdown。");
             }
 
-            var rootObject = new GameObject(RootName);
-            rootObject.transform.SetParent(persistRoot, false);
-            TimerScheduler createdScheduler = null;
+            var createdScheduler = TimerScheduler.CreateRuntime(
+                options ?? TimerSchedulerOptions.LargeGameDefault());
+            GameObject rootObject = null;
             try
             {
-                createdScheduler = TimerScheduler.CreateRuntime(
-                    options ?? TimerSchedulerOptions.LargeGameDefault());
+                rootObject = new GameObject(RootName);
+                rootObject.transform.SetParent(persistRoot, false);
                 UnityTimerRunner createdRunner =
                     rootObject.AddComponent<UnityTimerRunner>();
                 createdRunner.Initialize(createdScheduler);
@@ -69,7 +69,7 @@ namespace GameFrame.Timing
             }
             catch
             {
-                if (createdScheduler != null && !createdScheduler.IsDisposed)
+                if (!createdScheduler.IsDisposed)
                 {
                     createdScheduler.Dispose();
                 }

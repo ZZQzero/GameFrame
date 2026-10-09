@@ -57,10 +57,22 @@ namespace GameFrame.UI
             }
 
             var go = new GameObject("UIFrameRoot");
-            DontDestroyOnLoad(go);
-            var root = go.AddComponent<UIFrameRoot>();
-            root.Build();
-            return root;
+            try
+            {
+                DontDestroyOnLoad(go);
+                var root = go.AddComponent<UIFrameRoot>();
+                root.Build();
+                return root;
+            }
+            catch (Exception exception)
+            {
+                var failure = new CleanupFailure();
+                failure.Capture(exception);
+                failure.Run(() => go.SetActive(false));
+                failure.Run(() => Destroy(go));
+                failure.Throw();
+                throw;
+            }
         }
 
         public RectTransform GetLayer(UILayer layer)

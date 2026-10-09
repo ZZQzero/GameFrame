@@ -92,13 +92,11 @@ namespace GameFrame.Input
             Transform persistRoot,
             InputRuntimeConfig runtimeConfig)
         {
-            RequireMainThread(nameof(Init));
             if (runtimeConfig == null)
             {
                 throw new ArgumentNullException(nameof(runtimeConfig));
             }
 
-            runtimeConfig.Validate();
             Init(
                 persistRoot,
                 runtimeConfig.Actions,
@@ -110,8 +108,6 @@ namespace GameFrame.Input
 
         public static void Init(Transform persistRoot, InputActionAsset actions)
         {
-            RequireMainThread(nameof(Init));
-            ValidateAsset(actions, PlayerActions.Map, UiActions.Map);
             Init(
                 persistRoot,
                 actions,
@@ -288,6 +284,7 @@ namespace GameFrame.Input
             bool keepUi,
             float lookSensitivity)
         {
+            RequireMainThread(nameof(Init));
             if (persistRoot == null)
             {
                 throw new ArgumentNullException(nameof(persistRoot));
@@ -305,10 +302,11 @@ namespace GameFrame.Input
                     "GameInput.Init 重复调用或上次未按流程 Shutdown。");
             }
 
+            ValidateAsset(source, gameplayMapName, uiMapName, lookSensitivity);
             InputActionAsset clone = UnityEngine.Object.Instantiate(source);
-            clone.name = source.name + " (Runtime)";
             try
             {
+                clone.name = source.name + " (Runtime)";
                 InputActionMap clonedGameplay = clone.FindActionMap(gameplayMapName)
                     ?? throw new InputStateException(
                         $"克隆后的 Asset 中不存在 gameplayMap：{gameplayMapName}。");

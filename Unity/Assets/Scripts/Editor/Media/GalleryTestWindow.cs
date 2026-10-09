@@ -33,7 +33,7 @@ namespace GameFrame.Media.Editor
         Vector2 scroll;
         bool busy, opening;
         int page;
-        [MenuItem("Tools/UIFrame/图片与备份")]
+        [MenuItem("Tools/GameFrame/图片与备份")]
         public static void Open() => GetWindow<GalleryTestWindow>("图片与备份");
         void OnEnable() { lifetime = new CancellationTokenSource();cache=new ImageThumbnailCache(); }
         async void OnDisable()

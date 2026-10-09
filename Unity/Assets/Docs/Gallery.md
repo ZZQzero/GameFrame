@@ -337,7 +337,7 @@ python3 Tools~/BackupServer/server.py serve --root /absolute/private/backup-v2 \
 
 客户端业务 URL 对应 `http://192.168.1.2:8787`。`0.0.0.0` 只是监听地址，不能作为返回给手机的上传地址。测试时须显式启用开发 HTTP 与平台网络规则；正式服务应接入认证、HTTPS、配额、存储、监控和灾备。本机参考服务和测试不证明生产容量。协议字段见 [OpenAPI](../Tools~/BackupServer/backup-protocol.openapi.yaml)，固定夹具位于 `Tools~/BackupServer/fixtures/protocol-v2.json`。
 
-打开 `Tools/UIFrame/图片与备份` 使用索引分页、共享预览、任务分页 / 批量控制和清理预览；UGUI 示例在 `Samples~/GalleryDemo`，提供任务翻页和预览后清理入口。场景中挂载 `GalleryDemo` 到独立于预览面板的应用级对象，绑定 `SelectOne`、`SelectMultiple`、`ReadAlbums`、`BackupSelected`、`PauseBackup`、`ResumeBackup`、`RefreshBackupStatus` 与 `ClearPreview`；令牌通过 `SetAccessToken` 在运行时提供。Editor 文件窗口只支持单选，多选 / 相册窗口 / 授权目录须在移动端核验。关闭预览不取消已接收任务；结束示例对象会等待 C# 服务停止，已交接的移动后台传输由系统继续管理。退出账号前先暂停备份并等待完成。
+打开 `Tools/GameFrame/图片与备份` 使用索引分页、共享预览、任务分页 / 批量控制和清理预览；UGUI 示例在 `Samples~/GalleryDemo`，提供任务翻页和预览后清理入口。场景中挂载 `GalleryDemo` 到独立于预览面板的应用级对象，绑定 `SelectOne`、`SelectMultiple`、`ReadAlbums`、`BackupSelected`、`PauseBackup`、`ResumeBackup`、`RefreshBackupStatus` 与 `ClearPreview`；令牌通过 `SetAccessToken` 在运行时提供。Editor 文件窗口只支持单选，多选 / 相册窗口 / 授权目录须在移动端核验。关闭预览不取消已接收任务；结束示例对象会等待 C# 服务停止，已交接的移动后台传输由系统继续管理。退出账号前先暂停备份并等待完成。
 
 虚拟图库示例使用 `LoopVerticalScrollRect`、`GalleryVirtualListDemo` 和 `GalleryThumbnailCell`。列表需配置 Viewport / RectMask2D、Content、固定尺寸单元与 RawImage；应用创建并持有 `ImageLibraryIndex` 和 scope 后调用 `InitializeAsync(library, scope)`。`ShowFirstPageAsync` / `ShowNextPageAsync` 查询最多200项元数据，`HasNextPage` 控制翻页；滚动重绑取消旧加载，离屏释放缩略图租约。关页先等待 `list.ShutdownAsync()`，再关闭图库索引。后台加载失败会写 Unity 日志，不伪装成空图片；5000张连续滚动的设备帧预算仍需产品场景验收。
 

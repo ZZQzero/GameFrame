@@ -12,7 +12,7 @@ namespace GameFrame.Editor.Excel
     {
         static bool running;
 
-        [MenuItem("GameTool/Excel/ExcelExporter")]
+        [MenuItem("Tools/GameFrame/Excel/ExcelExporter")]
         public static async void GenerateExcelTools()
         {
             if (running)

@@ -70,16 +70,16 @@ MonoBehaviour:
         AddressRuleName: AddressByFileName
         PackRuleName: PackSeparately
         FilterRuleName: CollectAll
-        AssetTags:
-        UserData:
+        AssetTags: 
+        UserData: 
       - CollectPath: Assets/ArtRes/WoodenFish/Audio
         CollectorGUID: 1d14c3f5067714291ae0b88b13c36cf5
         CollectorType: 0
         AddressRuleName: AddressByFileName
         PackRuleName: PackSeparately
         FilterRuleName: CollectAll
-        AssetTags:
-        UserData:
+        AssetTags: 
+        UserData: 
     - GroupName: Scenes
       GroupDesc: 
       AssetTags: 
@@ -87,6 +87,27 @@ MonoBehaviour:
       Collectors:
       - CollectPath: Assets/Scenes/MainScene
         CollectorGUID: e9c7df80a63a04be2ac96857dd515683
+        CollectorType: 0
+        AddressRuleName: AddressByFileName
+        PackRuleName: PackDirectory
+        FilterRuleName: CollectAll
+        AssetTags: 
+        UserData: 
+    - GroupName: Gomoku
+      GroupDesc: 
+      AssetTags: gomoku;boot
+      ActiveRuleName: EnableGroup
+      Collectors:
+      - CollectPath: Assets/ArtRes/Gomoku/Image
+        CollectorGUID: 6e651a97387404efcb5c6a4d524f37f7
+        CollectorType: 0
+        AddressRuleName: AddressByFileName
+        PackRuleName: PackDirectory
+        FilterRuleName: CollectAll
+        AssetTags: 
+        UserData: 
+      - CollectPath: Assets/Prefab/Gomoku
+        CollectorGUID: 16ad54ae573b34ee7b949c2830e2c63c
         CollectorType: 0
         AddressRuleName: AddressByFileName
         PackRuleName: PackDirectory

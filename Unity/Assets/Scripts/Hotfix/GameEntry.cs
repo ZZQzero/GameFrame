@@ -31,7 +31,7 @@ namespace Game.Hotfix
                 return;
             }
 
-            GameUI.Push<WoodenFishMainPanel>().Forget();
+            GameUI.Push<GomokuMainPanel>().Forget();
         }
 
         void Initialize()

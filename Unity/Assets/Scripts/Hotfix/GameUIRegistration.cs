@@ -8,6 +8,7 @@ namespace Game.Hotfix
         public static void RegisterAll()
         {
             GameUI.Register<WoodenFishMainPanel>("WoodenFishMain", UIGroup.Scene, cache: true);
+            GameUI.Register<GomokuMainPanel>("GomokuMain", UIGroup.Scene, cache: true);
         }
     }
 }

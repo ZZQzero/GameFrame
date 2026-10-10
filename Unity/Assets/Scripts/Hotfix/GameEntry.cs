@@ -23,6 +23,17 @@ namespace Game.Hotfix
             Initialize();
         }
 
+        void Start()
+        {
+            if (!IsReady)
+            {
+                // Awake 已报告初始化异常，后续生命周期不再启动业务。
+                return;
+            }
+
+            GameUI.Push<WoodenFishMainPanel>().Forget();
+        }
+
         void Initialize()
         {
             var token = this.GetCancellationTokenOnDestroy();
@@ -44,6 +55,7 @@ namespace Game.Hotfix
             }
 
             LanguageManager.AddTable(languages);
+            GameUIRegistration.RegisterAll();
             IsReady = true;
             Debug.Log("[GameEntry] Hotfix 初始化完成。");
         }

@@ -1,0 +1,242 @@
+---
+name: unity-primetween
+description: >-
+  本项目统一用 PrimeTween（零分配 Tween/Sequence）做表现层动画：Transform、UI、
+  Sprite、Camera、自定义数值。Use when working on animation, tween, Sequence,
+  UI show/hide, panel open/close, move/scale/fade, shake, Ease, TweenSettings,
+  TweenSettings<T>, PrimeTween, or replacing DOTween / UniTask Lerp with tween.
+---
+
+# Unity PrimeTween Skill
+
+本项目 **所有小游戏与 UI** 的补间动画统一使用 **PrimeTween 1.4.11**（`com.kyrylokuzyk.primetween`）。  
+不要引入 DOTween；不要用手写 `Lerp` + `Update`/`UniTask.Yield` 做常规表现动画（临时调试除外）。
+
+包路径（只读参考，勿改 PackageCache）：
+
+`Unity/Library/PackageCache/com.kyrylokuzyk.primetween@*`
+
+官方：https://github.com/KyryloKuzyk/PrimeTween
+
+## 何时启用
+
+涉及以下任一场景时先读本 Skill：
+
+- Transform / RectTransform 移动、缩放、旋转
+- UI 显隐、弹窗开合、锚点滑动、CanvasGroup / Graphic 透明度
+- Sprite / Material / Camera 属性动画
+- 多段编排（并行 / 串行 / 插入时间线）
+- 震动、Punch、屏幕 Shake
+- 从 DOTween 或手写 Lerp 迁移
+
+## 技术要点（必记）
+
+| 点 | 说明 |
+|----|------|
+| 命名空间 | `using PrimeTween;` |
+| 返回值 | `Tween` / `Sequence` 为 **struct**，结束后 `isAlive == false`，**不可复用** |
+| 正向 / 反向 | 不缓存、无 PlayForward；反向时 **新开一条 Tween** |
+| 零分配回调 | `OnComplete(target, t => t.Method())`，禁止 `() => Method()` 捕获 `this` |
+| 异步 | 可 `await tween` / `await sequence`（WebGL 可用）；热路径优先 `Sequence`，少用 async 状态机 |
+| 销毁安全 | target 为 `UnityEngine.Object` 时销毁对象会安全结束 tween |
+| 参数配置 | Inspector 用 `[SerializeField] TweenSettings`（时长/缓动）或 `TweenSettings<T>`（含起终点）；传给 `Tween.*` 时必须用 **`TweenSettings<T>`** |
+
+## 传参约定（1.4.11，避免 CS0618）
+
+`Tween.Position/Scale/...(target, endValue, TweenSettings)` **已过时**，会报警。统一用下面两种写法：
+
+```csharp
+[SerializeField] TweenSettings moveSettings; // 只配 duration / ease 等
+
+// ✅ 运行时 end + 共用 TweenSettings → 包成 TweenSettings<T>
+Tween.Position(t, new TweenSettings<Vector3>(endPos, moveSettings));
+Tween.Scale(t, new TweenSettings<Vector3>(endScale, moveSettings));
+
+// ✅ 直接传 TweenSettings<T>（Inspector 可配 start/end）
+[SerializeField] TweenSettings<Vector3> moveSettingsT;
+Tween.Position(t, moveSettingsT);
+
+// ✅ 字面量 duration/ease（无 SerializeField 时）
+Tween.Position(t, endPos, duration: 0.28f, ease: Ease.OutQuad);
+Tween.Scale(t, endScale, 0.22f, Ease.OutCubic);
+
+// ❌ 过时
+Tween.Position(t, endPos, moveSettings);
+Tween.Scale(t, endScale, moveSettings);
+```
+
+`new TweenSettings<T>(endValue, settings)` 默认 `startFromCurrent = true`（从当前值播到 end）。
+
+## 分层约定
+
+| 场景 | API |
+|------|-----|
+| 世界物体位移 | `Tween.Position` / `LocalPosition` |
+| UI 位移 | `Tween.UIAnchoredPosition` / `UIAnchoredPosition3D` / 轴分量 |
+| UI / Sprite 淡入淡出 | `Tween.Alpha(CanvasGroup\|Graphic\|SpriteRenderer, …)` |
+| 缩放 / 旋转 | `Tween.Scale` / `Rotation` / `EulerAngles` |
+| 匀速移动 | `PositionAtSpeed` / `LocalPositionAtSpeed`（Chain 后续段必须带 `startValue`） |
+| 编排 | `Sequence.Create().Group / Chain / Insert` |
+| 任意数值 | `Tween.Custom` |
+
+## 常用模式
+
+### 1. 单属性动画
+
+```csharp
+using PrimeTween;
+
+[SerializeField] TweenSettings moveSettings;
+
+void MoveTo(Transform target, Vector3 endPos)
+{
+    Tween.StopAll(onTarget: target);
+    Tween.Position(target, new TweenSettings<Vector3>(endPos, moveSettings));
+}
+```
+
+### 2. UI 开合（可逆，不缓存 Tween）
+
+```csharp
+[SerializeField] RectTransform panel;
+[SerializeField] TweenSettings<float> panelYSettings; // Inspector 配 start/end
+
+public void SetPanelOpened(bool opened)
+{
+    Tween.UIAnchoredPositionY(panel, panelYSettings.WithDirection(toEndValue: opened));
+}
+```
+
+### 3. Sequence 编排
+
+```csharp
+Sequence.Create()
+    .Group(Tween.UIAnchoredPositionY(panel, 0f, 0.35f, Ease.OutCubic))
+    .Group(Tween.Alpha(canvasGroup, 1f, 0.25f))
+    .Chain(Tween.Scale(icon, new Vector3(1.1f, 1.1f, 1f), 0.12f, Ease.OutBack))
+    .Chain(Tween.Scale(icon, Vector3.one, 0.1f))
+    .ChainCallback(this, t => t.OnIntroFinished());
+```
+
+路径逐步移动示例：
+
+```csharp
+var seq = Sequence.Create();
+for (var i = 0; i < waypoints.Count; i++)
+{
+    seq.Chain(Tween.Position(t, new TweenSettings<Vector3>(waypoints[i], stepSettings)));
+}
+```
+
+| 方法 | 行为 |
+|------|------|
+| `Group` | 与上一段并行 |
+| `Chain` | 接在整条序列末尾 |
+| `Insert(atTime, …)` | 指定时刻插入（可重叠） |
+| `ChainDelay` | 串行延迟 |
+
+### 4. 打断与对齐
+
+```csharp
+tween.Stop();
+Tween.StopAll(onTarget: transform);
+
+tween.Complete();
+Tween.CompleteAll(onTarget: transform);
+
+Tween.StopAll(onTarget: transform);
+transform.position = authoritativePos;
+```
+
+存句柄时用字段保存 `Tween`/`Sequence`，用前判断 `isAlive`：
+
+```csharp
+Tween _tween;
+
+void Play(Transform t, Vector3 to)
+{
+    if (_tween.isAlive)
+    {
+        _tween.Stop();
+    }
+
+    _tween = Tween.Position(t, new TweenSettings<Vector3>(to, moveSettings));
+}
+```
+
+### 5. 与 UniTask 协作
+
+```csharp
+async UniTask PlayAsync(Transform t, Vector3 to, CancellationToken ct)
+{
+    var tween = Tween.Position(t, new TweenSettings<Vector3>(to, moveSettings));
+    try
+    {
+        await tween;
+    }
+    finally
+    {
+        if (ct.IsCancellationRequested && tween.isAlive)
+        {
+            tween.Stop();
+        }
+    }
+}
+```
+
+- **网络 / 业务逻辑**：`UniTask`
+- **表现补间**：`PrimeTween`（可 await，或 fire-and-forget）
+- 纯表现、无需等待：直接开 Tween，不要再包 `UniTaskVoid` 逐帧 Yield
+
+### 6. 零分配回调
+
+```csharp
+// ❌ 闭包分配
+.OnComplete(() => OnFinished());
+
+// ✅
+.OnComplete(this, t => t.OnFinished());
+Tween.Delay(this, 0.5f, t => t.OnFinished());
+Tween.Custom(this, 0f, 1f, 0.3f, (t, v) => t._fill = v);
+```
+
+## Ease 选用建议
+
+| Ease | 用途 |
+|------|------|
+| `InOutSine` | 平滑平移 |
+| `OutCubic` / `OutQuad` | UI 滑入、落点减速 |
+| `OutBack` | 按钮 / 弹窗轻微过冲 |
+| `Linear` | 进度条、匀速 |
+| `Default` | `PrimeTweenConfig.defaultEase` |
+
+自定义：传 `AnimationCurve`，或 `Easing.BounceExact` / `Overshoot` / `Elastic`。
+
+## 启动与调试
+
+```csharp
+PrimeTweenConfig.SetTweensCapacity(128);
+```
+
+调试：Hierarchy → DontDestroyOnLoad → **PrimeTweenManager**。
+
+## 禁止事项
+
+1. 新代码不要用 DOTween；迁移可用宏 `PRIME_TWEEN_DOTWEEN_ADAPTER`，但语法仍逐步改成 PrimeTween
+2. **禁止** `Tween.*(target, endValue, TweenSettings)` 非泛型重载（CS0618）；改用 `TweenSettings<T>`
+3. 不要缓存 Tween 再 Restart / PlayForward（不支持；按方向新开）
+4. 不要在每帧重复创建同目标 Tween 却不 `StopAll`（会叠动画）
+5. 热路径不要用闭包 `OnComplete` / `OnUpdate`
+6. 不要在 `Update` 里分配 Sequence / 闭包做常规动画
+
+## 新功能 Checklist
+
+1. `using PrimeTween;`
+2. 时长/缓动用 `[SerializeField] TweenSettings`；传给 API 时包成 `new TweenSettings<T>(end, settings)`，或直接序列化 `TweenSettings<T>`
+3. 开播前按需 `Stop` / `StopAll`，避免叠动画
+4. 回调用 `OnComplete(target, …)`
+5. 多段用 `Sequence`；只需等待业务节点时再 `await`
+6. 对象销毁前无需手动 Kill（挂在 Unity 对象上的 tween 会安全结束）
+7. 编译无 CS0618（过时 TweenSettings 重载）
+
+更多 API / DOTween 对照见 [reference.md](reference.md)。

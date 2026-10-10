@@ -64,7 +64,8 @@ namespace GameFrame.UI
                     throw new OperationCanceledException();
                 }
 
-                var op = handle.InstantiateAsync(new InstantiateOptions(false, parent, false));
+                // 实例化完成前不挂到 UI 根节点，Shutdown 可能在等待期间销毁它。
+                var op = handle.InstantiateAsync(new InstantiateOptions(false, null, false));
                 await op;
                 instance = op.Result;
                 if (instance == null)
@@ -88,14 +89,28 @@ namespace GameFrame.UI
                 }
 
                 panel.AssetHandle = handle;
+                instance.transform.SetParent(parent, false);
                 return panel;
             }
             catch
             {
                 if (instance != null)
                 {
-                    UnityEngine.Object.Destroy(instance);
-                    instance = null;
+                    try
+                    {
+                        var panel = instance.GetComponent<UIPanel>();
+                        if (panel != null)
+                        {
+                            panel.DispatchDestroy();
+                        }
+                    }
+                    finally
+                    {
+                        UnityEngine.Object.Destroy(instance);
+                        instance = null;
+                        Release(handle);
+                        handle = null;
+                    }
                 }
 
                 Release(handle);

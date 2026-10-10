@@ -6,8 +6,9 @@
 启动顺序：初始化语言服务与事件派发器 → 初始化 UI → 绑定主相机 Stack → 初始化 YooAsset → 获取版本与清单 →
 GameUI.SetPackage → 下载 boot 资源 → 启动其余框架系统 →
 加载 AOT 元数据与 Hotfix DLL → 实例化 GameEntry prefab → 读取热更配置并补入翻译 → 启动热更业务。
-Launch 负责框架初始化、选择相机和准备资源。GameEntry 仅在 Awake 中初始化 Hotfix 配置与业务，
-完成后 IsReady 为 true。Launch 启动 GameRuntime 时 EnableUI 为 false，语言服务也不重复初始化。
+Launch 负责框架初始化、选择相机和准备资源。GameEntry 在 Awake 中初始化 Hotfix 配置，
+并调用 `GameUIRegistration.RegisterAll()` 统一注册业务面板，完成后 IsReady 为 true，
+再在 Start 中打开木鱼主面板。Launch 启动 GameRuntime 时 EnableUI 为 false，语言服务也不重复初始化。
 任一步失败直接抛出并终止后续启动，不重试、不回退旧资源、不自动回滚。
 
 `Game.AOT` 程序集使用 `Game.AOT` 命名空间，引用框架、UniTask、YooAsset、HybridCLR 和 Luban.Runtime，不引用 Hotfix。
@@ -54,7 +55,11 @@ Launch 引用 `Assets/Resources/GlobalConfig.asset`，该 ScriptableObject 随�
 
 语言服务、事件派发器和 UI 在资源初始化前启动；Timer、Pool、Scene 在 boot 下载完成后由 Launch 启动。
 Input / Audio 在 Launch 的 Inspector 绑定配置后才启用。GameEntry 在 Awake 中自动初始化热更配置和业务。
-场景尚未配置业务首界面或内容场景，启动完成后停留在 Launch，后续导航由业务接入。
+启动完成后在 Launch 场景打开 `WoodenFishMainPanel`，无需额外切换内容场景。
+`DefaultPackage` 的 `WoodenFish` 组按文件名采集 `Assets/Prefab/WoodenFish` 和
+`Assets/ArtRes/WoodenFish/WoodenFishHit.wav`，标签为 `boot`。图片与字体通过 prefab 依赖采集。
+Launch 绑定 `Assets/Config/Audio/WoodenFishAudioConfig.asset`，木鱼音效在框架初始化时常驻预加载。
+玩法与可调参数见 [WoodenFish.md](WoodenFish.md)。
 
 最早显示的启动界面应直接放在 Launch 场景或引用安装包内置 prefab，不依赖待更新资源或 Hotfix。
 UI 根节点创建不依赖 YooAsset，但通过 GameUI 加载面板仍需要 Package 就绪。

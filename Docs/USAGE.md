@@ -86,6 +86,8 @@ GamePool.Shutdown();
 - 退出顺序必须是 **`GameUI.Shutdown()` → 再 `GamePool.Shutdown()`**。面板的 `OnDestroyPanel` 可能还要还池。统一入口已处理该顺序；单独使用时还需参考 [Scene.md](Scene.md)、[Audio.md](Audio.md)、[Timer.md](Timer.md)。
 - `Shutdown` 会销毁 Root、打开中与缓存面板，并释放 YooAsset Handle；**注册表会保留**，可再次 `Init`。
 - 进行中的 `Push` / `Popup` / `Hud` 在 `Shutdown` 时以 **`OperationCanceledException`** 结束，不会返回 `null`。
+- 异步实例化中的面板先脱离 UI 根节点，加载成功后才挂到对应层；加载取消时派发销毁并释放句柄。
+  `OnDestroyPanel` 可能在 `OnCreate` 前执行，清理初始化时创建的资源时需允许它们尚未创建。
 - 不要只检查“启动完成”日志：相机 Stack 配不上会抛，首屏 `Push` 失败也会抛。
 - 宿主需主动调用并等待关闭；框架本身不注册 Editor PlayMode 退出钩子，Unity 的退出 / 销毁回调不能保证异步清理完成。
 
@@ -216,6 +218,8 @@ protected override void OnOpen(ItemArgs args)
 - **`Tips` 与 `Toast` 不要用同一面板类型**（通道不同，可能同时存在两套实例）。
 - `Back()` 只关 Popup / Window；Hud / Tips / Guide / Toast 需显式 Close。
 - 必须 `GameUI.Register`。未注册、空 Location、重复且不一致的注册都会抛。
+- 本项目的业务注册集中在 Hotfix 的 `GameUIRegistration.RegisterAll()`，由 GameEntry 初始化时调用。
+  新面板的类型、地址、UIGroup 和缓存选项在该脚本维护；注册不加载 prefab，打开时仍调用 `Push` / `Popup` 等接口。
 - 资源地址原样传递，不自动去除首尾空格。无参打开重载使用 `UINone.Value`；显式传入 `null` 不会自动补成无参对象。
 - 默认 `cache: true`：Close 只隐藏，不释放内存；要释放用 `destroy: true` 或 `ClearCache()`。
 

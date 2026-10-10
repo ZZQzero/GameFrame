@@ -150,7 +150,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Game.AOT::Game.AOT.Launch
   globalConfig: {fileID: 11400000, guid: e919f0f8871934251a912b2b969e987d, type: 2}
   inputConfig: {fileID: 0}
-  audioConfig: {fileID: 0}
+  audioConfig: {fileID: 11400000, guid: e9039f1ea62f04705967618849a89f34, type: 2}
 --- !u!4 &282740284
 Transform:
   m_ObjectHideFlags: 0

@@ -4,3 +4,4 @@
 !Unity/Assets/Scripts/Runtime/MediaBackup/Native~/
 !Unity/Assets/Scripts/Runtime/MediaBackup/Native~/**
 **/__pycache__/
+/output/

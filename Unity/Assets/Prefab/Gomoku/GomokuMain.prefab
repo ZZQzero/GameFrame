@@ -862,7 +862,6 @@ GameObject:
   - component: {fileID: 4963728968378282564}
   - component: {fileID: 6592778457246802863}
   - component: {fileID: 8831938036974851869}
-  - component: {fileID: 275840878836342608}
   m_Layer: 5
   m_Name: Checkerboard
   m_TagString: Untagged
@@ -884,12 +883,12 @@ RectTransform:
   m_Children:
   - {fileID: 1215291372170686564}
   - {fileID: 5744165658402283074}
-  m_Father: {fileID: 8263656440353119528}
+  m_Father: {fileID: 1359187167684621021}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0.05, y: 0.2}
-  m_AnchorMax: {x: 0.95, y: 0.8}
+  m_AnchorMin: {x: 0.5, y: 0.5}
+  m_AnchorMax: {x: 0.5, y: 0.5}
   m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 0, y: 0}
+  m_SizeDelta: {x: 1000, y: 1000}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &6592778457246802863
 CanvasRenderer:
@@ -935,12 +934,13 @@ MonoBehaviour:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3322112556468016191}
+  m_GameObject: {fileID: 7795413679096576832}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 2735b3039a21f4ea5aa9bbe62fcdc98f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Game.Hotfix::Game.Hotfix.GomokuBoardView
+  board: {fileID: 4963728968378282564}
   grid: {fileID: 9024331324946188234}
   piecesRoot: {fileID: 5744165658402283074}
   lastMoveMarker: {fileID: 7621174056009188118}
@@ -1190,7 +1190,7 @@ RectTransform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
-  - {fileID: 4963728968378282564}
+  - {fileID: 1359187167684621021}
   - {fileID: 546446314259475600}
   - {fileID: 7856979881394333565}
   - {fileID: 4367730810759532374}
@@ -1404,3 +1404,40 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls: []
+--- !u!1 &7795413679096576832
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1359187167684621021}
+  - component: {fileID: 275840878836342608}
+  m_Layer: 5
+  m_Name: BoardArea
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!224 &1359187167684621021
+RectTransform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7795413679096576832}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 4963728968378282564}
+  m_Father: {fileID: 8263656440353119528}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_AnchorMin: {x: 0.05, y: 0.2}
+  m_AnchorMax: {x: 0.95, y: 0.8}
+  m_AnchoredPosition: {x: 0, y: 0}
+  m_SizeDelta: {x: 0, y: 0}
+  m_Pivot: {x: 0.5, y: 0.5}

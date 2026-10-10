@@ -94,18 +94,20 @@ namespace GameFrame.Tests
                 Assert.AreEqual(size, view.Grid.PointCount);
             }
 
-            var board = (RectTransform)view.transform;
-            Assert.AreSame(board, view.Grid.transform.parent);
-            var content = (RectTransform)board.parent;
-            content.anchorMin = new Vector2(0.5f, 0.5f);
-            content.anchorMax = content.anchorMin;
+            var board = (RectTransform)view.Grid.transform.parent;
+            Assert.AreEqual(new Vector2(0.5f, 0.5f), board.anchorMin);
+            Assert.AreEqual(board.anchorMin, board.anchorMax);
+            var area = (RectTransform)view.transform;
+            Assert.AreSame(area, board.parent);
+            Assert.AreEqual("BoardArea", area.name);
+            area.anchorMin = new Vector2(0.5f, 0.5f);
+            area.anchorMax = area.anchorMin;
             var root = board.Find("Pieces");
             var piece = root.Find("Piece").GetComponent<Image>();
             var marker = root.Find("LastMoveMarker");
-            var span = board.anchorMax - board.anchorMin;
             foreach (var available in new[] { new Vector2(480f, 700f), new Vector2(1400f, 1200f), new Vector2(700f, 360f) })
             {
-                content.sizeDelta = new Vector2(available.x / span.x, available.y / span.y);
+                area.sizeDelta = available;
                 yield return null;
                 Canvas.ForceUpdateCanvases();
                 var expectedSize = Mathf.Min(1000f, Mathf.Min(available.x, available.y));
@@ -119,6 +121,19 @@ namespace GameFrame.Tests
 
             Click(0, 0, PointerEventData.InputButton.Left);
             Assert.AreEqual(GomokuStone.White, panel.Game.GetStone(0, 0));
+
+            var outside = board.TransformPoint(new Vector3(board.rect.xMax + 10f, 0f));
+            var eventData = new PointerEventData(EventSystem.current)
+            {
+                position = RectTransformUtility.WorldToScreenPoint(GameUI.UICamera, outside)
+            };
+            var hits = new List<RaycastResult>();
+            EventSystem.current.RaycastAll(eventData, hits);
+            foreach (var hit in hits)
+            {
+                Assert.AreNotSame(view.gameObject, ExecuteEvents.GetEventHandler<IPointerClickHandler>(hit.gameObject),
+                    "BoardArea 中棋盘外的空白不能命中棋盘点击处理器。");
+            }
         }
 
         [UnityTest]
@@ -146,6 +161,28 @@ namespace GameFrame.Tests
             Assert.AreEqual(GomokuGameState.BlackWon, panel.Game.State);
             yield return null;
         }
+
+#if UNITY_EDITOR
+        [UnityTest]
+        public IEnumerator InspectorChangesRefreshBoardAndPieceSizesWithoutAnotherMove()
+        {
+            Click(14, 14, PointerEventData.InputButton.Left);
+            var serialized = new UnityEditor.SerializedObject(view);
+            serialized.FindProperty("maximumBoardSize").floatValue = 225f;
+            serialized.FindProperty("pieceSizeRatio").floatValue = 0.6f;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            yield return new WaitForSeconds(0.05f);
+
+            var board = (RectTransform)view.Grid.transform.parent;
+            Assert.That(board.rect.width, Is.EqualTo(225f).Within(0.01f));
+            Assert.That(board.rect.height, Is.EqualTo(225f).Within(0.01f));
+            var piece = board.Find("Pieces/Piece").GetComponent<Image>();
+            Assert.That(piece.rectTransform.rect.width, Is.EqualTo(view.Grid.CellSize * 0.6f).Within(0.01f));
+            var expected = view.Grid.transform.TransformPoint(view.Grid.GetIntersectionLocalPosition(14, 14));
+            Assert.That(Vector3.Distance(expected, piece.transform.position), Is.LessThan(0.01f));
+            Assert.AreEqual(1, panel.Game.Moves.Count);
+        }
+#endif
 
         void Click(int column, int row, PointerEventData.InputButton button)
         {

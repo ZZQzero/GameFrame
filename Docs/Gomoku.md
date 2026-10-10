@@ -54,17 +54,19 @@ GomokuMain
 └── GomokuBg
     └── Content                         SafeAreaFitter
         ├── Title / Subtitle / Status
-        ├── Checkerboard                Image + GomokuBoardView
-        │   ├── Grid                    GomokuBoardGraphic
-        │   └── Pieces
-        │       ├── Piece …             运行时按需创建
-        │       └── LastMoveMarker
+        ├── BoardArea                   GomokuBoardView，棋盘可用布局区域
+        │   └── Checkerboard            Image
+        │       ├── Grid                GomokuBoardGraphic
+        │       └── Pieces
+        │           ├── Piece …         运行时按需创建
+        │           └── LastMoveMarker
         ├── UndoButton
         └── RestartButton
 ```
 
 Checkerboard 的 Image 提供底色，Grid 和 Pieces 均铺满 Checkerboard，棋子与标记关闭 Raycast Target。
-Checkerboard 的 Image 接收射线，由同节点的 GomokuBoardView 处理点击；右键不落子。
+Checkerboard 的 Image 接收射线，点击沿父层级传给 BoardArea 上的 GomokuBoardView；右键不落子。
+BoardArea 没有 Graphic，不接收射线，棋盘外的布局空白不会触发落子。
 点击转为 Grid 的局部坐标，取最近交点，最外圈线之外允许半格；超出允许范围返回 false。
 
 在 Grid 的 Inspector 配置网格：
@@ -82,15 +84,19 @@ Checkerboard 的 Image 接收射线，由同节点的 GomokuBoardView 处理点�
 小于 9 路的奇数棋盘只有中央星位，偶数棋盘没有。星位仅为装饰，不改变规则。
 网格按配置或尺寸变化重建 UI Mesh，不每帧生成对象。
 
-Checkerboard 的 GomokuBoardView 可设置 Maximum Board Size（默认 1000）和 Piece Size Ratio（默认 0.85）。
-Checkerboard 的 RectTransform 锚点定义 Content 中的可用范围，默认 Min=(0.05, 0.2)、Max=(0.95, 0.8)，
-为上下信息和按钮留出空间，Anchored Position 为零、Pivot 为中心。
-实际棋盘边长取最大边长与父节点尺寸乘锚点跨度得到的可用宽高的最小值，
-通过 sizeDelta 将矩形收缩为正方形；点击范围跟随实际棋盘，不额外创建布局容器。
+BoardArea 的 GomokuBoardView 可设置 Maximum Board Size（默认 1000）和 Piece Size Ratio（默认 0.85）。
+BoardArea 的 RectTransform 用锚点与边距定义 Content 中的可用范围，
+默认 Min=(0.05, 0.2)、Max=(0.95, 0.8)，为上下信息和按钮留出空间。
+Checkerboard 使用标准 Center 锚点，Min=Max=(0.5, 0.5)，Anchored Position 为零、Pivot 为中心。
+实际棋盘边长取 Maximum Board Size、BoardArea 宽度、BoardArea 高度的最小值，
+直接将 Checkerboard 的 sizeDelta 设置为相同的宽高，点击范围跟随实际棋盘。
 Content 复用框架 SafeAreaFitter，方向不锁定。
 GomokuBoardView 使用 ExecuteAlways，Prefab 编辑预览与运行时使用相同的正方形适配。
-尺寸回调调整棋盘和已落棋子，无每帧轮询；尺寸写入期间阻止回调重入。
-sizeDelta 由布局管理，调整可用范围使用锚点，调整最大边长使用 Maximum Board Size。
+监听 BoardArea 的尺寸变化后调整棋盘和已落棋子，无每帧轮询。
+尺寸回调位于布局容器，尺寸写入位于子棋盘，不需要自身尺寸回调的重入保护。
+尺寸不变时不重复写入 sizeDelta；在 Inspector 修改 BoardView 配置后，下一次编辑器主线程回调刷新布局。
+Checkerboard 的 sizeDelta 由布局管理；调整可用范围使用 BoardArea 的锚点和边距，
+调整最大边长使用 Maximum Board Size，无需叠加 AspectRatioFitter 或其他尺寸控制组件。
 
 GridRect 返回网格边界，CellSize 返回格距，GetIntersectionLocalPosition(column, row) 返回交点局部坐标。
 行列从 0 开始，左下角为 (0, 0)，列向右、行向上；越界行列抛出 ArgumentOutOfRangeException。
@@ -104,4 +110,4 @@ GameUIRegistration 注册 GomokuMain，DefaultPackage 的 Gomoku 组保持 `gomo
 正式包仍需重新编译 Hotfix DLL 并构建 YooAsset 资源包，不能仅更新 Editor 源码。
 
 PlayMode 测试 GomokuGameTests 覆盖回合、非法落子、四方向胜负、白方胜利、长连、和棋、悔棋和历史重放；
-GomokuPanelTests 覆盖指针输入、按钮、缓存重开、规格切换、区域缩放、坐标对齐和终局显示。
+GomokuPanelTests 覆盖指针输入、按钮、缓存重开、规格切换、区域缩放、坐标对齐、终局显示和 Inspector 配置刷新。

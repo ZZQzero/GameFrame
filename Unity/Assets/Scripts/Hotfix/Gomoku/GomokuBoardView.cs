@@ -6,12 +6,13 @@ using UnityEngine.UI;
 
 namespace Game.Hotfix
 {
-    /// <summary>棋盘显示和点击转换。挂在 Checkerboard，规则和回合由棋局决定。</summary>
+    /// <summary>棋盘显示和点击转换。挂在 BoardArea，规则和回合由棋局决定。</summary>
     [ExecuteAlways]
     [DisallowMultipleComponent]
     [RequireComponent(typeof(RectTransform))]
     public sealed class GomokuBoardView : UIBehaviour, IPointerClickHandler
     {
+        [SerializeField] RectTransform board;
         [SerializeField] GomokuBoardGraphic grid;
         [SerializeField] RectTransform piecesRoot;
         [SerializeField] Image lastMoveMarker;
@@ -22,7 +23,6 @@ namespace Game.Hotfix
 
         readonly List<Image> pieces = new List<Image>();
         GomokuGame displayedGame;
-        bool refreshingLayout;
 
         public GomokuBoardGraphic Grid => grid;
         public bool Interactable { get; set; }
@@ -73,7 +73,7 @@ namespace Game.Hotfix
                 throw new ArgumentNullException(nameof(game));
             }
 
-            if (grid == null || piecesRoot == null || lastMoveMarker == null
+            if (board == null || grid == null || piecesRoot == null || lastMoveMarker == null
                 || blackPiece == null || whitePiece == null)
             {
                 throw new InvalidOperationException("[Gomoku] 棋盘显示组件或黑白棋子资源未绑定。");
@@ -123,41 +123,60 @@ namespace Game.Hotfix
             RefreshLayout();
         }
 
+#if UNITY_EDITOR
+        protected override void OnValidate()
+        {
+            base.OnValidate();
+            // OnValidate 可能在资源加载线程执行，延后到编辑器主线程更新布局。
+            UnityEditor.EditorApplication.update -= RefreshEditorLayout;
+            UnityEditor.EditorApplication.update += RefreshEditorLayout;
+        }
+
+        protected override void OnDisable()
+        {
+            UnityEditor.EditorApplication.update -= RefreshEditorLayout;
+            base.OnDisable();
+        }
+
+        void RefreshEditorLayout()
+        {
+            UnityEditor.EditorApplication.update -= RefreshEditorLayout;
+            if (this != null && isActiveAndEnabled)
+            {
+                RefreshLayout();
+            }
+        }
+#endif
+
         void RefreshLayout()
         {
             // 添加组件和 prefab 回填引用期间也会收到尺寸回调。
-            if (refreshingLayout || grid == null || piecesRoot == null || transform.parent is not RectTransform parent)
+            if (board == null || grid == null || piecesRoot == null)
             {
                 return;
             }
 
-            refreshingLayout = true;
-            try
+            var available = ((RectTransform)transform).rect;
+            var size = Mathf.Max(0f, Mathf.Min(maximumBoardSize, Mathf.Min(available.width, available.height)));
+            var sizeDelta = Vector2.one * size;
+            if (board.sizeDelta != sizeDelta)
             {
-                var board = (RectTransform)transform;
-                // 锚点定义父级中的可用区域；sizeDelta 将实际矩形收缩为正方形。
-                var available = Vector2.Scale(parent.rect.size, board.anchorMax - board.anchorMin);
-                var size = Mathf.Max(0f, Mathf.Min(maximumBoardSize, Mathf.Min(available.x, available.y)));
-                board.sizeDelta = Vector2.one * size - available;
-                if (displayedGame == null || grid.rectTransform.rect.width <= 0f)
-                {
-                    return;
-                }
-
-                for (var index = 0; index < displayedGame.Moves.Count; index++)
-                {
-                    PlaceImage(pieces[index], displayedGame.Moves[index], grid.CellSize * pieceSizeRatio);
-                }
-
-                if (displayedGame.Moves.Count > 0)
-                {
-                    PlaceImage(lastMoveMarker, displayedGame.Moves[displayedGame.Moves.Count - 1], grid.CellSize * 0.16f);
-                }
+                board.sizeDelta = sizeDelta;
             }
-            finally
+
+            if (displayedGame == null || grid.rectTransform.rect.width <= 0f)
             {
-                // 设置自身尺寸会同步触发尺寸回调，避免重入并确保异常后恢复。
-                refreshingLayout = false;
+                return;
+            }
+
+            for (var index = 0; index < displayedGame.Moves.Count; index++)
+            {
+                PlaceImage(pieces[index], displayedGame.Moves[index], grid.CellSize * pieceSizeRatio);
+            }
+
+            if (displayedGame.Moves.Count > 0)
+            {
+                PlaceImage(lastMoveMarker, displayedGame.Moves[displayedGame.Moves.Count - 1], grid.CellSize * 0.16f);
             }
         }
 

@@ -14,10 +14,11 @@
 | GomokuGame | 纯 C# 棋局数据、执子方、合法性检查、四方向胜负、和棋、历史和悔棋；不依赖 Unity |
 | GomokuBoardGraphic | 网格、星位和交点坐标计算 |
 | GomokuBoardView | 点击转行列、棋子和最后落子标记、可用区域适配；不判断回合和胜负 |
-| GomokuMainPanel | 本地操作协调、棋局创建、调用规则、刷新显示与状态文字、按钮生命周期 |
+| GomokuMainPanel | 本地操作协调、棋局创建、调用规则、刷新显示与状态文字、落子音效、按钮生命周期 |
 
 本地流程是 `IntersectionClicked → GomokuMainPanel.ApplyMove → GomokuGame.PlaceMove → Render`。
-被规则拒绝的落子不会刷新显示。操作包含行列和执子方，显示层不直接写棋盘数组。
+被规则拒绝的落子不会刷新显示或播放音效。接受落子后，面板通过 GameAudio 播放一次落盘声；
+悔棋、重开、缓存重新打开、布局调整和直接 Render 都不播放。操作包含行列和执子方，显示层不直接写棋盘数组。
 后续网络接入可将点击处理改为发送请求，收到服务器确认后调用 ApplyMove；
 匹配、房间、消息顺序、身份、超时和断线处理由届时的网络流程负责，当前不预建这些层。
 
@@ -36,7 +37,7 @@
   即使上一手结束了棋局，也可以撤销。
 - `GomokuMainPanel.StartNewGame(pointCount)`：统一创建新棋局、修改网格规格并清空显示。
   在活动棋局中切换 18、20 路等规格必须走此入口。
-- `GomokuMainPanel.ApplyMove(column, row, stone)`：应用操作并在接受后更新显示；未创建棋局时抛出 InvalidOperationException。
+- `GomokuMainPanel.ApplyMove(column, row, stone)`：应用操作并在接受后更新显示、播放音效；未创建棋局时抛出 InvalidOperationException。
 - `GomokuBoardView.Render(game)`：按完整棋局更新显示。空棋局参数抛出 ArgumentNullException；
   资源引用缺失或棋局与网格规格不一致抛出 InvalidOperationException。
 
@@ -105,9 +106,15 @@ GridRect 返回网格边界，CellSize 返回格距，GetIntersectionLocalPositi
 ## 资源与验证
 
 黑白棋子使用 `Assets/ArtRes/Gomoku/Image/BlackPieces.png` 和 `WhitePieces.png`，导入类型为 Sprite。
+落子音效为 `Assets/ArtRes/Gomoku/Audio/GomokuPlace.wav`，合成的 0.16 秒落盘声（单声道 PCM）。
+`GameAudioIds.GomokuPlace` 对应 `sfx.gomoku.place`，YooAsset 地址为 `GomokuPlace`。
+Launch 引用共用的 `Assets/Config/Audio/GameAudioConfig.asset`，其中保留木鱼条目并加入落子条目：
+Sfx 总线、Resident 启动预加载、音量 0.7、无冷却、最多 4 声并行，超限替换最早一声。
+面板传递 OpenCancellationToken，关闭时取消尚未完成的播放请求，已经开播的短音效自然结束。
+需要更换音色时替换同路径 WAV 并保留 `.meta`；音量在共用配置的落子条目中调整。
 GameUIRegistration 注册 GomokuMain，DefaultPackage 的 Gomoku 组保持 `gomoku` 标签并增加 `boot`，
-采集 Images 和 prefab；字体通过 prefab 依赖采集。GameEntry 在框架和配置就绪后打开此面板。
+采集 Image、Audio 和 prefab；字体通过 prefab 依赖采集。GameEntry 在框架和配置就绪后打开此面板。
 正式包仍需重新编译 Hotfix DLL 并构建 YooAsset 资源包，不能仅更新 Editor 源码。
 
 PlayMode 测试 GomokuGameTests 覆盖回合、非法落子、四方向胜负、白方胜利、长连、和棋、悔棋和历史重放；
-GomokuPanelTests 覆盖指针输入、按钮、缓存重开、规格切换、区域缩放、坐标对齐、终局显示和 Inspector 配置刷新。
+GomokuPanelTests 覆盖指针输入、按钮、缓存重开、规格切换、区域缩放、坐标对齐、终局显示、Inspector 配置刷新和音效触发范围。

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using Game.AOT;
 using Game.Hotfix;
+using GameFrame.Audio;
 using GameFrame.UI;
 using NUnit.Framework;
 using TMPro;
@@ -20,27 +21,42 @@ namespace GameFrame.Tests
         GlobalConfig config;
         GomokuMainPanel panel;
         GomokuBoardView view;
+        AudioRuntimeDriver audioDriver;
 
         [UnitySetUp]
         public IEnumerator SetUp() => UniTask.ToCoroutine(async () =>
         {
+#if UNITY_EDITOR
             config = ScriptableObject.CreateInstance<GlobalConfig>();
             config.PlayMode = EPlayMode.EditorSimulateMode;
             resources = new ResourceLoadManager();
             await resources.InitializeAsync(config);
             await resources.UpdatePackageManifestAsync();
+            Assert.IsTrue(resources.ContainsLocation("GomokuPlace"));
+            var audio = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioRuntimeConfig>(
+                "Assets/Config/Audio/GameAudioConfig.asset");
+            await GameAudio.InitAsync(resources.Package, audio);
+            audioDriver = Object.FindFirstObjectByType<AudioRuntimeDriver>();
             GameUI.Init(resources.Package);
             GameUIRegistration.RegisterAll();
             panel = await GameUI.Push<GomokuMainPanel>();
             view = panel.GetComponentInChildren<GomokuBoardView>();
             await UniTask.NextFrame();
             Canvas.ForceUpdateCanvases();
+#else
+            Assert.Ignore("Gomoku panel tests require Editor simulated assets.");
+            await UniTask.CompletedTask;
+#endif
         });
 
         [UnityTearDown]
         public IEnumerator TearDown() => UniTask.ToCoroutine(async () =>
         {
             GameUI.Shutdown();
+            if (GameAudio.IsInited)
+            {
+                await GameAudio.ShutdownAsync();
+            }
             if (resources != null)
             {
                 await resources.ShutdownAsync();
@@ -49,6 +65,37 @@ namespace GameFrame.Tests
             Object.Destroy(config);
             await UniTask.NextFrame();
         });
+
+        [UnityTest]
+        public IEnumerator OnlyAcceptedMovesPlayPlacementSound()
+        {
+            Assert.AreEqual(0, audioDriver.GetActiveVoiceCount(AudioBus.Sfx));
+            Click(0, 0, PointerEventData.InputButton.Left);
+            yield return null;
+            Assert.AreEqual(1, audioDriver.GetActiveVoiceCount(AudioBus.Sfx));
+            var source = System.Array.Find(audioDriver.GetComponentsInChildren<AudioSource>(),
+                item => item.clip != null);
+            Assert.AreEqual("GomokuPlace", source.clip.name);
+            Assert.IsTrue(source.isPlaying);
+            Assert.AreEqual(1, GameAudio.StopBus(AudioBus.Sfx));
+
+            Click(0, 0, PointerEventData.InputButton.Left);
+            Click(1, 0, PointerEventData.InputButton.Right);
+            Assert.AreEqual(GomokuMoveResult.WrongTurn, panel.ApplyMove(1, 0, GomokuStone.Black));
+            Assert.AreEqual(GomokuMoveResult.OutOfBounds, panel.ApplyMove(-1, 0, GomokuStone.White));
+            view.Render(panel.Game);
+            Button("UndoButton").onClick.Invoke();
+            Button("RestartButton").onClick.Invoke();
+            GameUI.Close<GomokuMainPanel>();
+            yield return GameUI.Push<GomokuMainPanel>().ToCoroutine();
+            Assert.AreEqual(0, audioDriver.GetActiveVoiceCount(AudioBus.Sfx));
+
+            Click(1, 0, PointerEventData.InputButton.Left);
+            Click(2, 0, PointerEventData.InputButton.Left);
+            Assert.AreEqual(2, audioDriver.GetActiveVoiceCount(AudioBus.Sfx), "黑白落子各播放一次。");
+            yield return new WaitForSecondsRealtime(0.3f);
+            Assert.AreEqual(0, audioDriver.GetActiveVoiceCount(AudioBus.Sfx), "短音效播放完应释放声道。");
+        }
 
         [UnityTest]
         public IEnumerator PointerInputUndoRestartAndCacheReopenKeepStateConsistent() => UniTask.ToCoroutine(async () =>

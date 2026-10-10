@@ -1,4 +1,6 @@
 using System;
+using Cysharp.Threading.Tasks;
+using GameFrame.Audio;
 using GameFrame.UI;
 using TMPro;
 using UnityEngine;
@@ -70,6 +72,7 @@ namespace Game.Hotfix
             if (result == GomokuMoveResult.Accepted)
             {
                 RefreshGame();
+                GameAudio.TryPlayAsync(GameAudioIds.GomokuPlace, OpenCancellationToken).Forget();
             }
 
             return result;

@@ -56,10 +56,10 @@ Launch 引用 `Assets/Resources/GlobalConfig.asset`，该 ScriptableObject 随�
 语言服务、事件派发器和 UI 在资源初始化前启动；Timer、Pool、Scene 在 boot 下载完成后由 Launch 启动。
 Input / Audio 在 Launch 的 Inspector 绑定配置后才启用。GameEntry 在 Awake 中自动初始化热更配置和业务。
 启动完成后在 Launch 场景打开 `GomokuMainPanel`，无需额外切换内容场景。
-`DefaultPackage` 的 `Gomoku` 组采集 `Assets/Prefab/Gomoku` 和 `Assets/ArtRes/Gomoku/Image`，
+`DefaultPackage` 的 `Gomoku` 组采集 `Assets/Prefab/Gomoku`、`Assets/ArtRes/Gomoku/Image` 和 `Assets/ArtRes/Gomoku/Audio`，
 标签为 `gomoku;boot`。字体通过 prefab 依赖采集，本地对局和配置见 [Gomoku.md](Gomoku.md)。
 木鱼面板仍保留注册，`WoodenFish` 组采集 prefab 与 Audio 目录，标签为 `fish`。
-Launch 绑定 `Assets/Config/Audio/WoodenFishAudioConfig.asset`，木鱼音效在框架初始化时常驻预加载。
+Launch 绑定 `Assets/Config/Audio/GameAudioConfig.asset`，棋子落盘声和木鱼音效在框架初始化时常驻预加载。
 玩法与可调参数见 [WoodenFish.md](WoodenFish.md)。
 
 最早显示的启动界面应直接放在 Launch 场景或引用安装包内置 prefab，不依赖待更新资源或 Hotfix。

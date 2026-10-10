@@ -48,7 +48,7 @@ GameEntry 初始化时统一调用；打开面板的时机由各业务流程决�
 ## 音效与采集
 
 `GameAudioIds.WoodenFishHit` 对应 `sfx.woodenfish.hit`，地址为 `WoodenFishHit`。
-`Assets/Config/Audio/WoodenFishAudioConfig.asset` 配置 Sfx 总线、Resident 预加载、
+`Assets/Config/Audio/GameAudioConfig.asset` 配置 Sfx 总线、Resident 预加载、
 无冷却、最多 16 条同音效并行，超限停止最早一条再播放；全局声道上限 32。
 当前 WAV 是合成的短木质敲击音，可替换同路径资源并保留 `.meta`。
 

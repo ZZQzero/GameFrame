@@ -39,7 +39,7 @@ namespace GameFrame.Tests
             Assert.IsTrue(resources.ContainsLocation("WoodenFishHit"));
             GameUI.Init(resources.Package);
             var audio = AssetDatabase.LoadAssetAtPath<AudioRuntimeConfig>(
-                "Assets/Config/Audio/WoodenFishAudioConfig.asset");
+                "Assets/Config/Audio/GameAudioConfig.asset");
             await GameAudio.InitAsync(resources.Package, audio);
             GameUIRegistration.RegisterAll();
             panel = await GameUI.Push<WoodenFishMainPanel>();

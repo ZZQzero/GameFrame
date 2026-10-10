@@ -6,5 +6,6 @@ namespace Game.Hotfix
     public static class GameAudioIds
     {
         public static readonly AudioId WoodenFishHit = new("sfx.woodenfish.hit");
+        public static readonly AudioId GomokuPlace = new("sfx.gomoku.place");
     }
 }

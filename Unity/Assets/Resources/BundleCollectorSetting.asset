@@ -45,7 +45,7 @@ MonoBehaviour:
         PackRuleName: PackSeparately
         FilterRuleName: CollectAll
         AssetTags: boot
-        UserData:
+        UserData: 
     - GroupName: LoadPrefab
       GroupDesc: 
       AssetTags: 
@@ -58,4 +58,17 @@ MonoBehaviour:
         PackRuleName: PackDirectory
         FilterRuleName: CollectAll
         AssetTags: boot
+        UserData: 
+    - GroupName: Scenes
+      GroupDesc: 
+      AssetTags: 
+      ActiveRuleName: EnableGroup
+      Collectors:
+      - CollectPath: Assets/Scenes/MainScene
+        CollectorGUID: e9c7df80a63a04be2ac96857dd515683
+        CollectorType: 0
+        AddressRuleName: AddressByFileName
+        PackRuleName: PackDirectory
+        FilterRuleName: CollectAll
+        AssetTags: 
         UserData: 

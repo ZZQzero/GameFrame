@@ -3,5 +3,43 @@
 !Unity/Assets/Scripts/Runtime/Sqlite/Native~/**
 !Unity/Assets/Scripts/Runtime/MediaBackup/Native~/
 !Unity/Assets/Scripts/Runtime/MediaBackup/Native~/**
+!Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/
+!Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/**
+
+# Local OS and IDE files.
+.DS_Store
+Thumbs.db
+Desktop.ini
+**/.idea/
+**/.vs/
+*.suo
+*.user
+*.userprefs
+*.DotSettings.user
+
+# .NET server and tools: keep projects, solutions and dependency lock files.
+/DotNet/**/[Bb]in/
+/DotNet/**/[Oo]bj/
+/DotNet/**/[Aa]rtifacts/
+/DotNet/**/[Tt]est[Rr]esults/
+/DotNet/**/[Ll]ogs/
+/DotNet/**/*.log
+/Tools/**/[Bb]in/
+/Tools/**/[Oo]bj/
+/Tools/**/[Aa]rtifacts/
+/Tools/**/[Tt]est[Rr]esults/
+/Tools/**/[Ll]ogs/
+/Tools/**/*.log
+
+# Native build caches; Native~/build contains maintained scripts and is retained.
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/CTestTestfile.cmake
+**/cmake-build-*/
+
+# Python bytecode and task/build output.
 **/__pycache__/
+*.pyc
+*.pyo
 /output/

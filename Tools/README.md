@@ -10,6 +10,12 @@ Build and install Sqlite first, then build MediaBackup against that same core bu
 and install it. Keep binaries together with their `.meta`, `artifact.json` and
 `build-manifest.json` files. Restart Unity after replacing a loaded native library.
 
+KCP source-fix notes and native regression tests live in
+`Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~`.
+Its [README](../Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/README.md)
+documents the integrated fast-ACK fix and verification command. KCP build/install
+scripts and the UDP/DTLS bridge are still planned; these tests do not install a plugin.
+
 On macOS, Backup searches `@loader_path` for a built Player's adjacent SQLite
 library, and `@loader_path/../../Sqlite/macOS` for the Editor directory layout.
 Newly generated macOS importer metadata enables preloading; existing metadata

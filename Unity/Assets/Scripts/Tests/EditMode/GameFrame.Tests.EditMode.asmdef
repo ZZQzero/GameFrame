@@ -8,7 +8,8 @@
         "GameFrame.Sqlite",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
-        "GameFrame.Runtime"
+        "GameFrame.Runtime",
+        "Game.Hotfix"
     ],
     "includePlatforms": [
         "Editor"
@@ -17,7 +18,8 @@
     "allowUnsafeCode": false,
     "overrideReferences": true,
     "precompiledReferences": [
-        "nunit.framework.dll"
+        "nunit.framework.dll",
+        "MemoryPack.Core.dll"
     ],
     "autoReferenced": false,
     "defineConstraints": [

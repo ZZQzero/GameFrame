@@ -1,0 +1,12 @@
+<Project>
+  <!-- Both hosts compile exactly the same generated DTOs and route catalog. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../Unity/Assets/Scripts/Hotfix/Network/Generated/*.cs" Link="Protocol/Generated/%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(IncludeProtocolRuntime)' == 'true'">
+    <Compile Include="$(MSBuildThisFileDirectory)../Unity/Assets/Scripts/Runtime/Network/ProtocolContracts/*.cs" Link="Protocol/Runtime/%(Filename)%(Extension)" />
+    <Compile Include="$(MSBuildThisFileDirectory)../Unity/Assets/Scripts/Runtime/Network/Protocol/*.cs" Link="Protocol/Runtime/%(Filename)%(Extension)" />
+    <Compile Include="$(MSBuildThisFileDirectory)../Unity/Assets/Scripts/Runtime/Network/Messaging/NetProtocolCatalog.cs" Link="Protocol/Runtime/NetProtocolCatalog.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../Unity/Assets/Scripts/Runtime/Network/NetworkException.cs" Link="Protocol/Runtime/NetworkException.cs" />
+  </ItemGroup>
+</Project>

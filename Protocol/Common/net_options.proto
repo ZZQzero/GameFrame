@@ -1,0 +1,34 @@
+syntax = "proto3";
+package game.net;
+import "google/protobuf/descriptor.proto";
+
+enum RouteKind {
+  ROUTE_KIND_UNSPECIFIED = 0;
+  ROUTE_KIND_RPC = 1;
+  ROUTE_KIND_SERVER_PUSH = 2;
+  ROUTE_KIND_CLIENT_SEND = 3;
+}
+
+enum Delivery {
+  DELIVERY_UNSPECIFIED = 0;
+  DELIVERY_RELIABLE = 1;
+  DELIVERY_UNRELIABLE = 2;
+}
+
+extend google.protobuf.MethodOptions {
+  uint32 opcode = 51001;
+  RouteKind route_kind = 51002;
+  Delivery delivery = 51003;
+  uint32 max_body = 51004;
+  uint32 response_max_body = 51005;
+}
+
+extend google.protobuf.FieldOptions {
+  uint32 max_utf16 = 51101;
+  uint32 max_utf8 = 51102;
+  uint32 max_count = 51103;
+  bool nullable = 51104;
+  bool element_nullable = 51105;
+  // Narrow int32/uint32 explicitly; affects MemoryPack width, not Proto encoding.
+  string scalar = 51106;
+}

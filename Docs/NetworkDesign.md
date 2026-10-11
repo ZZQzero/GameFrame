@@ -1,6 +1,6 @@
 # GameFrame 商业网络模块设计
 
-> 状态：待实现的工程设计，2026-10-11。本文定义第一版实现与验收契约，不代表网络模块已经实现或通过正式包验证。
+> 状态：分阶段实施中，2026-10-11。本文定义第一版实现与验收契约；已完成项与验证范围见 [实施记录](NetworkImplementation.md)，不代表完整模块已经通过正式包验证。
 > 技术基线：WebSocket/WSS、MemoryPack 1.21.4、原版 C KCP；服务端已确定为 C#/.NET 10。
 > 会话入口：WSS 建连与协议握手 → 登录 RPC → 大厅会话；战斗按配置复用 WSS，或通过大厅申请授权后建立 KCP/DTLS。
 
@@ -79,8 +79,7 @@ WSS 登录与游戏 RPC 共用帧格式、MemoryPack、取消和超时机制。�
 ```text
 Game.Hotfix/Network
   GameNetworkSession              登录、选服、进入世界、恢复状态
-  Protocol/                       业务 DTO、强类型路由、字段约束
-  Generated/                      协议目录、验证器、哈希；禁止手改
+  Generated/                      MemoryPack DTO、路由、验证器、哈希；禁止手改
   Features/...                    AOI 实体、快照、插值、玩法事件
              ↓
 GameFrame.Runtime / GameFrame.Network
@@ -98,7 +97,8 @@ Transport/Kcp/Native~             ABI、构建脚本、原生测试、DTLS 依�
 Assets/Plugins/GameFrame/Kcp      用户已放置的 KCP 源码与 LICENSE，已合入 #467
 Assets/Plugins/GameFrame/Native/Kcp/<platform>
                                 gameframe_kcp 原生安装产物
-Tools/NetworkProtocol/            .NET 协议分析/生成/校验工具
+Protocol/                        唯一手写 .proto 协议源、共享 MSBuild 引用与编写说明
+Tools/NetworkProtocol/            Proto → MemoryPack .NET 生成/校验工具
 DotNet/DotNet.sln                 已有服务端解决方案，与 Unity/ 同级
 DotNet/DotNet.csproj              已有 .NET 10 入口项目，承载服务端与联调模式
 ```
@@ -288,52 +288,47 @@ Hello 完成前仅允许当前握手所需控制包。Hello 完成后，WSS 进�
 
 ### 8.1 唯一协议源
 
-业务协议放在 `Game.Hotfix/Network/Protocol`，纯 C#、不引用 Unity/Hotfix 其他业务模块。系统固定帧协议放在 Runtime。服务器的 .NET 10 工程通过链接源码编译同一套业务协议，引用 NuGet MemoryPack 1.21.4；不能直接拿 Unity 编译出的 DTO DLL 当作 .NET 10 的通用协议 DLL，因为目标框架与生成代码可能不同。
+用户确认采用 `.proto` 作为唯一手写协议源，位于仓库根 `Protocol/`，参考 `gameprotomessage` 的 message/service 分离方式；Proto 仅用于书写，不使用 Protobuf Binary。`Tools/NetworkProtocol` 生成纯 C# MemoryPack DTO、强类型路由与校验器到 `Game.Hotfix/Network/Generated`，不引用 Unity/Hotfix 其他业务模块。系统固定帧协议仍放在 Runtime。服务器通过 `Protocol/GameFrame.Protocol.projitems` 链接同一份生成源码，引用 NuGet MemoryPack 1.21.4；不能直接拿 Unity 编译出的 DTO DLL 当作 .NET 10 的通用协议 DLL。
 
-服务端、协议工具与联调测试工程统一使用 `TargetFramework=net10.0`。实施时分别在 `DotNet/` 与 `Tools/` 下通过 `global.json` 锁定同一 .NET 10 SDK 补丁版本，构建命令从对应目录执行，避免影响 `Unity/Config` 的 .NET 8 生成环境；当前尚未新增这些 SDK 锁文件。共享 DTO/属性源码仍限制在当前 Unity 支持的 C# 语法与 API 范围；服务端独有代码可使用 .NET 10 能力。Unity 保持 MemoryPack.Core 的 `.NET Standard 2.1` 版本，不因服务端升级而替换为 .NET 10 DLL。MemoryPack 继续固定 1.21.4，实际互通以 Unity/.NET 10 golden vectors 和 IL2CPP 测试为准。
+服务端、协议工具与联调测试工程统一使用 `TargetFramework=net10.0`。实施时分别在 `DotNet/` 与 `Tools/` 下通过 `global.json` 锁定同一 .NET 10 SDK 补丁版本，构建命令从对应目录执行，避免影响 `Unity/Config` 的 .NET 8 生成环境；已锁定 SDK 10.0.401。共享生成 DTO/约束属性源码仍限制在当前 Unity 支持的 C# 语法与 API 范围；服务端独有代码可使用 .NET 10 能力。Unity 保持 MemoryPack.Core 的 `.NET Standard 2.1` 版本，不因服务端升级而替换为 .NET 10 DLL。MemoryPack 继续固定 1.21.4，实际互通以 Unity/.NET 10 golden vectors 和 IL2CPP 测试为准。
 
-采用明确顺序的 Object 模式：
+字段号必须从 1 连续编号，生成 `[MemoryPackOrder(n - 1)]` 与 `[MemoryPackable(SerializeLayout.Explicit)]`。字段名称使用 snake_case，生成 C# PascalCase 属性；字符串、数组限额与引用可空性以自定义 FieldOptions 声明。路由 opcode、类型、通道与正文上限以 service method 的 MethodOptions 声明；完整规则和命令见 [Protocol/README.md](../Protocol/README.md)。例如：
 
-```csharp
-using MemoryPack;
+```proto
+syntax = "proto3";
+package game.protocol.session;
+option csharp_namespace = "Game.Hotfix.Network.Protocol";
+import "Common/net_options.proto";
 
-namespace Game.Hotfix.Network.Protocol
-{
-    [MemoryPackable(SerializeLayout.Explicit)]
-    public partial class MoveCommand
-    {
-        [MemoryPackOrder(0)]
-        public ulong CommandId { get; set; }
-
-        [MemoryPackOrder(1)]
-        public uint ClientTick { get; set; }
-
-        [MemoryPackOrder(2)]
-        public short DirectionX { get; set; }
-
-        [MemoryPackOrder(3)]
-        public short DirectionZ { get; set; }
-    }
+message MoveCommand {
+  uint64 command_id = 1;
+  uint32 client_tick = 2;
+  int32 direction_x = 3 [(game.net.scalar) = "int16"];
+  int32 direction_z = 4 [(game.net.scalar) = "int16"];
+  uint64 entity_id = 5;
+  uint64 world_epoch = 6;
 }
 ```
 
 字段修改允许随协议发布整体升级，不承诺追加字段可跨版本解析。`MemoryPackOrder` 防止源文件重排悄悄改变布局，不是兼容旧版本的承诺。禁止直接序列化任意 `object`、反射类型标识、运行时注册的多态类型和循环引用。
 
-共享协议 V1 类型白名单：定宽整数、bool、float/double、受限 string、上述类型的可空值、受限数组、按上述规则生成的 DTO class。禁止 Dictionary/任意集合接口、Unity Vector3/Quaternion、DateTimeOffset/ValueTuple、decimal、自定义 Formatter、任意无引用 struct 直接拷贝布局。时间使用 i64 UTC 毫秒，位置使用明确量化整数或三个 float，枚举线上使用显式定宽整数并验证范围。未声明类型生成失败，不能静默降级反射序列化。
+共享协议 V1 类型白名单：定宽整数、bool、float/double、受限 string、受限数组、按上述规则生成的 DTO class；string、数组和 DTO 引用的可空性必须在 manifest 声明。禁止 Nullable<T>（MemoryPack 1.21.4 对可空数值原样复制内存布局，包含填充字节）；数值缺省使用显式 HasValue＋Value 字段或可空 DTO。禁止 Dictionary/任意集合接口、Unity Vector3/Quaternion、DateTimeOffset/ValueTuple、decimal、自定义 Formatter、任意无引用 struct 直接拷贝布局。时间使用 i64 UTC 毫秒，位置使用明确量化整数或三个 float，枚举线上使用显式定宽整数并验证范围。未声明类型生成失败，不能静默降级反射序列化。
 
 ### 8.2 生成工具与协议哈希
 
-`Tools/NetworkProtocol` 是计划新增的 .NET 工具。输入是路由声明、DTO 源码与同源约束属性；一次生成以下产物，禁止再维护第二份 opcode 表：
+`Tools/NetworkProtocol` 读取 `Protocol/**/*.proto`，通过 Proto 解析库处理声明和 import，先生成 DTO，再用 MemoryPack 1.21.4 自带的 Roslyn generator 编译，分析实际序列化成员并核对 serialization-info。生成器不依赖既有生成文件，可从缺失产物的 checkout 运行；完整生成源码编译通过后才写入。默认生成以下正式 C# 内容到 `Unity/Assets/Scripts/Hotfix/Network/Generated/`，禁止再维护第二份 opcode 表：
+
+0. 显式顺序 MemoryPack DTO 与字段约束；它们是产物，不是手写协议源。
 
 1. 强类型 `GameNetRoutes`，含 RPC 请求/响应、Push、Notify、不可靠路由。
 2. 冻结的 `NetProtocolCatalog`，包含 opcode、方向、通道、类型、最大 Body 与生成的序列化/反序列化委托。
 3. 每个入口 DTO 的无分配字节形状校验器、出站对象约束校验器。
-4. 规范化 manifest 和 SHA-256 协议哈希；默认生成 UTF-8 无 BOM、LF、键与路由排序固定的 JSON。
-5. 跨 Unity/.NET 的 golden vectors 与协议差异报告。
+
+规范化 manifest 始终在内存中计算，采用 UTF-8 无 BOM、LF、键与路由排序固定的 JSON；其 SHA-256 协议哈希内嵌于 C# catalog。只有指定 `--artifacts` 才额外将 manifest、hash 与跨 Unity/.NET 的 golden vectors 输出到仓库根 `Protocol/Generated/`，供开发验证使用，不进入正式运行资源。默认 `check` 比较 C#，`check --artifacts` 同时比较辅助文件，报告缺失、变化与额外 C# 产物；完整字段差异报告仍待实现。
 
 哈希输入包含 WireVersion、控制协议版本、MemoryPack 版本、UTF-8 字符串策略、路由信息、字段顺序/类型/可空性、所有长度与深度限制；不包含文件路径、空白、编译时间和 git hash。编译时分析实际参与 MemoryPack 序列化的成员，不只扫描属性名字。使用 MemoryPack 的 serialization-info 输出辅助比对；Unity 与 .NET 最终编码还必须由 golden vectors 证明一致，不能只凭同源文件判断。
 
-生成输出纳入版本管理，CI `check` 模式只比较，不覆盖用户文件。工具发现重复 opcode、成员顺序重复/缺失、未受限字符串/数组、递归类型、未支持类型、超出帧上限、路由方向错误时失败。客户端与服务端部署使用同一 manifest；hash 不同先拒绝连接并要求升级，不试着猜测解码。
+生成输出纳入版本管理，CI 使用 `check --artifacts` 只比较，不覆盖用户文件。工具发现重复 opcode、成员顺序重复/缺失、未受限字符串/数组、递归类型、未支持类型、超出帧上限、路由方向错误时失败。客户端与服务端使用同源生成协议和内嵌 hash，不在运行时加载 manifest；hash 不同先拒绝连接并要求升级，不试着猜测解码。
 
 ### 8.3 防止小包触发大分配
 
@@ -626,7 +621,7 @@ TLS 信任使用平台正常证书验证与可信域名配置；不能连接任�
 
 ### 13.2 登录白名单与服务端权限
 
-登录是业务 RPC，使用 MemoryPack 和第 7 节统一帧；系统控制包仍不依赖业务 DTO。以下 opcode 在 P0 一次分配，作为协议源属性输入，由工具生成强类型路由，不另手写数值权限表：
+登录是业务 RPC，使用 MemoryPack 和第 7 节统一帧；系统控制包仍不依赖业务 DTO。以下 opcode 在 P0 一次分配，作为 Proto service method 输入，由工具生成强类型路由，不另手写数值权限表：
 
 | Opcode/路由 | 允许阶段/连接 | 主要结果与限制 |
 | --- | --- | --- |
@@ -837,17 +832,19 @@ UI 使用 `OpenScope.Token` 取消请求，将 IDisposable 注册到 OpenScope/L
 
 ### 15.3 协议声明的实施边界
 
-协议工具以 DTO 上的属性为唯一入口；第一版定义下列纯 C# 属性，放在 Runtime 的 `Network/ProtocolContracts`，服务端和工具以链接源码编译，不引用整个 Unity Runtime：
+协议工具以 `Protocol/**/*.proto` 为唯一入口，路由写在 service method 上，不能再在 DTO 上手写路由属性。Runtime 的 `Network/ProtocolContracts` 保留字段限制属性与硬预算；属性由生成工具写入 DTO，服务端以链接源码编译，不引用整个 Unity Runtime。
 
-| 属性 | 语义 |
+| Proto 选项 | 语义 |
 | --- | --- |
-| `NetRpcRoute(opcode, responseType, requestMaxBodyBytes, responseMaxBodyBytes)` | 标在请求 DTO；响应类型必须为受支持 DTO |
-| `NetPushRoute(opcode, delivery, maxBodyBytes)` | 服务端推送 DTO；delivery 为 Reliable/Unreliable |
-| `NetNotifyRoute(opcode, delivery, maxBodyBytes)` | 客户端通知 DTO；delivery 为 Reliable/Unreliable |
-| `NetStringLimit(maxUtf16Units, maxUtf8Bytes)` | 必须标在每个 string 字段/属性 |
-| `NetArrayLimit(maxCount)` | 必须标在每个数组字段/属性 |
+| `game.net.opcode / route_kind` | 全目录唯一 opcode；RPC / SERVER_PUSH / CLIENT_SEND |
+| `game.net.delivery` | Reliable / Unreliable；RPC 必须可靠 |
+| `game.net.max_body / response_max_body` | 请求或单向消息 / RPC 响应正文上限 |
+| `game.net.max_utf16 / max_utf8` | 每个 string 或 string 数组元素必须声明；生成 NetStringLimit |
+| `game.net.max_count` | 每个 repeated 或 bytes 必须声明；生成 NetArrayLimit |
+| `game.net.nullable / element_nullable` | 引用 / 引用数组元素可空；禁止可空数值 |
+| `game.net.scalar` | 对 int32/uint32 显式收窄为 int8/int16/uint8/uint16 |
 
-RPC 固定可靠；每个入口 DTO 第一版只声明一个路由，子 DTO 可以复用。字段限制不能超过第 8 节硬上限，默认上限不是省略属性的许可。工具生成 `GameNetRoutes` 和 `GameNetProtocol.Catalog`；不要在业务再写一份字符串 opcode 名称表。Runtime 强类型描述符构造器与 catalog 注册接口由第一个协议工具任务一并固定并测试。
+同一个 DTO 可以被多个 service method 复用；每条路由仍有独立、不可变的通道和上限。Push/Notify 的 returns 必须为 google.protobuf.Empty，该占位类型不传输。字段限制不能超过第 8 节硬上限，默认上限不是省略选项的许可。工具生成 GameNetRoutes 和 GameNetProtocol.Catalog；不再维护手写 opcode 表。未知选项和不支持的 map/oneof/嵌套消息/业务 enum/streaming RPC 等语法直接失败，不忽略字段。
 
 ## 16. 平台、构建与依赖管理
 
@@ -886,7 +883,7 @@ KCP MIT、MemoryPack MIT 及 mbedTLS 对应版本许可证/第三方声明随安
 | --- | --- | --- |
 | P0 协议冻结 | FrameCodec、ProtocolContracts、登录/授权路由、错误类型、配置、协议工具骨架 | 无 ticket WSS/有 ticket KCP Hello、hash 规范、长度/溢出用例通过 |
 | P1 WSS 闭环 | NetworkRuntime/Client/Context、OwnedFrame、Rpc、Dispatcher、WebSocketTransport；现有 DotNet 项目接入 Kestrel/WSS 与登录联调 profile | Hello→Login/ResumeLogin→已登录 RPC 闭环；白名单/限额/取消/超时/关闭可复现 |
-| P2 MemoryPack 工具 | DTO 属性分析、路由/catalog、字节验证器、manifest/check、跨端向量 | Unity/.NET 字节完全一致；恶意长度不会触发超额分配；CI 能发现漏生成 |
+| P2 MemoryPack 工具 | Proto 解析/DTO 生成、实际序列化成员分析、路由/catalog、字节验证器、manifest/check、跨端向量 | Unity/.NET 字节完全一致；恶意长度不会触发超额分配；CI 能发现漏生成 |
 | P3 原生与安全 | gfnet ABI/listener、KCP 安全补丁、DTLS、分配统计、原生 build/install/test | macOS/Windows 本地 UDP 安全闭环；错误 PSK/重放失败；逐分配点故障注入、native 配额与清理通过 |
 | P4 KCP 整合 | KcpTransport、worker、业务入口限流、两个 channel、WSS 授权与撤销链路 | WSS 取 grant→KCP 入场闭环；整窗 flush、慢 socket、丢包/乱序/拥塞/回绕、注销撤销通过 |
 | P5 会话与样例 | GameRuntime 可选配置、Hotfix 双连接状态、入场/离场/恢复/幂等示例、Docs/Network.md | 离线行为保留；WSS-only/KCP 两模式、故障隔离、恢复不重复结算 |
@@ -894,11 +891,13 @@ KCP MIT、MemoryPack MIT 及 mbedTLS 对应版本许可证/第三方声明随安
 
 P1 可使用手工固定测试 DTO，不能因此绕过 P2 直接投产。P3 原生安全任务可在 P0 冻结后独立推进，但 P4 依赖 P1/P2/P3。第一版交付需包括 Native~/ABI.md、Docs/Network.md（公开使用说明）与 DotNet/README.md（服务端运行、配置和联调 profile），并同步更新 Launch/Tools 中实际变化的契约。
 
-计划命令入口如下，从仓库根目录进入对应目录执行。DotNet 项目已存在，但下列网络 profile、协议工具与原生脚本均**尚未实现**，不能把本文当成已运行日志：
+命令入口如下，从仓库根目录进入对应目录执行。协议工具已实现，默认仅生成或检查正式 C#；`--artifacts` 额外生成或检查仓库根 `Protocol/Generated/` 下的 manifest/hash/vector，供开发验证与 CI 使用。辅助文件不进入正式运行资源，协议指纹始终内嵌于 C# catalog。DotNet 网络 profile 与原生脚本仍**尚未实现**，不能把本文当成已运行日志：
 
 ```sh
 (cd Tools && dotnet run --project NetworkProtocol -- generate)
 (cd Tools && dotnet run --project NetworkProtocol -- check)
+(cd Tools && dotnet run --project NetworkProtocol -- generate --artifacts)
+(cd Tools && dotnet run --project NetworkProtocol -- check --artifacts)
 (cd Tools && dotnet test NetworkProtocol.Tests)
 (cd DotNet && dotnet run --project DotNet.csproj -- --profile local-wss)
 (cd DotNet && dotnet run --project DotNet.csproj -- --profile local-kcp-dtls)
@@ -976,7 +975,7 @@ Unity 测试按现有 `GameFrame.Tests.EditMode`/PlayMode 边界组织；若直�
 | 第一批发布平台 | Windows/macOS/Android/iOS；WebGL WSS 可选 | 缩小/扩大 native 与实机验收矩阵 |
 | UDP 安全库 | mbedTLS 3.6 LTS，开工锁补丁与 SHA | 影响安全 ABI/构建，不改变应用帧 |
 | 业务峰值与最低设备 | 待产品给定；以第 14 节示例作起算 | 决定 AOI、频率、分配和服务端容量门槛 |
-| 登录凭据与域名 | 待服务端确定账号凭据校验、WSS/UDP 域名/端口和证书 | 决定 Login DTO、环境配置与生产联调；HTTPS 资源域名单独配置 |
+| 登录凭据与域名 | 已确认第一版本地联调使用账号＋密码，只在显式 local profile 启用；生产未配置认证时拒绝启动。生产账号校验、WSS/UDP 域名/端口和证书仍待服务端确定 | 决定 Login DTO、环境配置与生产联调；HTTPS 资源域名单独配置 |
 
 ## 21. 参考资料与本次交付边界
 
@@ -985,4 +984,4 @@ Unity 测试按现有 `GameFrame.Tests.EditMode`/PlayMode 边界组织；若直�
 - [mbedTLS](https://github.com/Mbed-TLS/mbedtls)、[3.6.4 套件定义参考](https://github.com/Mbed-TLS/mbedtls/blob/v3.6.4/include/mbedtls/ssl_ciphersuites.h)。
 - 本地参考：`/Users/zzq/unitygame/Assets/Scripts/AOT/Network`、`AOT/NetCore`、`Hotfix/Network` 及该项目网络/协议文档。
 
-本次交付包括设计文档、已直接合入 KCP 源码的 #467 修复及其原生回归测试。DotNet 解决方案为用户已添加的工程，目前尚无网络服务实现；未新增网络 Runtime、服务端代码、DTLS 依赖或原生构建产物，不将此前 MemoryPack 安装验证或本次原生回归算作完整网络验收。后续按 P0～P6 逐项实现并提交实际测试报告。
+设计冻结时已有 KCP #467 修复与原生回归测试，DotNet 工程当时仍为控制台入口。后续按 P0～P6 实施，实际代码与测试结果统一记录在 [实施记录](NetworkImplementation.md)；不将此前 MemoryPack 安装验证或 ACK 原生回归算作完整网络验收。

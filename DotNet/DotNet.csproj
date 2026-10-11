@@ -5,6 +5,13 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+        <IncludeProtocolRuntime>true</IncludeProtocolRuntime>
     </PropertyGroup>
 
+    <ItemGroup>
+        <PackageReference Include="MemoryPack" Version="1.21.4" />
+    </ItemGroup>
+    <Import Project="../Protocol/GameFrame.Protocol.projitems" />
 </Project>

@@ -11,10 +11,10 @@
 - `Runtime/Network/ProtocolContracts/NetProtocolContracts.cs`：字符串/数组限额属性和固定硬预算。属性构造校验不替代后续生成工具的完整 schema 分析。
 - `Runtime/Network/NetworkException.cs`：协议、背压、请求超时与远端系统错误类型；未知非零远端码保留原值。
 - `Runtime/Network/NetworkOptions.cs` 与 `NetworkConnectOptions.cs`：宿主/连接预算、可信端点、连接参数与 grant 单调期限校验；尚未接入实际连接与资源配额执行。
-- `Protocol/Session/*.proto` 与生成的 `Hotfix/Network/Generated/GameNetMessages.cs`：17 个显式顺序 MemoryPack DTO、11 个登录/恢复/授权/世界/echo 路由。移动输入包含 commandId、EntityId、WorldEpoch；当前仅声明不可靠通道。
+- `Protocol/Common`、`Session`、`World`、`Diagnostics` 与生成的 `Hotfix/Network/Generated/GameNetMessages.cs`：18 个显式顺序 MemoryPack DTO、1 个 int32 ResultCode 枚举、14 个路由。账号与世界/联调协议分域；授权改名为 RequestWorldGrant。WorldEntityEntered/Left 明确区分实体成员事件，实体带 incarnation，位置按毫米量化；MoveInput 使用 inputSequence/clientTick，并增加世界会话与实体代际。WSS 可靠输入/快照与 KCP 不可靠路由分别登记，复用 DTO/codec。
 - `Runtime/Network/Messaging/NetProtocolCatalog.cs`：不可变强类型路由、codec 与 catalog，验证重复 opcode、目录路由归属与最大正文。
 - `Runtime/Network/ProtocolContracts/NetWireReader.cs` 与生成的验证器：反序列化前检查对象布局、数组/字符串长度、UTF-8、深度/节点预算与尾随字节；序列化前检查 DTO 约束。
-- `Tools/NetworkProtocol`：以 Proto 为唯一手写源，使用 protobuf-net.Reflection 3.2.52 解析、生成 C# DTO，使用 Roslyn 4.14.0 和 MemoryPack.Generator 1.21.4 编译 DTO 与完整生成代码，分析实际成员并核对序列化信息；输出强类型 codec/catalog、规范 manifest、SHA-256 与 51 组默认/普通/最大值向量；`check` 校验生成产物一致性。拒绝 Nullable<T>、递归、缺少限额、重复 opcode、自定义 formatter 与序列化回调。目前限于顶层非泛型 DTO 和一维非交错数组。
+- `Tools/NetworkProtocol`：以 Proto 为唯一手写源，使用 protobuf-net.Reflection 3.2.52 解析、生成 C# DTO/枚举，使用 Roslyn 4.14.0 和 MemoryPack.Generator 1.21.4 编译 DTO 与完整生成代码，分析实际成员并核对序列化信息；输出强类型 codec/catalog，可选导出规范 manifest、SHA-256 与 54 组默认/普通/最大值向量；`check` 校验生成产物一致性。支持顶层 int32 枚举与枚举数组，入站/出站检查声明值集合，定义纳入 hash；拒绝别名、Flags、Nullable<T>、递归、缺少限额、重复 opcode、自定义 formatter 与序列化回调。目前限于顶层非泛型 DTO 和一维非交错数组。
 - `DotNet/DotNet.csproj`：通过 `Protocol/GameFrame.Protocol.projitems` 编译相同生成源码与纯协议基础代码，MemoryPack 1.21.4 依赖锁文件已保存。入口仍未实现 WSS 服务。
 - `Tools/NetworkProtocol.Tests`：链接相同 Runtime 源码与协议测试，使用 .NET 10；Tools/DotNet 分别锁定 SDK 10.0.401，测试依赖锁文件纳入版本管理，不改变 Luban 的 .NET 8 环境。
 
@@ -24,7 +24,7 @@
 
 尚未实现 NetworkRuntime/NetworkClient/ConnectionContext、实际传输、有界资源与 pending、连接状态机、原生 ABI/DTLS、服务端与 Hotfix 会话。ControlCodec 已提供连接阶段控制包校验，但尚未接入真实状态机。有界序列化 writer、完整生成工具负例/字段差异报告/CI 与 HybridCLR 验证仍待实施，不能宣称 P2 或完整网络模块验收完成。
 
-待用户确认：设计要求 WSS-only 与 KCP 两种世界模式，但目前移动输入只登记不可靠路由，WSS 禁止发送或自动转换该通道。建议新增独立的可靠移动 Notify 路由，由 WSS 世界模式显式使用；KCP 保留现有不可靠路由。该决定影响公开协议，在确认前不冻结最终目录。
+世界协议已按 NetworkDesign 第 14 节补齐两种通道、实体代际和独立量化快照。当前示例入场/恢复返回最多 64 个实体的完整 AOI 基线，超过明确拒绝；快照每包最多 16 个实体，缺席不表示删除。成功恢复推进 worldEpoch 并重置输入/快照序号，可靠 eventVersion 保持连续。以上是已生成的协议与业务契约，实际 AOI、恢复处理、权限校验与 GameNetworkSession 仍待实现；不以字段与文档代替服务端功能。
 
 ## 已确认的业务输入
 
@@ -51,10 +51,9 @@ long? 42：                   01000000000000002A00000000000000
 
 2026-10-11：
 
-- .NET 10 测试 165/165 通过，包含 73 个协议/参数用例、59 个 MemoryPack/catalog 用例与 33 个工具工程用例；默认与 `--artifacts` 的生成、检查均通过，覆盖两种模式 C# 一致性及默认模式不写辅助文件。
-- Unity 6000.3.19f1 Editor 编译通过，新增 Console 错误为 0；EditMode `GameFrame.Tests.NetworkProtocolTests` 与 `NetworkMemoryPackTests` 共 132/132 通过。
-- 辅助文件迁移后重新验证 Editor 编译与 `NetworkMemoryPackTests`：59/59 通过，覆盖外部路径的 51 组向量；本次未重复 Player/IL2CPP 或实际网络验证。
-- Unity 的 MemoryPack.Core .NET Standard 版本与 .NET 10 对 51 组向量输出字节一致；恶意数组/字符串声明、无效 UTF-8/字符计数、根/元素空值、尾随字节、catalog 初始化与 hash 复制检查通过。
+- .NET 10 测试 178/178 通过，包含 73 个协议/参数用例、67 个 MemoryPack/catalog 用例与 38 个工具工程用例；默认与 `--artifacts` 的 C# 一致性及默认模式不写辅助文件检查通过，`check --artifacts` 通过。
+- Unity 6000.3.19f1 Editor 编译通过，新增 Console 错误为 0；EditMode `GameFrame.Tests.NetworkProtocolTests` 与 `NetworkMemoryPackTests` 共 140/140 通过。
+- Unity 的 MemoryPack.Core .NET Standard 版本与 .NET 10 对 54 组向量输出字节一致；枚举固定四字节小端与未知值拒绝、枚举别名/可空/收窄拒绝、枚举定义改变 hash、WSS/KCP DTO codec 复用、恶意数组/字符串声明、无效 UTF-8/字符计数、根/元素空值、尾随字节、catalog 初始化与 hash 复制检查通过。
 - DotNet .NET 10 项目编译通过，包含同源生成协议；不代表服务端功能已完成。
 - StandaloneOSX Player 脚本编译通过，共 43 个程序集，包含 GameFrame.Runtime 与 Game.Hotfix。仅验证脚本编译，不代表原生 IL2CPP 打包或真机通过。
 - 用例包含设计发布的 Ping 小端向量、截断/尾随/拼帧、未知头字段、声明长度溢出、32 KiB/1150 字节边界、方向/握手限制、WSS/KCP ticket、协商 hash/路由上限、控制正文保留位，以及 seed=467 的 4096 次随机短包。

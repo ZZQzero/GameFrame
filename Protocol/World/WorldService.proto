@@ -1,0 +1,75 @@
+syntax = "proto3";
+package game.protocol.world;
+option csharp_namespace = "Game.Hotfix.Network.Protocol";
+import "Common/net_options.proto";
+import "Common/ResultProto.proto";
+import "World/WorldProto.proto";
+import "google/protobuf/empty.proto";
+
+service WorldService {
+  rpc EnterWorld(EnterWorldRequest) returns (WorldResponse) {
+    option (game.net.opcode) = 1100;
+    option (game.net.route_kind) = ROUTE_KIND_RPC;
+    option (game.net.delivery) = DELIVERY_RELIABLE;
+    option (game.net.max_body) = 64;
+    option (game.net.response_max_body) = 8192;
+  }
+
+  rpc RestoreWorld(RestoreWorldRequest) returns (WorldResponse) {
+    option (game.net.opcode) = 1101;
+    option (game.net.route_kind) = ROUTE_KIND_RPC;
+    option (game.net.delivery) = DELIVERY_RELIABLE;
+    option (game.net.max_body) = 128;
+    option (game.net.response_max_body) = 8192;
+  }
+
+  rpc LeaveWorld(LeaveWorldRequest) returns (game.protocol.common.OperationResponse) {
+    option (game.net.opcode) = 1102;
+    option (game.net.route_kind) = ROUTE_KIND_RPC;
+    option (game.net.delivery) = DELIVERY_RELIABLE;
+    option (game.net.max_body) = 64;
+    option (game.net.response_max_body) = 64;
+  }
+
+  rpc WorldEntityEntered(WorldEntityEntered) returns (google.protobuf.Empty) {
+    option (game.net.opcode) = 1200;
+    option (game.net.route_kind) = ROUTE_KIND_SERVER_PUSH;
+    option (game.net.delivery) = DELIVERY_RELIABLE;
+    option (game.net.max_body) = 1024;
+  }
+
+  rpc WorldEntityLeft(WorldEntityLeft) returns (google.protobuf.Empty) {
+    option (game.net.opcode) = 1201;
+    option (game.net.route_kind) = ROUTE_KIND_SERVER_PUSH;
+    option (game.net.delivery) = DELIVERY_RELIABLE;
+    option (game.net.max_body) = 128;
+  }
+
+  rpc WorldSnapshot(WorldSnapshot) returns (google.protobuf.Empty) {
+    option (game.net.opcode) = 1210;
+    option (game.net.route_kind) = ROUTE_KIND_SERVER_PUSH;
+    option (game.net.delivery) = DELIVERY_UNRELIABLE;
+    option (game.net.max_body) = 1118;
+  }
+
+  rpc WorldSnapshotReliable(WorldSnapshot) returns (google.protobuf.Empty) {
+    option (game.net.opcode) = 1211;
+    option (game.net.route_kind) = ROUTE_KIND_SERVER_PUSH;
+    option (game.net.delivery) = DELIVERY_RELIABLE;
+    option (game.net.max_body) = 1118;
+  }
+
+  rpc MoveInput(MoveInput) returns (google.protobuf.Empty) {
+    option (game.net.opcode) = 1220;
+    option (game.net.route_kind) = ROUTE_KIND_CLIENT_SEND;
+    option (game.net.delivery) = DELIVERY_UNRELIABLE;
+    option (game.net.max_body) = 64;
+  }
+
+  rpc MoveInputReliable(MoveInput) returns (google.protobuf.Empty) {
+    option (game.net.opcode) = 1221;
+    option (game.net.route_kind) = ROUTE_KIND_CLIENT_SEND;
+    option (game.net.delivery) = DELIVERY_RELIABLE;
+    option (game.net.max_body) = 64;
+  }
+}

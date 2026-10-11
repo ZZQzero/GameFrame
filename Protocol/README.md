@@ -5,8 +5,11 @@
 ## 目录与双端使用
 
 - `Common/net_options.proto`：全项目唯一的路由、长度、可空性和收窄整数选项。
-- `Session/SessionProto.proto`：登录、授权、世界与 echo DTO。
-- `Session/SessionService.proto`：路由；opcode 放在 method 上，DTO 可被多条路由复用。
+- `Common/ResultProto.proto`：唯一业务结果码枚举与简单操作响应。
+- `Session/SessionProto.proto`、`SessionService.proto`：账号登录、恢复、世界授权与注销。
+- `World/WorldProto.proto`、`WorldService.proto`：世界入场/恢复/离场、实体成员事件、输入与快照。
+- `Diagnostics/DiagnosticsProto.proto`、`DiagnosticsService.proto`：仅 local profile 注册的 Echo 联调路由。
+- 各域按 message/service 分离；opcode 放在 method 上，DTO 可被多条路由复用。
 - `GameFrame.Protocol.projitems`：DotNet 和 .NET 测试的共享源码引用入口。
 
 默认只输出 `GameNetMessages.cs` 与 `GameNetProtocol.cs` 到 `Unity/Assets/Scripts/Hotfix/Network/Generated/`。Unity 编译该目录；DotNet 导入 projitems 编译完全相同的源码，并按自己的目标框架运行 MemoryPack 的 source generator。无需复制 DTO，也不引用 Unity DLL。
@@ -48,7 +51,7 @@ message ExampleRequest {
 }
 ```
 
-字段从 1 连续编号，`= n` 生成 `[MemoryPackOrder(n - 1)]`；声明顺序、注释、空白与文件遍历顺序不改变协议。字段名 snake_case 转 PascalCase，检查转换后名称冲突。每个文件显式声明 package 与 csharp_namespace；跨文件类型通过 import 和完整 Proto 类型名解析。当前 catalog 的 codec 名称要求 DTO 简单类名全目录唯一，冲突时报错。
+字段从 1 连续编号，`= n` 生成 `[MemoryPackOrder(n - 1)]`；声明顺序、注释、空白与文件遍历顺序不改变协议。字段名 snake_case 转 PascalCase，检查转换后名称冲突。每个文件显式声明 package 与 csharp_namespace；跨文件类型通过 import 和完整 Proto 类型名解析。当前 catalog 的 codec/校验器名称要求 DTO 与枚举简单类名全目录唯一，冲突时报错。
 
 | Proto | MemoryPack C# 类型/约束 |
 | --- | --- |
@@ -59,12 +62,17 @@ message ExampleRequest {
 | bytes | byte[]；必须声明 max_count |
 | repeated T | T[]；必须声明 max_count；string 元素仍需字符串限额 |
 | 顶层 message 类型 | 对应 DTO class；不允许递归 |
+| 顶层 enum 类型 | `enum : int`；固定 4 字节小端，支持枚举数组，拒绝未声明值 |
 | int32 + scalar="int8"/"int16" | sbyte/short；显式选择 MemoryPack 1/2 字节宽度 |
 | uint32 + scalar="uint8"/"uint16" | byte/ushort |
 
 所有引用默认非空：string 初始化为空字符串，数组初始化为空数组，DTO 字段初始化为新对象。缺省/空值语义通过 `(game.net.nullable)=true` 声明；引用数组元素通过 `(game.net.element_nullable)=true` 声明。数值可空禁止，使用显式 bool HasValue + Value 或可空 DTO；不使用 Proto optional 来隐式生成 Nullable<T>。
 
 长度选项是**上限**，不是固定长度要求；sessionId、hash 等必须精确 16/32 字节的业务语义仍由会话处理器校验。字符串上限按 UTF-16 code units 和 UTF-8 bytes 分别计算。
+
+枚举必须先声明零值，成员名称建议直接使用 PascalCase；工具仍检查转换后的名称冲突。禁止别名、Flags、嵌套枚举、可空枚举和枚举宽度收窄。枚举定义随 manifest 纳入 hash；增加结果码也要求两端同步生成。`ResultCode.Success=0` 表示业务成功，其余值只说明业务拒绝；帧头 StatusCode 继续表示系统错误，不能混用。失败响应允许成功载荷保持默认空值，业务处理器仅在成功后使用和校验载荷。
+
+字段注释定义业务约束：成功登录的 accountSessionId/resumeToken 分别恰好 16/32 字节；恢复保留账号会话与 authEpoch 并轮换凭据。grant 成功后校验非零 ID/conv、端点、ticket、PSK 与限额，授权身份由服务端连接绑定提供。UTC 到期时间用于显示/诊断，TTL 以 RPC admission 单调时间起算，不从响应收到时重新续期。上述权限与语义校验属于实际 Hotfix/.NET 处理器，生成的结构验证器不替代它们。
 
 ## 路由
 
@@ -84,9 +92,15 @@ route_kind 为 RPC、SERVER_PUSH 或 CLIENT_SEND。RPC 必须可靠且声明响�
 
 opcode ≥1000 且在整个目录唯一，生成路由名称也全目录唯一。RPC 响应复用请求 opcode/correlationId；系统 1～999 保留在 Runtime 中，不写进业务 Proto。路由预算必须足够容纳所有声明字段的最大值，同时不超过 V1 通道预算。
 
+世界模式显式选择路由：KCP 使用 `WorldSnapshot` / `MoveInput`（不可靠），WSS 使用 `WorldSnapshotReliable` / `MoveInputReliable`（可靠）；两组分别有独立 opcode，但共用 DTO/codec。实体进入/离开事件始终可靠，借用 WSS 大厅连接时物理连接仍只有大厅所有者负责关闭。
+
+当前小世界示例的入场/恢复响应是完整 AOI 基线，最多 64 个实体；超过返回 TooManyEntities，不截断或让 Runtime 自动分块。后续大世界分块协议按设计第 14 节单独扩展。位置按毫米量化，实体以 entityId + incarnation 区分生命周期；进入/离开事件共享连续 eventVersion，缺号时停止应用并显式恢复。快照是每包最多 16 个实体的独立绝对状态批次，缺席不表示删除；服务器周期覆盖整个 AOI，未知实体/旧 incarnation 丢弃且不缓存。
+
+成功恢复保留 worldSessionId、推进 worldEpoch；输入/快照序号按新 epoch 重置，旧 epoch 消息丢弃。可靠 eventVersion 按世界会话保持连续；响应给出已包含的基线版本，之后只应用更高且连续的成员事件。每个实体分别比较 snapshotSequence，避免乱序的局部批次互相覆盖；u32 序号使用半周期内的环绕差值规则。MoveInput 使用 inputSequence/clientTick 去重和丢弃过期输入，方向轴范围为 [-32767,32767] 且归一化向量长度不超过一，不使用持久经济命令幂等表。实体控制权与移动规则由权威世界处理器校验。
+
 ## 校验与版本
 
-拒绝未知选项、类型、漏 import、缺少限额、编号空洞/重复、名称冲突、递归、map、oneof、嵌套 message、业务 enum、streaming RPC 和 Nullable<T>；不默默忽略字段。未使用 import 的解析警告不阻止生成。
+拒绝未知选项、类型、漏 import、缺少限额、编号空洞/重复、名称冲突、递归、map、oneof、嵌套 message/enum、枚举别名、streaming RPC 和 Nullable<T>；不默默忽略字段。未使用 import 的解析警告不阻止生成。
 
 生成入站字节形状校验器在 MemoryPack 反序列化前限制长度、UTF-8、深度与节点数量；生成出站对象校验器执行相同字段约束。默认/普通/最大值字节向量由实际 MemoryPack 编码生成，Unity 测试对照 .NET 向量。
 

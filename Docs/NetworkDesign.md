@@ -290,29 +290,33 @@ Hello 完成前仅允许当前握手所需控制包。Hello 完成后，WSS 进�
 
 用户确认采用 `.proto` 作为唯一手写协议源，位于仓库根 `Protocol/`，参考 `gameprotomessage` 的 message/service 分离方式；Proto 仅用于书写，不使用 Protobuf Binary。`Tools/NetworkProtocol` 生成纯 C# MemoryPack DTO、强类型路由与校验器到 `Game.Hotfix/Network/Generated`，不引用 Unity/Hotfix 其他业务模块。系统固定帧协议仍放在 Runtime。服务器通过 `Protocol/GameFrame.Protocol.projitems` 链接同一份生成源码，引用 NuGet MemoryPack 1.21.4；不能直接拿 Unity 编译出的 DTO DLL 当作 .NET 10 的通用协议 DLL。
 
+协议按 Common、Session、World、Diagnostics 分域并分别组织 message/service 文件，仍生成同一目录与 catalog，不因此新增程序集、部署进程或 Runtime 管理器。Common 定义唯一 ResultCode 与简单操作响应；Session 只处理账号登录/恢复、世界授权与注销，World 定义世界业务，Diagnostics 只由 local profile 注册。业务结果使用生成的 ResultCode（Success=0），帧头 StatusCode 仍用于系统错误。当前项目未部署，本轮直接更新字段和 opcode，不保留旧协议兼容入口。
+
 服务端、协议工具与联调测试工程统一使用 `TargetFramework=net10.0`。实施时分别在 `DotNet/` 与 `Tools/` 下通过 `global.json` 锁定同一 .NET 10 SDK 补丁版本，构建命令从对应目录执行，避免影响 `Unity/Config` 的 .NET 8 生成环境；已锁定 SDK 10.0.401。共享生成 DTO/约束属性源码仍限制在当前 Unity 支持的 C# 语法与 API 范围；服务端独有代码可使用 .NET 10 能力。Unity 保持 MemoryPack.Core 的 `.NET Standard 2.1` 版本，不因服务端升级而替换为 .NET 10 DLL。MemoryPack 继续固定 1.21.4，实际互通以 Unity/.NET 10 golden vectors 和 IL2CPP 测试为准。
 
 字段号必须从 1 连续编号，生成 `[MemoryPackOrder(n - 1)]` 与 `[MemoryPackable(SerializeLayout.Explicit)]`。字段名称使用 snake_case，生成 C# PascalCase 属性；字符串、数组限额与引用可空性以自定义 FieldOptions 声明。路由 opcode、类型、通道与正文上限以 service method 的 MethodOptions 声明；完整规则和命令见 [Protocol/README.md](../Protocol/README.md)。例如：
 
 ```proto
 syntax = "proto3";
-package game.protocol.session;
+package game.protocol.world;
 option csharp_namespace = "Game.Hotfix.Network.Protocol";
 import "Common/net_options.proto";
 
-message MoveCommand {
-  uint64 command_id = 1;
-  uint32 client_tick = 2;
-  int32 direction_x = 3 [(game.net.scalar) = "int16"];
-  int32 direction_z = 4 [(game.net.scalar) = "int16"];
-  uint64 entity_id = 5;
-  uint64 world_epoch = 6;
+message MoveInput {
+  bytes world_session_id = 1 [(game.net.max_count) = 16];
+  uint64 world_epoch = 2;
+  uint32 input_sequence = 3;
+  uint32 client_tick = 4;
+  int32 direction_x = 5 [(game.net.scalar) = "int16"];
+  int32 direction_z = 6 [(game.net.scalar) = "int16"];
+  uint64 entity_id = 7;
+  uint32 incarnation = 8;
 }
 ```
 
 字段修改允许随协议发布整体升级，不承诺追加字段可跨版本解析。`MemoryPackOrder` 防止源文件重排悄悄改变布局，不是兼容旧版本的承诺。禁止直接序列化任意 `object`、反射类型标识、运行时注册的多态类型和循环引用。
 
-共享协议 V1 类型白名单：定宽整数、bool、float/double、受限 string、受限数组、按上述规则生成的 DTO class；string、数组和 DTO 引用的可空性必须在 manifest 声明。禁止 Nullable<T>（MemoryPack 1.21.4 对可空数值原样复制内存布局，包含填充字节）；数值缺省使用显式 HasValue＋Value 字段或可空 DTO。禁止 Dictionary/任意集合接口、Unity Vector3/Quaternion、DateTimeOffset/ValueTuple、decimal、自定义 Formatter、任意无引用 struct 直接拷贝布局。时间使用 i64 UTC 毫秒，位置使用明确量化整数或三个 float，枚举线上使用显式定宽整数并验证范围。未声明类型生成失败，不能静默降级反射序列化。
+共享协议 V1 类型白名单：定宽整数、固定 int32 的顶层 enum、bool、float/double、受限 string、受限数组、按上述规则生成的 DTO class；string、数组和 DTO 引用的可空性必须在 manifest 声明。禁止 Nullable<T>（MemoryPack 1.21.4 对可空数值原样复制内存布局，包含填充字节）；数值缺省使用显式 HasValue＋Value 字段或可空 DTO。禁止 Dictionary/任意集合接口、Unity Vector3/Quaternion、DateTimeOffset/ValueTuple、decimal、自定义 Formatter、任意无引用 struct 直接拷贝布局。时间使用 i64 UTC 毫秒，位置使用明确量化整数或三个 float，顶层枚举由 Proto 生成 `enum : int`，线上固定 4 字节小端；必须声明零值，禁止别名、Flags 和可空枚举，入站/出站校验声明值集合。枚举名称与成员名称/数值纳入协议 hash。未声明类型生成失败，不能静默降级反射序列化。
 
 ### 8.2 生成工具与协议哈希
 
@@ -558,7 +562,7 @@ feed_udp 只进入有界原始输入缓存；tick 完成 DTLS 握手/定时器�
 
 KCP 自身不加密。第一版安全适配选 **mbedTLS 3.6 LTS**，以已核对包含目标套件的 3.6.4 作为接口参考；实际集成必须锁定 3.6 LTS 当时受维护的补丁版本和源码 SHA，并完成安全公告检查。补丁锁定属于开工交付，不是允许运行时浮动升级。该依赖当前尚未安装。
 
-固定 DTLS 1.2、`TLS_PSK_WITH_AES_128_GCM_SHA256`、系统 CSPRNG、anti-replay 和服务端 cookie 校验，禁用明文/CBC/匿名套件、会话恢复与 CID。PSK 模式不额外提供前向保密；本版使用短时、单连接随机 PSK，通过已登录 WSS 的 RequestBattleGrant RPC 下发，不能在客户端安装包中写全服共享密钥。若项目要求前向保密，必须单独变更安全配置并重新联调，不能口头把 PSK 说成具备该能力。
+固定 DTLS 1.2、`TLS_PSK_WITH_AES_128_GCM_SHA256`、系统 CSPRNG、anti-replay 和服务端 cookie 校验，禁用明文/CBC/匿名套件、会话恢复与 CID。PSK 模式不额外提供前向保密；本版使用短时、单连接随机 PSK，通过已登录 WSS 的 RequestWorldGrant RPC 下发，不能在客户端安装包中写全服共享密钥。若项目要求前向保密，必须单独变更安全配置并重新联调，不能口头把 PSK 说成具备该能力。
 
 服务端同样通过本 native bridge 调用 DTLS/KCP；.NET 10 的标准网络 API 不能被当成内置 DTLS 实现。native 库静态链接 mbedTLS 依赖，导出只开放 gfnet ABI，保留许可证与依赖清单。
 
@@ -566,7 +570,7 @@ KCP 自身不加密。第一版安全适配选 **mbedTLS 3.6 LTS**，以已核�
 
 第 12.3 节是已知凭据的单连接 ABI；服务端不能在收到陌生 UDP 后预先知道 PSK。P3 同时新增 server-listener ABI：create/destroy listener、register/revoke grant、feed UDP(peer,data,now)、poll UDP(peer,dst)、poll connection event、release connection。所有 peer 使用固定 addressFamily、16-byte 地址和 u16 port 结构，不把平台 sockaddr 布局暴露给 C#。
 
-大厅服务在返回 RequestBattleGrant 响应前，将 `{grantId, identity, PSK, conv, ticket摘要, accountSessionId, authEpoch, 目标世界, expiry}` 注册到目标网关；native listener 保存握手所需的有界凭据索引，PSK lookup 在 native 内完成，不调用 Unity/Hotfix 委托。目标网关确认注册成功后才允许向客户端返回 grant，不通过延时或自动重试掩盖未就绪状态。
+大厅服务在返回 RequestWorldGrant 响应前，将 `{grantId, identity, PSK, conv, ticket摘要, accountSessionId, authEpoch, 目标世界, expiry}` 注册到目标网关；native listener 保存握手所需的有界凭据索引，PSK lookup 在 native 内完成，不调用 Unity/Hotfix 委托。目标网关确认注册成功后才允许向客户端返回 grant，不通过延时或自动重试掩盖未就绪状态。
 
 listener 先执行 DTLS cookie 地址校验，再保留握手状态；完成 PSK 校验后发布携带 grantId 的 Established 事件与 connection handle，该 handle 接入第 12.3 节收发 API。PSK 身份必须与后续 Hello ticket 指向同一 grant，网关还须验证其账号 epoch 与目标世界，不能拼接不同授权。
 
@@ -590,7 +594,7 @@ sequenceDiagram
     L-->>C: 登录结果、账号会话、恢复凭据
     Note over C,L: 大厅已登录，可执行大厅业务
     alt 世界业务选择KCP
-        C->>L: RequestBattleGrant RPC
+        C->>L: RequestWorldGrant RPC
         L->>G: 注册grant/PSK并等待确认
         G-->>L: 注册成功
         L-->>C: 端点、ticket、conv、PSK
@@ -606,12 +610,14 @@ sequenceDiagram
 
 1. 从可信启动/热更配置读取大厅 WSS 入口，建立 TLS 连接并完成无 ticket 的协议 Hello。协议不符在发送登录凭据前拒绝。
 2. Hotfix 使用 Login RPC 提交账号凭据，或显式选择 ResumeLogin RPC 提交有效恢复凭据；服务端验证后将当前 WSS connection 绑定到账号会话。所有敏感字段只在 WSS 正文中出现。
-3. 登录成功才开放大厅业务、选角色/世界与 RequestBattleGrant。客户端不需要为每条大厅 RPC 再携带账号 token，服务端根据连接绑定的 principal/authEpoch 校验。
+3. 登录成功才开放大厅业务、选角色/世界与 RequestWorldGrant。客户端不需要为每条大厅 RPC 再携带账号 token，服务端根据连接绑定的 principal/authEpoch 校验。
 4. 世界 transport 选择 WSS 时直接复用当前已登录连接，经网关路由世界消息；不申请 KCP grant，不建立第二条 WSS，不加载 KCP native 插件。
 5. 选择 KCP 时，已登录大厅向目标网关注册新 grant，注册成功后通过 RPC 返回端点与密钥；客户端先完成 DTLS，再用 ClientHello ticket 绑定账号授权。
 6. 世界连接通过 EnterWorld/RestoreWorld RPC 与快照恢复后，Hotfix 才将世界状态设为 Ready。
 
 Login 成功响应至少包含 accountId、accountSessionId（16 字节）、authEpoch（u64）、resumeToken（32 字节）、resumeExpiresAtUtcMs/accountExpiresAtUtcMs（i64）与 resumeRemainingTtlMs/accountRemainingTtlMs（u32）。UTC 字段用于诊断与显示，剩余 TTL 用于单调时钟排程。传输 ServerHello.sessionId、账号 accountSessionId 和世界 worldSessionId 是不同标识；本地 generation 也不能替代其中任何一个。
+
+生成器的长度选项只验证上限，不代替认证与成功载荷校验。Hotfix 必须先检查 ResultCode，再校验成功响应的非零账号/epoch、精确凭据长度、有效 TTL，之后才能提交 Authenticated；默认构造的 DTO 不能直接作为认证成功。失败响应的成功载荷保持默认空值即可。服务端身份与权限从已认证连接绑定取得；EnterWorld/RestoreWorld 请求中的 authEpoch 只是期望代际，不是权限证明。
 
 accountSession 默认最长有效期 24 小时；resumeToken 有效期不超过该会话，到期返回明确认证失败。resumeToken 是 CSPRNG 生成的不透明凭据，服务端保存摘要，客户端只保存在账号会话内存中。ResumeLogin 成功原子消费旧凭据并返回新凭据；响应丢失时不自动复用旧 token 或退回密码登录，由调用者显式重新登录。首次登录与恢复都执行服务端账号/封禁/顶号策略，不通过客户端声明恢复旧权限。
 
@@ -627,10 +633,10 @@ TLS 信任使用平台正常证书验证与可信域名配置；不能连接任�
 | --- | --- | --- |
 | 1000 Login | 未登录 WSS | 凭据验证；Request Body≤2048 字节；返回登录业务结果 |
 | 1001 ResumeLogin | 未登录 WSS | accountSessionId + resumeToken；校验并轮换恢复凭据 |
-| 1002 RequestBattleGrant | 已登录 WSS | 指定角色/世界、grantRequestId、协议 hash；返回单连接授权 |
+| 1002 RequestWorldGrant | 已登录 WSS | 指定角色/世界、grantRequestId、协议 hash；返回单连接授权 |
 | 1003 Logout | 已登录 WSS | 撤销账号会话及其恢复凭据、未消费 grant、已绑定世界连接 |
 | 1100 EnterWorld | 已登录 WSS / 已绑定 grant 的 KCP | 验证角色归属、目标世界、authEpoch；创建/绑定世界会话 |
-| 1101 RestoreWorld | 已登录 WSS / 已绑定 grant 的 KCP | 验证世界会话与 lastEventVersion，返回快照/连续事件 |
+| 1101 RestoreWorld | 已登录 WSS / 已绑定 grant 的 KCP | 验证世界会话与 lastEventVersion，返回完整基线快照，再开放后续连续事件 |
 | 1102 LeaveWorld | 已进入世界的 WSS / KCP | 停止该世界订阅与指令准入，返回确认；不撤销账号会话 |
 
 其余路由的阶段策略在 .NET 大厅/世界服务中通过生成的类型化路由登记。Runtime 只维护传输 Connected；Hotfix 检查自身状态以避免误调用，服务端仍必须独立执行权限校验。Login/ResumeLogin 不允许从 KCP 执行，KCP 不能通过猜测账号 ID 跳过 WSS 登录。
@@ -643,7 +649,7 @@ Hello 之前、登录等待中和认证后分别限制全局/每 IP 连接数与
 
 ### 13.3 KCP grant 与账号会话绑定
 
-RequestBattleGrant 请求包含 grantRequestId（u64）、目标角色/世界和协议 hash；服务端从已认证 WSS 连接取 accountSessionId/authEpoch，不信任请求中自报账号。客户端生成并保留 grantRequestId；相同会话、相同 ID 与相同请求在授权未消费且未过期时可返回同一 grant，不同内容拒绝，已消费/过期则返回明确业务结果。Runtime 不因此自动重试该 RPC。
+RequestWorldGrant 请求包含 grantRequestId（u64）、目标角色/世界和协议 hash；服务端从已认证 WSS 连接取 accountSessionId/authEpoch，不信任请求中自报账号。客户端生成并保留 grantRequestId；相同会话、相同 ID 与相同请求在授权未消费且未过期时可返回同一 grant，不同内容拒绝，已消费/过期则返回明确业务结果。Runtime 不因此自动重试该 RPC。
 
 响应至少包含 grantId、UDP 端点、一次性 ticket、随机非 0 conv、16 字节随机 PSK identity、32 字节随机 PSK、expiresAtUtcMs（i64）、remainingTtlMs（u32）和网络限额。目标网关注册失败时 RPC 失败，不先返回一份不可用授权。未送达的授权到期清理，不无限保留注册；每账号会话默认最多 2 份未消费 grant，另受网关总量限额约束。
 
@@ -669,7 +675,7 @@ Logout RPC 只有在权威撤销提交、相关网关停止该 epoch 的新业�
 
 收到任何包不自动当成 Pong；匹配的 Pong 先在 IO 层更新存活/RTT，再触发主线程指标更新。KCP ACK 是传输状态，不能证明游戏逻辑可响应。服务端需明确 Ping 由网关还是业务进程回应，指标区分 gateway RTT 与应用 RPC 延迟，不把网关活着当成世界服健康。
 
-登录 RPC 默认 timeout=10 秒；客户端从 ClientHello 移交传输起记录 10 秒登录总预算，实际请求 timeout 取默认值与该预算剩余时间的较小值，不能在收到 ServerHello 后重置。服务端仍从 ServerHello 移交传输起执行自己的 10 秒硬期限，客户端更早开始预算以保守覆盖网络耗时。RequestBattleGrant 默认 timeout=5 秒，新 KCP Connect 仍使用 10 秒总期限且不得超过 grant 剩余时间。
+登录 RPC 默认 timeout=10 秒；客户端从 ClientHello 移交传输起记录 10 秒登录总预算，实际请求 timeout 取默认值与该预算剩余时间的较小值，不能在收到 ServerHello 后重置。服务端仍从 ServerHello 移交传输起执行自己的 10 秒硬期限，客户端更早开始预算以保守覆盖网络耗时。RequestWorldGrant 默认 timeout=5 秒，新 KCP Connect 仍使用 10 秒总期限且不得超过 grant 剩余时间。
 
 服务端在编码响应时计算剩余 TTL；客户端以该 RPC 的本地 admission 单调时间 + 返回 TTL 作为保守 deadline，不能从收到响应起重新获得完整有效期。账号与 grant 是否过期最终以服务端时钟和状态判定，不以客户端 UTC 声明放行。
 
@@ -702,7 +708,7 @@ RPC 超时/取消/断线后，UI 只能表示“结果未确认”；业务通�
 ### 14.1 服务端职责
 
 ```text
-WSS 大厅网关 → 登录/账号会话 → RequestBattleGrant → KCP/DTLS 网关
+WSS 大厅网关 → 登录/账号会话 → RequestWorldGrant → KCP/DTLS 网关
       ↓ WSS 世界消息                                  ↓ KCP 世界消息
       └────────────────── 会话路由 ──────────────────┘
                               ↓
@@ -752,6 +758,15 @@ WSS 大厅网关 → 登录/账号会话 → RequestBattleGrant → KCP/DTLS 网
 
 客户端业务层负责插值缓冲、预测和服务端校正。插值窗口起点建议 100ms，再根据抖动测量调整；不要在网络 Runtime 内直接修改 Transform。输入/快照使用有符号环绕差值比较 u32 tick/sequence，在半周期内定义先后，并按会话 epoch 隔离重连前数据。
 
+当前 Proto 小世界示例的具体契约如下：
+
+- EnterWorld/RestoreWorld 的 WorldResponse 返回完整 AOI 基线（最多 64 个实体），超过返回 TooManyEntities，不静默截断；大世界分块在实际业务需要时另定义，Runtime 不自动聚合。
+- EntityState 使用 entityId + 非零 incarnation，位置为 int32 毫米（Unity 一个世界单位对应一米）。WorldEntityEntered/WorldEntityLeft 分别为可靠进入/离开事件，共用连续 eventVersion；离开明确带实体 ID 与 incarnation。
+- WorldSnapshot 带 worldSessionId/worldEpoch/serverTick/snapshotSequence，每包最多 16 个实体，独立解码且只更新包含的实体；缺席不表示删除。服务端周期覆盖完整 AOI；序号按每实体分别比较，未知/旧 incarnation 丢弃，不无界缓存。
+- MoveInput 带 worldSessionId/worldEpoch/inputSequence/clientTick/entityId/incarnation，采用 tick/序号语义而非持久 commandId；轴取 [-32767,32767]，归一化后向量长度不超过一。权威处理器检查控制权、时间窗口和移动规则。
+- worldSessionId 标识逻辑世界会话，成功 Restore/rebind 推进 worldEpoch 并重置输入/快照序号；eventVersion 在逻辑世界会话内保持连续。恢复响应给出基线版本，旧 epoch 消息丢弃，只有之后更高且连续的成员事件才能应用。
+- KCP 使用 WorldSnapshot（1210）/MoveInput（1220）不可靠路由；WSS 使用 WorldSnapshotReliable（1211）/MoveInputReliable（1221）可靠路由，两组共用 DTO/codec。WorldEntityEntered（1200）/WorldEntityLeft（1201）始终可靠；不自动转换通道。
+
 ### 14.3 带宽起算与容量门槛
 
 示例 AOI=100 个活动实体，每实体量化状态 24 字节，20Hz：Body 裸数据为 `100×24×20=48000 bytes/s`。每条不可靠帧 Body 上限 1118，按协议留出快照字段后每包约容纳 40 个实体，每 tick 3 包；仅固定应用头/channel/DTLS 开销为 `60×(32+1+37)=4200 bytes/s`，另加 MemoryPack/快照字段、IP/UDP、可靠事件与丢包冗余。不能直接将 48KB/s 当成最终线上带宽。
@@ -797,7 +812,7 @@ StartLobbyAsync(loginInput, token)
 StartWorldAsync(worldOptions, token)
   1. 要求大厅已登录，记录本次账号/世界恢复序号
   2. WSS 模式：借用 lobbyClient 作为 worldClient
-     KCP 模式：await RequestBattleGrant，校验剩余 TTL/端点
+     KCP 模式：await RequestWorldGrant，校验剩余 TTL/端点
               创建独占 worldClient，await ConnectAsync(grantOptions, token)
   3. 注册世界状态 Push，持有独立于大厅的 IDisposable
   4. await EnterWorld 或显式 RestoreWorld RPC
@@ -822,7 +837,7 @@ StopSessionAsync(requestLogout)
   5. 最后传播主异常
 ```
 
-这里的 Login、ResumeLogin、RequestBattleGrant、EnterWorld/RestoreWorld、LeaveWorld、Logout 和快照处理都是需新增的 Hotfix/.NET 业务实现，不是当前仓库已有 API。启动/恢复失败停止当前流程；调用者显式清理该流程已获得的资源。KCP 世界启动失败不隐式注销账号或关闭独立大厅。
+这里的 Login、ResumeLogin、RequestWorldGrant、EnterWorld/RestoreWorld、LeaveWorld、Logout 和快照处理都是需新增的 Hotfix/.NET 业务实现，不是当前仓库已有 API。启动/恢复失败停止当前流程；调用者显式清理该流程已获得的资源。KCP 世界启动失败不隐式注销账号或关闭独立大厅。
 
 WSS 共享连接的状态流不能假装独立：EnterWorld/LeaveWorld 超时、取消或处理器失败导致世界状态不确定时，不能先注销处理器再继续使用大厅 socket；该次共享 WSS 必须停止业务并关闭，大厅可通过显式 ResumeLogin 恢复账号。业务明确拒绝入场且尚未改变状态时可保留大厅。StopSession 将关闭全部连接，不重复发 LeaveWorld；所有失败均保留原异常，不自动执行恢复或入场回滚。
 
@@ -844,7 +859,7 @@ UI 使用 `OpenScope.Token` 取消请求，将 IDisposable 注册到 OpenScope/L
 | `game.net.nullable / element_nullable` | 引用 / 引用数组元素可空；禁止可空数值 |
 | `game.net.scalar` | 对 int32/uint32 显式收窄为 int8/int16/uint8/uint16 |
 
-同一个 DTO 可以被多个 service method 复用；每条路由仍有独立、不可变的通道和上限。Push/Notify 的 returns 必须为 google.protobuf.Empty，该占位类型不传输。字段限制不能超过第 8 节硬上限，默认上限不是省略选项的许可。工具生成 GameNetRoutes 和 GameNetProtocol.Catalog；不再维护手写 opcode 表。未知选项和不支持的 map/oneof/嵌套消息/业务 enum/streaming RPC 等语法直接失败，不忽略字段。
+同一个 DTO 可以被多个 service method 复用；每条路由仍有独立、不可变的通道和上限。Push/Notify 的 returns 必须为 google.protobuf.Empty，该占位类型不传输。字段限制不能超过第 8 节硬上限，默认上限不是省略选项的许可。工具生成 GameNetRoutes 和 GameNetProtocol.Catalog；不再维护手写 opcode 表。未知选项和不支持的 map/oneof/嵌套消息或枚举/streaming RPC 等语法直接失败，不忽略字段。
 
 ## 16. 平台、构建与依赖管理
 
@@ -871,7 +886,7 @@ KCP MIT、MemoryPack MIT 及 mbedTLS 对应版本许可证/第三方声明随安
 
 宿主另报 Pump 用时、Pump 外发送校验/编码耗时、每帧网络主线程总耗时/分配量、每帧派发条数/最长处理器耗时、工作线程轮转延迟、全局额度、客户端数。队列分别记录当前/最大队龄、入口背压次数、过期丢弃和 UDP output 滞留时间。业务另报 Ready 时长、恢复次数、eventVersion 断档、snapshot 基线错误、输入校正幅度。RTT、业务处理耗时与主线程排队必须分开，不能统一叫“延迟”。
 
-默认不记录登录凭据、resumeToken、ticket、PSK、完整消息正文和聊天/个人信息。Login/ResumeLogin/RequestBattleGrant 的请求与响应在开发解码日志中也禁止输出敏感字段。协议日志只含 opcode、长度、correlation、代际、时间与结果码；其他开发解码日志显式启用并有采样和环形容量，不再次序列化每条消息。正式包故障导出由用户/业务触发，避免每个网络包写文件或同步刷日志。
+默认不记录登录凭据、resumeToken、ticket、PSK、完整消息正文和聊天/个人信息。Login/ResumeLogin/RequestWorldGrant 的请求与响应在开发解码日志中也禁止输出敏感字段。协议日志只含 opcode、长度、correlation、代际、时间与结果码；其他开发解码日志显式启用并有采样和环形容量，不再次序列化每条消息。正式包故障导出由用户/业务触发，避免每个网络包写文件或同步刷日志。
 
 新增业务指标包括未登录连接数、登录拒绝/等待超时、ResumeLogin 结果、grant 注册/签发/消费/过期、账号撤销传播耗时与大厅/世界分别恢复耗时。所有指标按环境/服务聚合，避免以账号 ID 创建无界指标标签。
 
@@ -905,7 +920,7 @@ python3 Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/build.p
 python3 Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/install.py --help
 ```
 
-本地 WSS 使用显式信任的开发证书，不修改生产证书验证。联调服务提供测试 Login/ResumeLogin、RequestBattleGrant、Logout、入场/离场、echo RPC、顺序 Push、错误响应与延迟/断线注入。`local-kcp-dtls` profile 同时启动 WSS 大厅与 UDP listener，客户端必须从已登录 WSS 获取 ticket/PSK，不提供绕过认证的取票 HTTP 接口；测试账号/密钥不进入正式资源。服务端本机可走 loopback，但仍应有真实 IPv6/WAN 网络阶段。
+本地 WSS 使用显式信任的开发证书，不修改生产证书验证。联调服务提供测试 Login/ResumeLogin、RequestWorldGrant、Logout、入场/离场、echo RPC、顺序 Push、错误响应与延迟/断线注入。`local-kcp-dtls` profile 同时启动 WSS 大厅与 UDP listener，客户端必须从已登录 WSS 获取 ticket/PSK，不提供绕过认证的取票 HTTP 接口；测试账号/密钥不进入正式资源。服务端本机可走 loopback，但仍应有真实 IPv6/WAN 网络阶段。
 
 ## 19. 测试矩阵与商业发布门禁
 

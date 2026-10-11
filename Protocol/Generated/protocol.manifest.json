@@ -1,6 +1,62 @@
 {
   "controlVersion": 1,
   "endianness": "little",
+  "enums": [
+    {
+      "name": "Game.Hotfix.Network.Protocol.ResultCode",
+      "underlyingType": "System.Int32",
+      "values": [
+        {
+          "name": "Success",
+          "value": 0
+        },
+        {
+          "name": "InvalidCredentials",
+          "value": 1
+        },
+        {
+          "name": "SessionExpired",
+          "value": 2
+        },
+        {
+          "name": "SessionRevoked",
+          "value": 3
+        },
+        {
+          "name": "CharacterNotOwned",
+          "value": 4
+        },
+        {
+          "name": "WorldUnavailable",
+          "value": 5
+        },
+        {
+          "name": "GrantExpired",
+          "value": 6
+        },
+        {
+          "name": "GrantConsumed",
+          "value": 7
+        },
+        {
+          "name": "ConflictingRequest",
+          "value": 8
+        },
+        {
+          "name": "InvalidWorldSession",
+          "value": 9
+        },
+        {
+          "name": "TooManyEntities",
+          "value": 10
+        },
+        {
+          "name": "InvalidInput",
+          "value": 11
+        }
+      ]
+    }
+  ],
   "limits": {
     "arrayCount": 512,
     "dtoNodes": 2048,
@@ -37,11 +93,11 @@
       "kind": "Rpc",
       "maxBodyBytes": 128,
       "opcode": 1002,
-      "name": "RequestBattleGrant",
+      "name": "RequestWorldGrant",
       "responseMaxBodyBytes": 2048,
-      "responseType": "Game.Hotfix.Network.Protocol.BattleGrantResponse",
+      "responseType": "Game.Hotfix.Network.Protocol.WorldGrantResponse",
       "rootNullable": false,
-      "type": "Game.Hotfix.Network.Protocol.RequestBattleGrantRequest"
+      "type": "Game.Hotfix.Network.Protocol.RequestWorldGrantRequest"
     },
     {
       "delivery": "Reliable",
@@ -92,16 +148,34 @@
       "kind": "Push",
       "maxBodyBytes": 1024,
       "opcode": 1200,
-      "name": "WorldEvent",
+      "name": "WorldEntityEntered",
       "rootNullable": false,
-      "type": "Game.Hotfix.Network.Protocol.WorldEvent"
+      "type": "Game.Hotfix.Network.Protocol.WorldEntityEntered"
+    },
+    {
+      "delivery": "Reliable",
+      "kind": "Push",
+      "maxBodyBytes": 128,
+      "opcode": 1201,
+      "name": "WorldEntityLeft",
+      "rootNullable": false,
+      "type": "Game.Hotfix.Network.Protocol.WorldEntityLeft"
     },
     {
       "delivery": "Unreliable",
       "kind": "Push",
       "maxBodyBytes": 1118,
-      "opcode": 1201,
+      "opcode": 1210,
       "name": "WorldSnapshot",
+      "rootNullable": false,
+      "type": "Game.Hotfix.Network.Protocol.WorldSnapshot"
+    },
+    {
+      "delivery": "Reliable",
+      "kind": "Push",
+      "maxBodyBytes": 1118,
+      "opcode": 1211,
+      "name": "WorldSnapshotReliable",
       "rootNullable": false,
       "type": "Game.Hotfix.Network.Protocol.WorldSnapshot"
     },
@@ -109,10 +183,19 @@
       "delivery": "Unreliable",
       "kind": "Notify",
       "maxBodyBytes": 64,
-      "opcode": 1202,
-      "name": "MoveCommand",
+      "opcode": 1220,
+      "name": "MoveInput",
       "rootNullable": false,
-      "type": "Game.Hotfix.Network.Protocol.MoveCommand"
+      "type": "Game.Hotfix.Network.Protocol.MoveInput"
+    },
+    {
+      "delivery": "Reliable",
+      "kind": "Notify",
+      "maxBodyBytes": 64,
+      "opcode": 1221,
+      "name": "MoveInputReliable",
+      "rootNullable": false,
+      "type": "Game.Hotfix.Network.Protocol.MoveInput"
     },
     {
       "delivery": "Reliable",
@@ -128,91 +211,6 @@
   ],
   "stringEncoding": "utf8",
   "types": [
-    {
-      "fields": [
-        {
-          "name": "ResultCode",
-          "nullable": false,
-          "order": 0,
-          "type": "System.UInt32"
-        },
-        {
-          "name": "GrantId",
-          "nullable": false,
-          "order": 1,
-          "type": "System.UInt64"
-        },
-        {
-          "name": "Host",
-          "nullable": false,
-          "order": 2,
-          "stringUtf16Units": 256,
-          "stringUtf8Bytes": 1024,
-          "type": "System.String"
-        },
-        {
-          "name": "Port",
-          "nullable": false,
-          "order": 3,
-          "type": "System.UInt16"
-        },
-        {
-          "arrayLimit": 512,
-          "elementNullable": false,
-          "name": "Ticket",
-          "nullable": false,
-          "order": 4,
-          "type": "System.Byte[]"
-        },
-        {
-          "name": "Conv",
-          "nullable": false,
-          "order": 5,
-          "type": "System.UInt32"
-        },
-        {
-          "arrayLimit": 16,
-          "elementNullable": false,
-          "name": "PskIdentity",
-          "nullable": false,
-          "order": 6,
-          "type": "System.Byte[]"
-        },
-        {
-          "arrayLimit": 32,
-          "elementNullable": false,
-          "name": "Psk",
-          "nullable": false,
-          "order": 7,
-          "type": "System.Byte[]"
-        },
-        {
-          "name": "ExpiresAtUtcMs",
-          "nullable": false,
-          "order": 8,
-          "type": "System.Int64"
-        },
-        {
-          "name": "RemainingTtlMs",
-          "nullable": false,
-          "order": 9,
-          "type": "System.UInt32"
-        },
-        {
-          "name": "ReliableLimit",
-          "nullable": false,
-          "order": 10,
-          "type": "System.UInt32"
-        },
-        {
-          "name": "UnreliableLimit",
-          "nullable": false,
-          "order": 11,
-          "type": "System.UInt32"
-        }
-      ],
-      "name": "Game.Hotfix.Network.Protocol.BattleGrantResponse"
-    },
     {
       "fields": [
         {
@@ -277,28 +275,28 @@
           "type": "System.UInt64"
         },
         {
-          "name": "X",
+          "name": "Incarnation",
           "nullable": false,
           "order": 1,
-          "type": "System.Single"
+          "type": "System.UInt32"
         },
         {
-          "name": "Y",
+          "name": "PositionXMm",
           "nullable": false,
           "order": 2,
-          "type": "System.Single"
+          "type": "System.Int32"
         },
         {
-          "name": "Z",
+          "name": "PositionYMm",
           "nullable": false,
           "order": 3,
-          "type": "System.Single"
+          "type": "System.Int32"
         },
         {
-          "name": "Tick",
+          "name": "PositionZMm",
           "nullable": false,
           "order": 4,
-          "type": "System.UInt32"
+          "type": "System.Int32"
         }
       ],
       "name": "Game.Hotfix.Network.Protocol.EntityState"
@@ -349,7 +347,7 @@
           "name": "ResultCode",
           "nullable": false,
           "order": 0,
-          "type": "System.UInt32"
+          "type": "Game.Hotfix.Network.Protocol.ResultCode"
         },
         {
           "name": "AccountId",
@@ -413,43 +411,57 @@
     {
       "fields": [
         {
-          "name": "CommandId",
+          "arrayLimit": 16,
+          "elementNullable": false,
+          "name": "WorldSessionId",
           "nullable": false,
           "order": 0,
+          "type": "System.Byte[]"
+        },
+        {
+          "name": "WorldEpoch",
+          "nullable": false,
+          "order": 1,
           "type": "System.UInt64"
+        },
+        {
+          "name": "InputSequence",
+          "nullable": false,
+          "order": 2,
+          "type": "System.UInt32"
         },
         {
           "name": "ClientTick",
           "nullable": false,
-          "order": 1,
+          "order": 3,
           "type": "System.UInt32"
         },
         {
           "name": "DirectionX",
           "nullable": false,
-          "order": 2,
+          "order": 4,
           "type": "System.Int16"
         },
         {
           "name": "DirectionZ",
           "nullable": false,
-          "order": 3,
+          "order": 5,
           "type": "System.Int16"
         },
         {
           "name": "EntityId",
           "nullable": false,
-          "order": 4,
+          "order": 6,
           "type": "System.UInt64"
         },
         {
-          "name": "WorldEpoch",
+          "name": "Incarnation",
           "nullable": false,
-          "order": 5,
-          "type": "System.UInt64"
+          "order": 7,
+          "type": "System.UInt32"
         }
       ],
-      "name": "Game.Hotfix.Network.Protocol.MoveCommand"
+      "name": "Game.Hotfix.Network.Protocol.MoveInput"
     },
     {
       "fields": [
@@ -457,7 +469,7 @@
           "name": "ResultCode",
           "nullable": false,
           "order": 0,
-          "type": "System.UInt32"
+          "type": "Game.Hotfix.Network.Protocol.ResultCode"
         }
       ],
       "name": "Game.Hotfix.Network.Protocol.OperationResponse"
@@ -491,7 +503,7 @@
           "type": "System.Byte[]"
         }
       ],
-      "name": "Game.Hotfix.Network.Protocol.RequestBattleGrantRequest"
+      "name": "Game.Hotfix.Network.Protocol.RequestWorldGrantRequest"
     },
     {
       "fields": [
@@ -568,13 +580,56 @@
           "type": "System.UInt64"
         },
         {
-          "name": "Entity",
+          "name": "ServerTick",
           "nullable": false,
           "order": 3,
+          "type": "System.UInt32"
+        },
+        {
+          "name": "Entity",
+          "nullable": false,
+          "order": 4,
           "type": "Game.Hotfix.Network.Protocol.EntityState"
         }
       ],
-      "name": "Game.Hotfix.Network.Protocol.WorldEvent"
+      "name": "Game.Hotfix.Network.Protocol.WorldEntityEntered"
+    },
+    {
+      "fields": [
+        {
+          "arrayLimit": 16,
+          "elementNullable": false,
+          "name": "WorldSessionId",
+          "nullable": false,
+          "order": 0,
+          "type": "System.Byte[]"
+        },
+        {
+          "name": "WorldEpoch",
+          "nullable": false,
+          "order": 1,
+          "type": "System.UInt64"
+        },
+        {
+          "name": "EventVersion",
+          "nullable": false,
+          "order": 2,
+          "type": "System.UInt64"
+        },
+        {
+          "name": "EntityId",
+          "nullable": false,
+          "order": 3,
+          "type": "System.UInt64"
+        },
+        {
+          "name": "Incarnation",
+          "nullable": false,
+          "order": 4,
+          "type": "System.UInt32"
+        }
+      ],
+      "name": "Game.Hotfix.Network.Protocol.WorldEntityLeft"
     },
     {
       "fields": [
@@ -582,7 +637,92 @@
           "name": "ResultCode",
           "nullable": false,
           "order": 0,
+          "type": "Game.Hotfix.Network.Protocol.ResultCode"
+        },
+        {
+          "name": "GrantId",
+          "nullable": false,
+          "order": 1,
+          "type": "System.UInt64"
+        },
+        {
+          "name": "Host",
+          "nullable": false,
+          "order": 2,
+          "stringUtf16Units": 256,
+          "stringUtf8Bytes": 1024,
+          "type": "System.String"
+        },
+        {
+          "name": "Port",
+          "nullable": false,
+          "order": 3,
+          "type": "System.UInt16"
+        },
+        {
+          "arrayLimit": 512,
+          "elementNullable": false,
+          "name": "Ticket",
+          "nullable": false,
+          "order": 4,
+          "type": "System.Byte[]"
+        },
+        {
+          "name": "Conv",
+          "nullable": false,
+          "order": 5,
           "type": "System.UInt32"
+        },
+        {
+          "arrayLimit": 16,
+          "elementNullable": false,
+          "name": "PskIdentity",
+          "nullable": false,
+          "order": 6,
+          "type": "System.Byte[]"
+        },
+        {
+          "arrayLimit": 32,
+          "elementNullable": false,
+          "name": "Psk",
+          "nullable": false,
+          "order": 7,
+          "type": "System.Byte[]"
+        },
+        {
+          "name": "ExpiresAtUtcMs",
+          "nullable": false,
+          "order": 8,
+          "type": "System.Int64"
+        },
+        {
+          "name": "RemainingTtlMs",
+          "nullable": false,
+          "order": 9,
+          "type": "System.UInt32"
+        },
+        {
+          "name": "ReliableLimit",
+          "nullable": false,
+          "order": 10,
+          "type": "System.UInt32"
+        },
+        {
+          "name": "UnreliableLimit",
+          "nullable": false,
+          "order": 11,
+          "type": "System.UInt32"
+        }
+      ],
+      "name": "Game.Hotfix.Network.Protocol.WorldGrantResponse"
+    },
+    {
+      "fields": [
+        {
+          "name": "ResultCode",
+          "nullable": false,
+          "order": 0,
+          "type": "Game.Hotfix.Network.Protocol.ResultCode"
         },
         {
           "arrayLimit": 16,
@@ -605,7 +745,7 @@
           "type": "System.UInt64"
         },
         {
-          "name": "Tick",
+          "name": "ServerTick",
           "nullable": false,
           "order": 4,
           "type": "System.UInt32"
@@ -624,15 +764,29 @@
     {
       "fields": [
         {
-          "name": "WorldEpoch",
+          "arrayLimit": 16,
+          "elementNullable": false,
+          "name": "WorldSessionId",
           "nullable": false,
           "order": 0,
+          "type": "System.Byte[]"
+        },
+        {
+          "name": "WorldEpoch",
+          "nullable": false,
+          "order": 1,
           "type": "System.UInt64"
         },
         {
-          "name": "Tick",
+          "name": "ServerTick",
           "nullable": false,
-          "order": 1,
+          "order": 2,
+          "type": "System.UInt32"
+        },
+        {
+          "name": "SnapshotSequence",
+          "nullable": false,
+          "order": 3,
           "type": "System.UInt32"
         },
         {
@@ -640,7 +794,7 @@
           "elementNullable": false,
           "name": "Entities",
           "nullable": false,
-          "order": 2,
+          "order": 4,
           "type": "Game.Hotfix.Network.Protocol.EntityState[]"
         }
       ],

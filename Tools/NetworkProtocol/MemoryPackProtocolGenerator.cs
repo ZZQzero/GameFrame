@@ -13,6 +13,7 @@ namespace GameFrame.ProtocolTools
         private const string ArtifactDirectory = "Protocol/Generated/";
         private readonly NullabilityInfoContext nullability = new NullabilityInfoContext();
         private readonly SortedDictionary<string, Schema> schemas = new SortedDictionary<string, Schema>(StringComparer.Ordinal);
+        private readonly SortedDictionary<string, Type> enums = new SortedDictionary<string, Type>(StringComparer.Ordinal);
         private readonly Dictionary<Type, Schema> byType = new Dictionary<Type, Schema>();
         private readonly HashSet<Type> visiting = new HashSet<Type>();
         private readonly List<Route> routes = new List<Route>();
@@ -21,12 +22,20 @@ namespace GameFrame.ProtocolTools
             IEnumerable<ProtocolRouteDefinition> definitions, bool includeArtifacts = false)
         {
             schemas.Clear();
+            enums.Clear();
             byType.Clear();
             visiting.Clear();
             routes.Clear();
             foreach (Type type in input.OrderBy(type => type.FullName, StringComparer.Ordinal))
             {
-                Analyze(type);
+                if (type.IsEnum)
+                {
+                    AnalyzeEnum(type);
+                }
+                else
+                {
+                    Analyze(type);
+                }
             }
 
             foreach (ProtocolRouteDefinition definition in definitions)
@@ -73,7 +82,8 @@ namespace GameFrame.ProtocolTools
                 }
             }
 
-            if (schemas.Values.Select(schema => schema.Type.Name).Distinct(StringComparer.Ordinal).Count() != schemas.Count)
+            if (schemas.Values.Select(schema => schema.Type.Name).Concat(enums.Values.Select(type => type.Name))
+                .Distinct(StringComparer.Ordinal).Count() != schemas.Count + enums.Count)
             {
                 throw new InvalidOperationException("DTO simple names must be unique in the generated protocol namespace.");
             }
@@ -248,10 +258,34 @@ namespace GameFrame.ProtocolTools
             }
             else if (!PrimitiveBytes.ContainsKey(valueType))
             {
-                result.Child = Analyze(valueType);
+                if (valueType.IsEnum)
+                {
+                    AnalyzeEnum(valueType);
+                }
+                else
+                {
+                    result.Child = Analyze(valueType);
+                }
             }
 
             return result;
+        }
+
+        private void AnalyzeEnum(Type type)
+        {
+            if (Enum.GetUnderlyingType(type) != typeof(int) || type.IsNested || type.IsDefined(typeof(FlagsAttribute)) ||
+                !Enum.IsDefined(type, 0))
+            {
+                throw new InvalidOperationException($"{type.FullName}: enum must be top-level int32, declare zero and forbid flags.");
+            }
+
+            int[] values = Enum.GetValues(type).Cast<object>().Select(value => Convert.ToInt32(value)).ToArray();
+            if (values.Distinct().Count() != values.Length)
+            {
+                throw new InvalidOperationException($"{type.FullName}: enum aliases are forbidden.");
+            }
+
+            enums[type.FullName!] = type;
         }
 
         private static int Depth(Schema schema)
@@ -267,7 +301,7 @@ namespace GameFrame.ProtocolTools
                 Type type = field.Type.IsArray ? field.Type.GetElementType()! : field.Type;
                 int stringBytes = field.StringUtf8.HasValue ? Math.Min(field.StringUtf8.Value, field.StringUtf16!.Value * 3) : 0;
                 long valueBytes = type == typeof(string) ? (stringBytes == 0 ? 4 : 8 + stringBytes)
-                    : PrimitiveBytes.TryGetValue(type, out int bytes) ? bytes : MaxBytes(field.Child!);
+                    : type.IsEnum ? 4 : PrimitiveBytes.TryGetValue(type, out int bytes) ? bytes : MaxBytes(field.Child!);
                 length = checked(length + (field.ArrayLimit.HasValue ? 4 + field.ArrayLimit.Value * valueBytes : valueBytes));
             }
 
@@ -299,6 +333,27 @@ namespace GameFrame.ProtocolTools
                 writer.WriteStartObject();
                 writer.WriteNumber("controlVersion", 1);
                 writer.WriteString("endianness", "little");
+                writer.WriteStartArray("enums");
+                foreach (Type type in enums.Values)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("name", type.FullName);
+                    writer.WriteString("underlyingType", "System.Int32");
+                    writer.WriteStartArray("values");
+                    foreach (FieldInfo field in type.GetFields(BindingFlags.Public | BindingFlags.Static)
+                        .OrderBy(field => (int)field.GetRawConstantValue()!))
+                    {
+                        writer.WriteStartObject();
+                        writer.WriteString("name", field.Name);
+                        writer.WriteNumber("value", (int)field.GetRawConstantValue()!);
+                        writer.WriteEndObject();
+                    }
+
+                    writer.WriteEndArray();
+                    writer.WriteEndObject();
+                }
+
+                writer.WriteEndArray();
                 writer.WriteStartObject("limits");
                 writer.WriteNumber("arrayCount", NetContractLimits.MaxArrayCount);
                 writer.WriteNumber("dtoNodes", NetContractLimits.MaxDtoNodes);
@@ -378,7 +433,8 @@ namespace GameFrame.ProtocolTools
             Line("using System;");
             Line("using GameFrame.Network;");
             Line("using MemoryPack;");
-            foreach (string? space in schemas.Values.Select(schema => schema.Type.Namespace).Distinct().OrderBy(value => value, StringComparer.Ordinal))
+            foreach (string? space in schemas.Values.Select(schema => schema.Type.Namespace)
+                .Concat(enums.Values.Select(type => type.Namespace)).Distinct().OrderBy(value => value, StringComparer.Ordinal))
             {
                 if (space != null)
                 {
@@ -432,6 +488,28 @@ namespace GameFrame.ProtocolTools
 
             Line("        }");
             Line();
+            foreach (Type type in enums.Values)
+            {
+                string valid = string.Join(" || ", Enum.GetValues(type).Cast<object>().Select(Convert.ToInt32)
+                    .OrderBy(value => value).Select(value => $"value == {value}"));
+                Line($"        private static bool IsEnum{type.Name}(int value) => {valid};");
+                Line($"        private static void ReadEnum{type.Name}(ref NetWireReader reader)");
+                Line("        {");
+                Line($"            if (!IsEnum{type.Name}(reader.Int32()))");
+                Line("            {");
+                Line("                throw new NetworkProtocolException(\"Unknown enum value.\");");
+                Line("            }");
+                Line("        }");
+                Line($"        private static void CheckEnum{type.Name}({type.Name} value)");
+                Line("        {");
+                Line($"            if (!IsEnum{type.Name}((int)value))");
+                Line("            {");
+                Line("                throw new ArgumentException(\"Unknown enum value.\");");
+                Line("            }");
+                Line("        }");
+                Line();
+            }
+
             foreach (Schema schema in schemas.Values)
             {
                 string type = schema.Type.Name;
@@ -532,6 +610,11 @@ namespace GameFrame.ProtocolTools
                 return "reader.Boolean();";
             }
 
+            if (type.IsEnum)
+            {
+                return $"ReadEnum{type.Name}(ref reader);";
+            }
+
             return PrimitiveBytes.TryGetValue(type, out int bytes) ? $"reader.Primitive({bytes});"
                 : $"Read{type.Name}(ref reader, {Bool(nullable)}, depth + 1);";
         }
@@ -539,6 +622,7 @@ namespace GameFrame.ProtocolTools
         private static string? CheckValue(Field field, Type type, bool nullable, string access)
         {
             return type == typeof(string) ? $"NetWireReader.ValidateString({access}, {field.StringUtf16}, {field.StringUtf8}, {Bool(nullable)});"
+                : type.IsEnum ? $"CheckEnum{type.Name}({access});"
                 : PrimitiveBytes.ContainsKey(type) ? null : $"Check{type.Name}({access}, {Bool(nullable)}, depth + 1, ref nodes);";
         }
 

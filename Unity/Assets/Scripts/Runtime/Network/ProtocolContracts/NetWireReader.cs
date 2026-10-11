@@ -43,6 +43,11 @@ namespace GameFrame.Network
             Take(bytes);
         }
 
+        public int Int32()
+        {
+            return BinaryPrimitives.ReadInt32LittleEndian(Take(4));
+        }
+
         public void Boolean()
         {
             if (Take(1)[0] > 1)

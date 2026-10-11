@@ -68,7 +68,10 @@ namespace GameFrame.ProtocolToolTests
         [TestCase("message Request { uint32 value = 1 [(game.net.typo)=true]; }", "typo")]
         [TestCase("message Request { uint32 value = 1 invalid; }", "error")]
         [TestCase("message Request { repeated bytes value = 1 [(game.net.max_count)=2]; }", "jagged")]
-        [TestCase("enum State { NONE = 0; } message Request { State value = 1; }", "enum")]
+        [TestCase("enum State { None = 0; Ready = 1; Alias = 1; option allow_alias = true; } message Request { State value = 1; }", "aliases")]
+        [TestCase("enum State { None = 0; snake_case = 1; SnakeCase = 2; } message Request { State value = 1; }", "unique")]
+        [TestCase("enum State { None = 0; } message Request { State value = 1 [(game.net.scalar)=\"int16\"]; }", "scalar")]
+        [TestCase("enum State { None = 0; } message Request { State value = 1 [(game.net.nullable)=true]; }", "Nullable<T>")]
         [TestCase("message Request { bytes value = 1 [(game.net.max_count)=513]; }", "V1 limits")]
         public void InvalidProtoNeverSilentlyDropsFields(string messages, string reason)
         {
@@ -88,6 +91,34 @@ namespace GameFrame.ProtocolToolTests
             string messages = Text(ProtoProtocolGenerator.Generate(fixture.Root), "GameNetMessages.cs");
             StringAssert.Contains("global::Game.Protocol.Child? Child", messages);
             StringAssert.Contains("global::Game.Protocol.Child?[] Children", messages);
+        }
+
+        [Test]
+        public void EnumScalarAndArrayUseFixedInt32BytesAndKnownValueValidators()
+        {
+            using var fixture = new Fixture("enum State { None = 0; Ready = 7; Error = -9; } " +
+                "message Request { State state = 1; repeated State states = 2 [(game.net.max_count)=2]; }");
+            var outputs = ProtoProtocolGenerator.Generate(fixture.Root, includeArtifacts: true);
+            StringAssert.Contains("public enum State : int", Text(outputs, "GameNetMessages.cs"));
+            string codecs = Text(outputs, "GameNetProtocol.cs");
+            StringAssert.Contains("ReadEnumState(ref reader)", codecs);
+            StringAssert.Contains("CheckEnumState(element)", codecs);
+            StringAssert.Contains("Unknown enum value", codecs);
+            string vectors = Text(outputs, "golden-vectors.json");
+            StringAssert.Contains("02f7ffffff02000000f7fffffff7ffffff", vectors);
+            StringAssert.Contains("0207000000020000000700000007000000", vectors);
+        }
+
+        [Test]
+        public void EnumDefinitionChangesHashEvenWhenEncodedValuesAreUnchanged()
+        {
+            const string proto = "enum State { None = 0; Ready = 7; } message Request { State value = 1; }";
+            using var fixture = new Fixture(proto);
+            var first = ProtoProtocolGenerator.Generate(fixture.Root, includeArtifacts: true);
+            fixture.Write(proto.Replace("Ready", "Available"));
+            var second = ProtoProtocolGenerator.Generate(fixture.Root, includeArtifacts: true);
+            Assert.AreNotEqual(Text(first, "protocol.sha256"), Text(second, "protocol.sha256"));
+            Assert.AreEqual(Text(first, "golden-vectors.json"), Text(second, "golden-vectors.json"));
         }
 
         [Test]

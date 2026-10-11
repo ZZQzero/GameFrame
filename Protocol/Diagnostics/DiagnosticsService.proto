@@ -1,0 +1,15 @@
+syntax = "proto3";
+package game.protocol.diagnostics;
+option csharp_namespace = "Game.Hotfix.Network.Protocol";
+import "Common/net_options.proto";
+import "Diagnostics/DiagnosticsProto.proto";
+
+service DiagnosticsService {
+  rpc Echo(EchoRequest) returns (EchoResponse) {
+    option (game.net.opcode) = 1900;
+    option (game.net.route_kind) = ROUTE_KIND_RPC;
+    option (game.net.delivery) = DELIVERY_RELIABLE;
+    option (game.net.max_body) = 1024;
+    option (game.net.response_max_body) = 1024;
+  }
+}

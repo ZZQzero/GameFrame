@@ -1,0 +1,15 @@
+syntax = "proto3";
+package game.protocol.diagnostics;
+option csharp_namespace = "Game.Hotfix.Network.Protocol";
+import "Common/net_options.proto";
+
+// Registered only by local diagnostics profile, never by production handlers.
+message EchoRequest {
+  string text = 1 [(game.net.max_utf16) = 128, (game.net.max_utf8) = 512];
+  // Handler accepts 0..5000 ms and propagates cancellation.
+  uint32 delay_ms = 2;
+}
+
+message EchoResponse {
+  string text = 1 [(game.net.max_utf16) = 128, (game.net.max_utf8) = 512];
+}

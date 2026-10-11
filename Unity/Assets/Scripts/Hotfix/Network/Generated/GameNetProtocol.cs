@@ -11,25 +11,22 @@ namespace Game.Hotfix.Network.Generated
     {
         public static readonly NetRpc<LoginRequest, LoginResponse> Login = new NetRpc<LoginRequest, LoginResponse>(1000u, 2048, 256, GameNetProtocol.CodecLoginRequest, GameNetProtocol.CodecLoginResponse);
         public static readonly NetRpc<ResumeLoginRequest, LoginResponse> ResumeLogin = new NetRpc<ResumeLoginRequest, LoginResponse>(1001u, 128, 256, GameNetProtocol.CodecResumeLoginRequest, GameNetProtocol.CodecLoginResponse);
-        public static readonly NetRpc<RequestBattleGrantRequest, BattleGrantResponse> RequestBattleGrant = new NetRpc<RequestBattleGrantRequest, BattleGrantResponse>(1002u, 128, 2048, GameNetProtocol.CodecRequestBattleGrantRequest, GameNetProtocol.CodecBattleGrantResponse);
+        public static readonly NetRpc<RequestWorldGrantRequest, WorldGrantResponse> RequestWorldGrant = new NetRpc<RequestWorldGrantRequest, WorldGrantResponse>(1002u, 128, 2048, GameNetProtocol.CodecRequestWorldGrantRequest, GameNetProtocol.CodecWorldGrantResponse);
         public static readonly NetRpc<LogoutRequest, OperationResponse> Logout = new NetRpc<LogoutRequest, OperationResponse>(1003u, 64, 64, GameNetProtocol.CodecLogoutRequest, GameNetProtocol.CodecOperationResponse);
         public static readonly NetRpc<EnterWorldRequest, WorldResponse> EnterWorld = new NetRpc<EnterWorldRequest, WorldResponse>(1100u, 64, 8192, GameNetProtocol.CodecEnterWorldRequest, GameNetProtocol.CodecWorldResponse);
         public static readonly NetRpc<RestoreWorldRequest, WorldResponse> RestoreWorld = new NetRpc<RestoreWorldRequest, WorldResponse>(1101u, 128, 8192, GameNetProtocol.CodecRestoreWorldRequest, GameNetProtocol.CodecWorldResponse);
         public static readonly NetRpc<LeaveWorldRequest, OperationResponse> LeaveWorld = new NetRpc<LeaveWorldRequest, OperationResponse>(1102u, 64, 64, GameNetProtocol.CodecLeaveWorldRequest, GameNetProtocol.CodecOperationResponse);
-        public static readonly NetPush<WorldEvent> WorldEvent = new NetPush<WorldEvent>(1200u, NetDelivery.Reliable, 1024, GameNetProtocol.CodecWorldEvent);
-        public static readonly NetPush<WorldSnapshot> WorldSnapshot = new NetPush<WorldSnapshot>(1201u, NetDelivery.Unreliable, 1118, GameNetProtocol.CodecWorldSnapshot);
-        public static readonly NetUnreliable<MoveCommand> MoveCommand = new NetUnreliable<MoveCommand>(1202u, 64, GameNetProtocol.CodecMoveCommand);
+        public static readonly NetPush<WorldEntityEntered> WorldEntityEntered = new NetPush<WorldEntityEntered>(1200u, NetDelivery.Reliable, 1024, GameNetProtocol.CodecWorldEntityEntered);
+        public static readonly NetPush<WorldEntityLeft> WorldEntityLeft = new NetPush<WorldEntityLeft>(1201u, NetDelivery.Reliable, 128, GameNetProtocol.CodecWorldEntityLeft);
+        public static readonly NetPush<WorldSnapshot> WorldSnapshot = new NetPush<WorldSnapshot>(1210u, NetDelivery.Unreliable, 1118, GameNetProtocol.CodecWorldSnapshot);
+        public static readonly NetPush<WorldSnapshot> WorldSnapshotReliable = new NetPush<WorldSnapshot>(1211u, NetDelivery.Reliable, 1118, GameNetProtocol.CodecWorldSnapshot);
+        public static readonly NetUnreliable<MoveInput> MoveInput = new NetUnreliable<MoveInput>(1220u, 64, GameNetProtocol.CodecMoveInput);
+        public static readonly NetSend<MoveInput> MoveInputReliable = new NetSend<MoveInput>(1221u, 64, GameNetProtocol.CodecMoveInput);
         public static readonly NetRpc<EchoRequest, EchoResponse> Echo = new NetRpc<EchoRequest, EchoResponse>(1900u, 1024, 1024, GameNetProtocol.CodecEchoRequest, GameNetProtocol.CodecEchoResponse);
     }
 
     public static class GameNetProtocol
     {
-        internal static readonly NetMessageCodec<BattleGrantResponse> CodecBattleGrantResponse = new NetMessageCodec<BattleGrantResponse>(
-            (writer, value) => MemoryPackSerializer.Serialize(writer, value, MemoryPackSerializerOptions.Utf8),
-            bytes => MemoryPackSerializer.Deserialize<BattleGrantResponse>(bytes, MemoryPackSerializerOptions.Utf8)!,
-            value => { int nodes = 0; CheckBattleGrantResponse(value, false, 1, ref nodes); },
-            bytes => { var reader = new NetWireReader(bytes); ReadBattleGrantResponse(ref reader, false, 1); reader.Complete(); });
-
         internal static readonly NetMessageCodec<EchoRequest> CodecEchoRequest = new NetMessageCodec<EchoRequest>(
             (writer, value) => MemoryPackSerializer.Serialize(writer, value, MemoryPackSerializerOptions.Utf8),
             bytes => MemoryPackSerializer.Deserialize<EchoRequest>(bytes, MemoryPackSerializerOptions.Utf8)!,
@@ -78,11 +75,11 @@ namespace Game.Hotfix.Network.Generated
             value => { int nodes = 0; CheckLogoutRequest(value, false, 1, ref nodes); },
             bytes => { var reader = new NetWireReader(bytes); ReadLogoutRequest(ref reader, false, 1); reader.Complete(); });
 
-        internal static readonly NetMessageCodec<MoveCommand> CodecMoveCommand = new NetMessageCodec<MoveCommand>(
+        internal static readonly NetMessageCodec<MoveInput> CodecMoveInput = new NetMessageCodec<MoveInput>(
             (writer, value) => MemoryPackSerializer.Serialize(writer, value, MemoryPackSerializerOptions.Utf8),
-            bytes => MemoryPackSerializer.Deserialize<MoveCommand>(bytes, MemoryPackSerializerOptions.Utf8)!,
-            value => { int nodes = 0; CheckMoveCommand(value, false, 1, ref nodes); },
-            bytes => { var reader = new NetWireReader(bytes); ReadMoveCommand(ref reader, false, 1); reader.Complete(); });
+            bytes => MemoryPackSerializer.Deserialize<MoveInput>(bytes, MemoryPackSerializerOptions.Utf8)!,
+            value => { int nodes = 0; CheckMoveInput(value, false, 1, ref nodes); },
+            bytes => { var reader = new NetWireReader(bytes); ReadMoveInput(ref reader, false, 1); reader.Complete(); });
 
         internal static readonly NetMessageCodec<OperationResponse> CodecOperationResponse = new NetMessageCodec<OperationResponse>(
             (writer, value) => MemoryPackSerializer.Serialize(writer, value, MemoryPackSerializerOptions.Utf8),
@@ -90,11 +87,11 @@ namespace Game.Hotfix.Network.Generated
             value => { int nodes = 0; CheckOperationResponse(value, false, 1, ref nodes); },
             bytes => { var reader = new NetWireReader(bytes); ReadOperationResponse(ref reader, false, 1); reader.Complete(); });
 
-        internal static readonly NetMessageCodec<RequestBattleGrantRequest> CodecRequestBattleGrantRequest = new NetMessageCodec<RequestBattleGrantRequest>(
+        internal static readonly NetMessageCodec<RequestWorldGrantRequest> CodecRequestWorldGrantRequest = new NetMessageCodec<RequestWorldGrantRequest>(
             (writer, value) => MemoryPackSerializer.Serialize(writer, value, MemoryPackSerializerOptions.Utf8),
-            bytes => MemoryPackSerializer.Deserialize<RequestBattleGrantRequest>(bytes, MemoryPackSerializerOptions.Utf8)!,
-            value => { int nodes = 0; CheckRequestBattleGrantRequest(value, false, 1, ref nodes); },
-            bytes => { var reader = new NetWireReader(bytes); ReadRequestBattleGrantRequest(ref reader, false, 1); reader.Complete(); });
+            bytes => MemoryPackSerializer.Deserialize<RequestWorldGrantRequest>(bytes, MemoryPackSerializerOptions.Utf8)!,
+            value => { int nodes = 0; CheckRequestWorldGrantRequest(value, false, 1, ref nodes); },
+            bytes => { var reader = new NetWireReader(bytes); ReadRequestWorldGrantRequest(ref reader, false, 1); reader.Complete(); });
 
         internal static readonly NetMessageCodec<RestoreWorldRequest> CodecRestoreWorldRequest = new NetMessageCodec<RestoreWorldRequest>(
             (writer, value) => MemoryPackSerializer.Serialize(writer, value, MemoryPackSerializerOptions.Utf8),
@@ -108,11 +105,23 @@ namespace Game.Hotfix.Network.Generated
             value => { int nodes = 0; CheckResumeLoginRequest(value, false, 1, ref nodes); },
             bytes => { var reader = new NetWireReader(bytes); ReadResumeLoginRequest(ref reader, false, 1); reader.Complete(); });
 
-        internal static readonly NetMessageCodec<WorldEvent> CodecWorldEvent = new NetMessageCodec<WorldEvent>(
+        internal static readonly NetMessageCodec<WorldEntityEntered> CodecWorldEntityEntered = new NetMessageCodec<WorldEntityEntered>(
             (writer, value) => MemoryPackSerializer.Serialize(writer, value, MemoryPackSerializerOptions.Utf8),
-            bytes => MemoryPackSerializer.Deserialize<WorldEvent>(bytes, MemoryPackSerializerOptions.Utf8)!,
-            value => { int nodes = 0; CheckWorldEvent(value, false, 1, ref nodes); },
-            bytes => { var reader = new NetWireReader(bytes); ReadWorldEvent(ref reader, false, 1); reader.Complete(); });
+            bytes => MemoryPackSerializer.Deserialize<WorldEntityEntered>(bytes, MemoryPackSerializerOptions.Utf8)!,
+            value => { int nodes = 0; CheckWorldEntityEntered(value, false, 1, ref nodes); },
+            bytes => { var reader = new NetWireReader(bytes); ReadWorldEntityEntered(ref reader, false, 1); reader.Complete(); });
+
+        internal static readonly NetMessageCodec<WorldEntityLeft> CodecWorldEntityLeft = new NetMessageCodec<WorldEntityLeft>(
+            (writer, value) => MemoryPackSerializer.Serialize(writer, value, MemoryPackSerializerOptions.Utf8),
+            bytes => MemoryPackSerializer.Deserialize<WorldEntityLeft>(bytes, MemoryPackSerializerOptions.Utf8)!,
+            value => { int nodes = 0; CheckWorldEntityLeft(value, false, 1, ref nodes); },
+            bytes => { var reader = new NetWireReader(bytes); ReadWorldEntityLeft(ref reader, false, 1); reader.Complete(); });
+
+        internal static readonly NetMessageCodec<WorldGrantResponse> CodecWorldGrantResponse = new NetMessageCodec<WorldGrantResponse>(
+            (writer, value) => MemoryPackSerializer.Serialize(writer, value, MemoryPackSerializerOptions.Utf8),
+            bytes => MemoryPackSerializer.Deserialize<WorldGrantResponse>(bytes, MemoryPackSerializerOptions.Utf8)!,
+            value => { int nodes = 0; CheckWorldGrantResponse(value, false, 1, ref nodes); },
+            bytes => { var reader = new NetWireReader(bytes); ReadWorldGrantResponse(ref reader, false, 1); reader.Complete(); });
 
         internal static readonly NetMessageCodec<WorldResponse> CodecWorldResponse = new NetMessageCodec<WorldResponse>(
             (writer, value) => MemoryPackSerializer.Serialize(writer, value, MemoryPackSerializerOptions.Utf8),
@@ -130,99 +139,36 @@ namespace Game.Hotfix.Network.Generated
         private static class CatalogHolder
         {
             internal static readonly NetProtocolCatalog Value = new NetProtocolCatalog(
-                new byte[] { 0x79, 0x50, 0x38, 0x60, 0x50, 0x93, 0x91, 0xe6, 0x2d, 0xd5, 0xa6, 0xbe, 0xd7, 0x82, 0xe0, 0x38, 0xd0, 0xcb, 0x62, 0xae, 0x6d, 0xd9, 0xe2, 0xc8, 0xd0, 0xba, 0xae, 0x7d, 0xed, 0xfd, 0xea, 0x09 },
+                new byte[] { 0x4e, 0xe5, 0x65, 0x3c, 0x59, 0x28, 0x87, 0x27, 0xdb, 0xd3, 0x8d, 0xd3, 0x7a, 0xce, 0x44, 0xbc, 0x31, 0x4e, 0x57, 0x4e, 0xed, 0x21, 0xdb, 0xf0, 0x95, 0x5c, 0xb9, 0xa0, 0x57, 0x72, 0x7e, 0x4d },
                 GameNetRoutes.Login,
                 GameNetRoutes.ResumeLogin,
-                GameNetRoutes.RequestBattleGrant,
+                GameNetRoutes.RequestWorldGrant,
                 GameNetRoutes.Logout,
                 GameNetRoutes.EnterWorld,
                 GameNetRoutes.RestoreWorld,
                 GameNetRoutes.LeaveWorld,
-                GameNetRoutes.WorldEvent,
+                GameNetRoutes.WorldEntityEntered,
+                GameNetRoutes.WorldEntityLeft,
                 GameNetRoutes.WorldSnapshot,
-                GameNetRoutes.MoveCommand,
+                GameNetRoutes.WorldSnapshotReliable,
+                GameNetRoutes.MoveInput,
+                GameNetRoutes.MoveInputReliable,
                 GameNetRoutes.Echo);
         }
 
-        private static void ReadBattleGrantResponse(ref NetWireReader reader, bool nullable, int depth)
+        private static bool IsEnumResultCode(int value) => value == 0 || value == 1 || value == 2 || value == 3 || value == 4 || value == 5 || value == 6 || value == 7 || value == 8 || value == 9 || value == 10 || value == 11;
+        private static void ReadEnumResultCode(ref NetWireReader reader)
         {
-            if (!reader.Object(12, nullable, depth))
+            if (!IsEnumResultCode(reader.Int32()))
             {
-                return;
+                throw new NetworkProtocolException("Unknown enum value.");
             }
-            reader.Primitive(4);
-            reader.Primitive(8);
-            reader.String(256, 1024, false);
-            reader.Primitive(2);
-            int count4 = reader.Array(512, false);
-            for (int i = 0; i < count4; i++)
-            {
-                reader.Primitive(1);
-            }
-            reader.Primitive(4);
-            int count6 = reader.Array(16, false);
-            for (int i = 0; i < count6; i++)
-            {
-                reader.Primitive(1);
-            }
-            int count7 = reader.Array(32, false);
-            for (int i = 0; i < count7; i++)
-            {
-                reader.Primitive(1);
-            }
-            reader.Primitive(8);
-            reader.Primitive(4);
-            reader.Primitive(4);
-            reader.Primitive(4);
         }
-
-        private static void CheckBattleGrantResponse(BattleGrantResponse? value, bool nullable, int depth, ref int nodes)
+        private static void CheckEnumResultCode(ResultCode value)
         {
-            if (value == null)
+            if (!IsEnumResultCode((int)value))
             {
-                if (!nullable)
-                {
-                    throw new ArgumentException("Nonnullable DTO is null.");
-                }
-                return;
-            }
-            if (depth > NetContractLimits.MaxObjectDepth || ++nodes > NetContractLimits.MaxDtoNodes)
-            {
-                throw new ArgumentException("Object budget exceeded.");
-            }
-            NetWireReader.ValidateString(value.@Host, 256, 1024, false);
-            if (value.@Ticket == null)
-            {
-                throw new ArgumentException("Nonnullable array is null.");
-            }
-            else
-            {
-                if (value.@Ticket.Length > 512)
-                {
-                    throw new ArgumentException("Array count exceeds its limit.");
-                }
-            }
-            if (value.@PskIdentity == null)
-            {
-                throw new ArgumentException("Nonnullable array is null.");
-            }
-            else
-            {
-                if (value.@PskIdentity.Length > 16)
-                {
-                    throw new ArgumentException("Array count exceeds its limit.");
-                }
-            }
-            if (value.@Psk == null)
-            {
-                throw new ArgumentException("Nonnullable array is null.");
-            }
-            else
-            {
-                if (value.@Psk.Length > 32)
-                {
-                    throw new ArgumentException("Array count exceeds its limit.");
-                }
+                throw new ArgumentException("Unknown enum value.");
             }
         }
 
@@ -410,7 +356,7 @@ namespace Game.Hotfix.Network.Generated
             {
                 return;
             }
-            reader.Primitive(4);
+            ReadEnumResultCode(ref reader);
             reader.Primitive(8);
             int count2 = reader.Array(16, false);
             for (int i = 0; i < count2; i++)
@@ -443,6 +389,7 @@ namespace Game.Hotfix.Network.Generated
             {
                 throw new ArgumentException("Object budget exceeded.");
             }
+            CheckEnumResultCode(value.@ResultCode);
             if (value.@AccountSessionId == null)
             {
                 throw new ArgumentException("Nonnullable array is null.");
@@ -491,21 +438,27 @@ namespace Game.Hotfix.Network.Generated
             }
         }
 
-        private static void ReadMoveCommand(ref NetWireReader reader, bool nullable, int depth)
+        private static void ReadMoveInput(ref NetWireReader reader, bool nullable, int depth)
         {
-            if (!reader.Object(6, nullable, depth))
+            if (!reader.Object(8, nullable, depth))
             {
                 return;
             }
+            int count0 = reader.Array(16, false);
+            for (int i = 0; i < count0; i++)
+            {
+                reader.Primitive(1);
+            }
             reader.Primitive(8);
+            reader.Primitive(4);
             reader.Primitive(4);
             reader.Primitive(2);
             reader.Primitive(2);
             reader.Primitive(8);
-            reader.Primitive(8);
+            reader.Primitive(4);
         }
 
-        private static void CheckMoveCommand(MoveCommand? value, bool nullable, int depth, ref int nodes)
+        private static void CheckMoveInput(MoveInput? value, bool nullable, int depth, ref int nodes)
         {
             if (value == null)
             {
@@ -519,6 +472,17 @@ namespace Game.Hotfix.Network.Generated
             {
                 throw new ArgumentException("Object budget exceeded.");
             }
+            if (value.@WorldSessionId == null)
+            {
+                throw new ArgumentException("Nonnullable array is null.");
+            }
+            else
+            {
+                if (value.@WorldSessionId.Length > 16)
+                {
+                    throw new ArgumentException("Array count exceeds its limit.");
+                }
+            }
         }
 
         private static void ReadOperationResponse(ref NetWireReader reader, bool nullable, int depth)
@@ -527,7 +491,7 @@ namespace Game.Hotfix.Network.Generated
             {
                 return;
             }
-            reader.Primitive(4);
+            ReadEnumResultCode(ref reader);
         }
 
         private static void CheckOperationResponse(OperationResponse? value, bool nullable, int depth, ref int nodes)
@@ -544,9 +508,10 @@ namespace Game.Hotfix.Network.Generated
             {
                 throw new ArgumentException("Object budget exceeded.");
             }
+            CheckEnumResultCode(value.@ResultCode);
         }
 
-        private static void ReadRequestBattleGrantRequest(ref NetWireReader reader, bool nullable, int depth)
+        private static void ReadRequestWorldGrantRequest(ref NetWireReader reader, bool nullable, int depth)
         {
             if (!reader.Object(4, nullable, depth))
             {
@@ -562,7 +527,7 @@ namespace Game.Hotfix.Network.Generated
             }
         }
 
-        private static void CheckRequestBattleGrantRequest(RequestBattleGrantRequest? value, bool nullable, int depth, ref int nodes)
+        private static void CheckRequestWorldGrantRequest(RequestWorldGrantRequest? value, bool nullable, int depth, ref int nodes)
         {
             if (value == null)
             {
@@ -688,9 +653,9 @@ namespace Game.Hotfix.Network.Generated
             }
         }
 
-        private static void ReadWorldEvent(ref NetWireReader reader, bool nullable, int depth)
+        private static void ReadWorldEntityEntered(ref NetWireReader reader, bool nullable, int depth)
         {
-            if (!reader.Object(4, nullable, depth))
+            if (!reader.Object(5, nullable, depth))
             {
                 return;
             }
@@ -701,10 +666,11 @@ namespace Game.Hotfix.Network.Generated
             }
             reader.Primitive(8);
             reader.Primitive(8);
+            reader.Primitive(4);
             ReadEntityState(ref reader, false, depth + 1);
         }
 
-        private static void CheckWorldEvent(WorldEvent? value, bool nullable, int depth, ref int nodes)
+        private static void CheckWorldEntityEntered(WorldEntityEntered? value, bool nullable, int depth, ref int nodes)
         {
             if (value == null)
             {
@@ -732,13 +698,140 @@ namespace Game.Hotfix.Network.Generated
             CheckEntityState(value.@Entity, false, depth + 1, ref nodes);
         }
 
+        private static void ReadWorldEntityLeft(ref NetWireReader reader, bool nullable, int depth)
+        {
+            if (!reader.Object(5, nullable, depth))
+            {
+                return;
+            }
+            int count0 = reader.Array(16, false);
+            for (int i = 0; i < count0; i++)
+            {
+                reader.Primitive(1);
+            }
+            reader.Primitive(8);
+            reader.Primitive(8);
+            reader.Primitive(8);
+            reader.Primitive(4);
+        }
+
+        private static void CheckWorldEntityLeft(WorldEntityLeft? value, bool nullable, int depth, ref int nodes)
+        {
+            if (value == null)
+            {
+                if (!nullable)
+                {
+                    throw new ArgumentException("Nonnullable DTO is null.");
+                }
+                return;
+            }
+            if (depth > NetContractLimits.MaxObjectDepth || ++nodes > NetContractLimits.MaxDtoNodes)
+            {
+                throw new ArgumentException("Object budget exceeded.");
+            }
+            if (value.@WorldSessionId == null)
+            {
+                throw new ArgumentException("Nonnullable array is null.");
+            }
+            else
+            {
+                if (value.@WorldSessionId.Length > 16)
+                {
+                    throw new ArgumentException("Array count exceeds its limit.");
+                }
+            }
+        }
+
+        private static void ReadWorldGrantResponse(ref NetWireReader reader, bool nullable, int depth)
+        {
+            if (!reader.Object(12, nullable, depth))
+            {
+                return;
+            }
+            ReadEnumResultCode(ref reader);
+            reader.Primitive(8);
+            reader.String(256, 1024, false);
+            reader.Primitive(2);
+            int count4 = reader.Array(512, false);
+            for (int i = 0; i < count4; i++)
+            {
+                reader.Primitive(1);
+            }
+            reader.Primitive(4);
+            int count6 = reader.Array(16, false);
+            for (int i = 0; i < count6; i++)
+            {
+                reader.Primitive(1);
+            }
+            int count7 = reader.Array(32, false);
+            for (int i = 0; i < count7; i++)
+            {
+                reader.Primitive(1);
+            }
+            reader.Primitive(8);
+            reader.Primitive(4);
+            reader.Primitive(4);
+            reader.Primitive(4);
+        }
+
+        private static void CheckWorldGrantResponse(WorldGrantResponse? value, bool nullable, int depth, ref int nodes)
+        {
+            if (value == null)
+            {
+                if (!nullable)
+                {
+                    throw new ArgumentException("Nonnullable DTO is null.");
+                }
+                return;
+            }
+            if (depth > NetContractLimits.MaxObjectDepth || ++nodes > NetContractLimits.MaxDtoNodes)
+            {
+                throw new ArgumentException("Object budget exceeded.");
+            }
+            CheckEnumResultCode(value.@ResultCode);
+            NetWireReader.ValidateString(value.@Host, 256, 1024, false);
+            if (value.@Ticket == null)
+            {
+                throw new ArgumentException("Nonnullable array is null.");
+            }
+            else
+            {
+                if (value.@Ticket.Length > 512)
+                {
+                    throw new ArgumentException("Array count exceeds its limit.");
+                }
+            }
+            if (value.@PskIdentity == null)
+            {
+                throw new ArgumentException("Nonnullable array is null.");
+            }
+            else
+            {
+                if (value.@PskIdentity.Length > 16)
+                {
+                    throw new ArgumentException("Array count exceeds its limit.");
+                }
+            }
+            if (value.@Psk == null)
+            {
+                throw new ArgumentException("Nonnullable array is null.");
+            }
+            else
+            {
+                if (value.@Psk.Length > 32)
+                {
+                    throw new ArgumentException("Array count exceeds its limit.");
+                }
+            }
+        }
+
         private static void ReadWorldResponse(ref NetWireReader reader, bool nullable, int depth)
         {
             if (!reader.Object(6, nullable, depth))
             {
                 return;
             }
-            reader.Primitive(4);
+            ReadEnumResultCode(ref reader);
             int count1 = reader.Array(16, false);
             for (int i = 0; i < count1; i++)
             {
@@ -768,6 +861,7 @@ namespace Game.Hotfix.Network.Generated
             {
                 throw new ArgumentException("Object budget exceeded.");
             }
+            CheckEnumResultCode(value.@ResultCode);
             if (value.@WorldSessionId == null)
             {
                 throw new ArgumentException("Nonnullable array is null.");
@@ -798,14 +892,20 @@ namespace Game.Hotfix.Network.Generated
 
         private static void ReadWorldSnapshot(ref NetWireReader reader, bool nullable, int depth)
         {
-            if (!reader.Object(3, nullable, depth))
+            if (!reader.Object(5, nullable, depth))
             {
                 return;
             }
+            int count0 = reader.Array(16, false);
+            for (int i = 0; i < count0; i++)
+            {
+                reader.Primitive(1);
+            }
             reader.Primitive(8);
             reader.Primitive(4);
-            int count2 = reader.Array(16, false);
-            for (int i = 0; i < count2; i++)
+            reader.Primitive(4);
+            int count4 = reader.Array(16, false);
+            for (int i = 0; i < count4; i++)
             {
                 ReadEntityState(ref reader, false, depth + 1);
             }
@@ -824,6 +924,17 @@ namespace Game.Hotfix.Network.Generated
             if (depth > NetContractLimits.MaxObjectDepth || ++nodes > NetContractLimits.MaxDtoNodes)
             {
                 throw new ArgumentException("Object budget exceeded.");
+            }
+            if (value.@WorldSessionId == null)
+            {
+                throw new ArgumentException("Nonnullable array is null.");
+            }
+            else
+            {
+                if (value.@WorldSessionId.Length > 16)
+                {
+                    throw new ArgumentException("Array count exceeds its limit.");
+                }
             }
             if (value.@Entities == null)
             {

@@ -29,7 +29,9 @@ namespace GameFrame.ProtocolTools
                     route.Response == null ? null : Resolve(route.Response), route.MaxBody, route.ResponseMaxBody));
                 var generator = new MemoryPackProtocolGenerator();
                 var outputs = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
-                foreach (var item in generator.Generate(schema.Messages.Keys.Select(Resolve), definitions, includeArtifacts))
+                IEnumerable<Type> types = schema.Messages.Keys.Select(Resolve)
+                    .Concat(schema.Enums.Values.Select(model => assembly.GetType(model.CsharpName, true)!));
+                foreach (var item in generator.Generate(types, definitions, includeArtifacts))
                 {
                     outputs.Add(item.Key, item.Value);
                 }
@@ -81,9 +83,39 @@ namespace GameFrame.ProtocolTools
 
                 string space = file.Options?.CsharpNamespace ?? string.Empty;
                 RequireNamespace(space);
-                if (file.EnumTypes.Count != 0 || file.Extensions.Count != 0)
+                if (file.Extensions.Count != 0)
                 {
-                    throw new InvalidOperationException($"{file.Name}: V1 uses explicit scalar fields; business enums/extensions are unsupported.");
+                    throw new InvalidOperationException($"{file.Name}: business extensions are unsupported.");
+                }
+
+                foreach (EnumDescriptorProto definition in file.EnumTypes)
+                {
+                    RequireIdentifier(definition.Name);
+                    if (definition.Options?.AllowAlias == true || definition.Values.Count == 0 || definition.Values[0].Number != 0)
+                    {
+                        throw new InvalidOperationException($"{definition.Name}: enum requires a zero first value and forbids aliases.");
+                    }
+
+                    string fullName = "." + file.Package + "." + definition.Name;
+                    var model = new ProtoEnum(space + "." + definition.Name);
+                    var names = new HashSet<string>(StringComparer.Ordinal);
+                    var numbers = new HashSet<int>();
+                    foreach (EnumValueDescriptorProto value in definition.Values)
+                    {
+                        string name = PascalCase(value.Name);
+                        RequireIdentifier(name);
+                        if (!names.Add(name) || !numbers.Add(value.Number) || name == definition.Name)
+                        {
+                            throw new InvalidOperationException($"{definition.Name}: enum names and values must be unique.");
+                        }
+
+                        model.Values.Add(new ProtoEnumValue(name, value.Number));
+                    }
+
+                    if (!result.Enums.TryAdd(fullName, model))
+                    {
+                        throw new InvalidOperationException($"Duplicate enum: {fullName}.");
+                    }
                 }
 
                 foreach (DescriptorProto message in file.MessageTypes)
@@ -119,6 +151,13 @@ namespace GameFrame.ProtocolTools
                 }
             }
 
+            string[] csharpNames = result.Messages.Values.Select(model => model.CsharpName)
+                .Concat(result.Enums.Values.Select(model => model.CsharpName)).ToArray();
+            if (csharpNames.Distinct(StringComparer.Ordinal).Count() != csharpNames.Length)
+            {
+                throw new InvalidOperationException("Duplicate generated C# type name.");
+            }
+
             foreach (ProtoMessage message in result.Messages.Values)
             {
                 foreach (ProtoField field in message.Fields)
@@ -126,6 +165,11 @@ namespace GameFrame.ProtocolTools
                     if (field.MessageType != null && !result.Messages.ContainsKey(field.MessageType))
                     {
                         throw new InvalidOperationException($"{message.Name}.{field.Name}: unknown business message {field.MessageType}.");
+                    }
+
+                    if (field.EnumType != null && !result.Enums.ContainsKey(field.EnumType))
+                    {
+                        throw new InvalidOperationException($"{message.Name}.{field.Name}: unknown business enum {field.EnumType}.");
                     }
                 }
             }
@@ -188,6 +232,7 @@ namespace GameFrame.ProtocolTools
                 FieldDescriptorProto.Type.TypeString => "string",
                 FieldDescriptorProto.Type.TypeBytes => "byte",
                 FieldDescriptorProto.Type.TypeMessage => string.Empty,
+                FieldDescriptorProto.Type.TypeEnum => "enum",
                 _ => throw new InvalidOperationException($"{field.Name}: unsupported field type {field.type}.")
             };
             if (scalar.Length != 0)
@@ -226,7 +271,9 @@ namespace GameFrame.ProtocolTools
                 throw new InvalidOperationException($"{field.Name}: length options do not apply to this field type.");
             }
 
-            return new ProtoField(name, field.Number - 1, core, messageType, array, nullable, elementNullable, count, utf16, utf8);
+            return new ProtoField(name, field.Number - 1, core, messageType,
+                field.type == FieldDescriptorProto.Type.TypeEnum ? field.TypeName : null,
+                array, nullable, elementNullable, count, utf16, utf8);
         }
 
         private static string GenerateMessages(ProtoSchema schema)
@@ -238,13 +285,30 @@ namespace GameFrame.ProtocolTools
             Line("using System;");
             Line("using GameFrame.Network;");
             Line("using MemoryPack;");
-            foreach (var group in schema.Messages.Values.GroupBy(message => message.CsharpName[..message.CsharpName.LastIndexOf('.')])
-                .OrderBy(group => group.Key, StringComparer.Ordinal))
+            IEnumerable<string> spaces = schema.Messages.Values.Select(model => model.CsharpName)
+                .Concat(schema.Enums.Values.Select(model => model.CsharpName))
+                .Select(name => name[..name.LastIndexOf('.')]).Distinct().OrderBy(name => name, StringComparer.Ordinal);
+            foreach (string space in spaces)
             {
                 Line();
-                Line("namespace " + group.Key);
+                Line("namespace " + space);
                 Line("{");
-                foreach (ProtoMessage message in group.OrderBy(value => value.CsharpName, StringComparer.Ordinal))
+                foreach (ProtoEnum definition in schema.Enums.Values.Where(model => model.CsharpName[..model.CsharpName.LastIndexOf('.')] == space)
+                    .OrderBy(model => model.CsharpName, StringComparer.Ordinal))
+                {
+                    Line($"    public enum {definition.CsharpName[(definition.CsharpName.LastIndexOf('.') + 1)..]} : int");
+                    Line("    {");
+                    foreach (ProtoEnumValue value in definition.Values.OrderBy(value => value.Number))
+                    {
+                        Line($"        {value.Name} = {value.Number},");
+                    }
+
+                    Line("    }");
+                    Line();
+                }
+
+                foreach (ProtoMessage message in schema.Messages.Values.Where(model => model.CsharpName[..model.CsharpName.LastIndexOf('.')] == space)
+                    .OrderBy(value => value.CsharpName, StringComparer.Ordinal))
                 {
                     string name = message.CsharpName[(message.CsharpName.LastIndexOf('.') + 1)..];
                     Line("    [MemoryPackable(SerializeLayout.Explicit)]");
@@ -264,6 +328,10 @@ namespace GameFrame.ProtocolTools
 
                         Line($"        [MemoryPackOrder({field.Order})]");
                         string core = field.MessageType == null ? field.Core : "global::" + schema.Messages[field.MessageType].CsharpName;
+                        if (field.EnumType != null)
+                        {
+                            core = "global::" + schema.Enums[field.EnumType].CsharpName;
+                        }
                         string type = core + (field.Array ? (field.ElementNullable ? "?" : "") + "[]" : "") +
                             (field.Nullable ? "?" : "");
                         string initializer = field.Nullable ? "" : field.Array ? $" = Array.Empty<{core}{(field.ElementNullable ? "?" : "")}>();"
@@ -351,6 +419,7 @@ namespace GameFrame.ProtocolTools
         internal sealed class ProtoSchema
         {
             public SortedDictionary<string, ProtoMessage> Messages { get; } = new(StringComparer.Ordinal);
+            public SortedDictionary<string, ProtoEnum> Enums { get; } = new(StringComparer.Ordinal);
             public List<ProtoRoute> Routes { get; } = new();
         }
 
@@ -359,7 +428,13 @@ namespace GameFrame.ProtocolTools
             public List<ProtoField> Fields { get; } = new();
         }
 
-        internal sealed record ProtoField(string Name, int Order, string Core, string? MessageType, bool Array,
+        internal sealed record ProtoEnum(string CsharpName)
+        {
+            public List<ProtoEnumValue> Values { get; } = new();
+        }
+
+        internal sealed record ProtoEnumValue(string Name, int Number);
+        internal sealed record ProtoField(string Name, int Order, string Core, string? MessageType, string? EnumType, bool Array,
             bool Nullable, bool ElementNullable, int? MaxCount, int? MaxUtf16, int? MaxUtf8);
         internal sealed record ProtoRoute(string Name, uint Opcode, string Kind, NetDelivery Delivery,
             string Request, string? Response, int MaxBody, int ResponseMaxBody);

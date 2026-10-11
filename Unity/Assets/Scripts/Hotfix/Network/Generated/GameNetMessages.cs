@@ -6,49 +6,20 @@ using MemoryPack;
 
 namespace Game.Hotfix.Network.Protocol
 {
-    [MemoryPackable(SerializeLayout.Explicit)]
-    public sealed partial class BattleGrantResponse
+    public enum ResultCode : int
     {
-        [MemoryPackOrder(0)]
-        public uint ResultCode { get; set; }
-
-        [MemoryPackOrder(1)]
-        public ulong GrantId { get; set; }
-
-        [NetStringLimit(256, 1024)]
-        [MemoryPackOrder(2)]
-        public string Host { get; set; } = string.Empty;
-
-        [MemoryPackOrder(3)]
-        public ushort Port { get; set; }
-
-        [NetArrayLimit(512)]
-        [MemoryPackOrder(4)]
-        public byte[] Ticket { get; set; } = Array.Empty<byte>();
-
-        [MemoryPackOrder(5)]
-        public uint Conv { get; set; }
-
-        [NetArrayLimit(16)]
-        [MemoryPackOrder(6)]
-        public byte[] PskIdentity { get; set; } = Array.Empty<byte>();
-
-        [NetArrayLimit(32)]
-        [MemoryPackOrder(7)]
-        public byte[] Psk { get; set; } = Array.Empty<byte>();
-
-        [MemoryPackOrder(8)]
-        public long ExpiresAtUtcMs { get; set; }
-
-        [MemoryPackOrder(9)]
-        public uint RemainingTtlMs { get; set; }
-
-        [MemoryPackOrder(10)]
-        public uint ReliableLimit { get; set; }
-
-        [MemoryPackOrder(11)]
-        public uint UnreliableLimit { get; set; }
-
+        Success = 0,
+        InvalidCredentials = 1,
+        SessionExpired = 2,
+        SessionRevoked = 3,
+        CharacterNotOwned = 4,
+        WorldUnavailable = 5,
+        GrantExpired = 6,
+        GrantConsumed = 7,
+        ConflictingRequest = 8,
+        InvalidWorldSession = 9,
+        TooManyEntities = 10,
+        InvalidInput = 11,
     }
 
     [MemoryPackable(SerializeLayout.Explicit)]
@@ -93,16 +64,16 @@ namespace Game.Hotfix.Network.Protocol
         public ulong EntityId { get; set; }
 
         [MemoryPackOrder(1)]
-        public float X { get; set; }
+        public uint Incarnation { get; set; }
 
         [MemoryPackOrder(2)]
-        public float Y { get; set; }
+        public int PositionXMm { get; set; }
 
         [MemoryPackOrder(3)]
-        public float Z { get; set; }
+        public int PositionYMm { get; set; }
 
         [MemoryPackOrder(4)]
-        public uint Tick { get; set; }
+        public int PositionZMm { get; set; }
 
     }
 
@@ -135,7 +106,7 @@ namespace Game.Hotfix.Network.Protocol
     public sealed partial class LoginResponse
     {
         [MemoryPackOrder(0)]
-        public uint ResultCode { get; set; }
+        public global::Game.Hotfix.Network.Protocol.ResultCode ResultCode { get; set; }
 
         [MemoryPackOrder(1)]
         public ulong AccountId { get; set; }
@@ -171,25 +142,32 @@ namespace Game.Hotfix.Network.Protocol
     }
 
     [MemoryPackable(SerializeLayout.Explicit)]
-    public sealed partial class MoveCommand
+    public sealed partial class MoveInput
     {
+        [NetArrayLimit(16)]
         [MemoryPackOrder(0)]
-        public ulong CommandId { get; set; }
+        public byte[] WorldSessionId { get; set; } = Array.Empty<byte>();
 
         [MemoryPackOrder(1)]
-        public uint ClientTick { get; set; }
+        public ulong WorldEpoch { get; set; }
 
         [MemoryPackOrder(2)]
-        public short DirectionX { get; set; }
+        public uint InputSequence { get; set; }
 
         [MemoryPackOrder(3)]
-        public short DirectionZ { get; set; }
+        public uint ClientTick { get; set; }
 
         [MemoryPackOrder(4)]
-        public ulong EntityId { get; set; }
+        public short DirectionX { get; set; }
 
         [MemoryPackOrder(5)]
-        public ulong WorldEpoch { get; set; }
+        public short DirectionZ { get; set; }
+
+        [MemoryPackOrder(6)]
+        public ulong EntityId { get; set; }
+
+        [MemoryPackOrder(7)]
+        public uint Incarnation { get; set; }
 
     }
 
@@ -197,12 +175,12 @@ namespace Game.Hotfix.Network.Protocol
     public sealed partial class OperationResponse
     {
         [MemoryPackOrder(0)]
-        public uint ResultCode { get; set; }
+        public global::Game.Hotfix.Network.Protocol.ResultCode ResultCode { get; set; }
 
     }
 
     [MemoryPackable(SerializeLayout.Explicit)]
-    public sealed partial class RequestBattleGrantRequest
+    public sealed partial class RequestWorldGrantRequest
     {
         [MemoryPackOrder(0)]
         public ulong GrantRequestId { get; set; }
@@ -251,7 +229,7 @@ namespace Game.Hotfix.Network.Protocol
     }
 
     [MemoryPackable(SerializeLayout.Explicit)]
-    public sealed partial class WorldEvent
+    public sealed partial class WorldEntityEntered
     {
         [NetArrayLimit(16)]
         [MemoryPackOrder(0)]
@@ -264,7 +242,76 @@ namespace Game.Hotfix.Network.Protocol
         public ulong EventVersion { get; set; }
 
         [MemoryPackOrder(3)]
+        public uint ServerTick { get; set; }
+
+        [MemoryPackOrder(4)]
         public global::Game.Hotfix.Network.Protocol.EntityState Entity { get; set; } = new global::Game.Hotfix.Network.Protocol.EntityState();
+
+    }
+
+    [MemoryPackable(SerializeLayout.Explicit)]
+    public sealed partial class WorldEntityLeft
+    {
+        [NetArrayLimit(16)]
+        [MemoryPackOrder(0)]
+        public byte[] WorldSessionId { get; set; } = Array.Empty<byte>();
+
+        [MemoryPackOrder(1)]
+        public ulong WorldEpoch { get; set; }
+
+        [MemoryPackOrder(2)]
+        public ulong EventVersion { get; set; }
+
+        [MemoryPackOrder(3)]
+        public ulong EntityId { get; set; }
+
+        [MemoryPackOrder(4)]
+        public uint Incarnation { get; set; }
+
+    }
+
+    [MemoryPackable(SerializeLayout.Explicit)]
+    public sealed partial class WorldGrantResponse
+    {
+        [MemoryPackOrder(0)]
+        public global::Game.Hotfix.Network.Protocol.ResultCode ResultCode { get; set; }
+
+        [MemoryPackOrder(1)]
+        public ulong GrantId { get; set; }
+
+        [NetStringLimit(256, 1024)]
+        [MemoryPackOrder(2)]
+        public string Host { get; set; } = string.Empty;
+
+        [MemoryPackOrder(3)]
+        public ushort Port { get; set; }
+
+        [NetArrayLimit(512)]
+        [MemoryPackOrder(4)]
+        public byte[] Ticket { get; set; } = Array.Empty<byte>();
+
+        [MemoryPackOrder(5)]
+        public uint Conv { get; set; }
+
+        [NetArrayLimit(16)]
+        [MemoryPackOrder(6)]
+        public byte[] PskIdentity { get; set; } = Array.Empty<byte>();
+
+        [NetArrayLimit(32)]
+        [MemoryPackOrder(7)]
+        public byte[] Psk { get; set; } = Array.Empty<byte>();
+
+        [MemoryPackOrder(8)]
+        public long ExpiresAtUtcMs { get; set; }
+
+        [MemoryPackOrder(9)]
+        public uint RemainingTtlMs { get; set; }
+
+        [MemoryPackOrder(10)]
+        public uint ReliableLimit { get; set; }
+
+        [MemoryPackOrder(11)]
+        public uint UnreliableLimit { get; set; }
 
     }
 
@@ -272,7 +319,7 @@ namespace Game.Hotfix.Network.Protocol
     public sealed partial class WorldResponse
     {
         [MemoryPackOrder(0)]
-        public uint ResultCode { get; set; }
+        public global::Game.Hotfix.Network.Protocol.ResultCode ResultCode { get; set; }
 
         [NetArrayLimit(16)]
         [MemoryPackOrder(1)]
@@ -285,7 +332,7 @@ namespace Game.Hotfix.Network.Protocol
         public ulong EventVersion { get; set; }
 
         [MemoryPackOrder(4)]
-        public uint Tick { get; set; }
+        public uint ServerTick { get; set; }
 
         [NetArrayLimit(64)]
         [MemoryPackOrder(5)]
@@ -296,14 +343,21 @@ namespace Game.Hotfix.Network.Protocol
     [MemoryPackable(SerializeLayout.Explicit)]
     public sealed partial class WorldSnapshot
     {
+        [NetArrayLimit(16)]
         [MemoryPackOrder(0)]
-        public ulong WorldEpoch { get; set; }
+        public byte[] WorldSessionId { get; set; } = Array.Empty<byte>();
 
         [MemoryPackOrder(1)]
-        public uint Tick { get; set; }
+        public ulong WorldEpoch { get; set; }
+
+        [MemoryPackOrder(2)]
+        public uint ServerTick { get; set; }
+
+        [MemoryPackOrder(3)]
+        public uint SnapshotSequence { get; set; }
 
         [NetArrayLimit(16)]
-        [MemoryPackOrder(2)]
+        [MemoryPackOrder(4)]
         public global::Game.Hotfix.Network.Protocol.EntityState[] Entities { get; set; } = Array.Empty<global::Game.Hotfix.Network.Protocol.EntityState>();
 
     }

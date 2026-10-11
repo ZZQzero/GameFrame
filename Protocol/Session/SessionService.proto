@@ -2,8 +2,8 @@ syntax = "proto3";
 package game.protocol.session;
 option csharp_namespace = "Game.Hotfix.Network.Protocol";
 import "Common/net_options.proto";
+import "Common/ResultProto.proto";
 import "Session/SessionProto.proto";
-import "google/protobuf/empty.proto";
 
 service SessionService {
   rpc Login(LoginRequest) returns (LoginResponse) {
@@ -22,7 +22,7 @@ service SessionService {
     option (game.net.response_max_body) = 256;
   }
 
-  rpc RequestBattleGrant(RequestBattleGrantRequest) returns (BattleGrantResponse) {
+  rpc RequestWorldGrant(RequestWorldGrantRequest) returns (WorldGrantResponse) {
     option (game.net.opcode) = 1002;
     option (game.net.route_kind) = ROUTE_KIND_RPC;
     option (game.net.delivery) = DELIVERY_RELIABLE;
@@ -30,65 +30,11 @@ service SessionService {
     option (game.net.response_max_body) = 2048;
   }
 
-  rpc Logout(LogoutRequest) returns (OperationResponse) {
+  rpc Logout(LogoutRequest) returns (game.protocol.common.OperationResponse) {
     option (game.net.opcode) = 1003;
     option (game.net.route_kind) = ROUTE_KIND_RPC;
     option (game.net.delivery) = DELIVERY_RELIABLE;
     option (game.net.max_body) = 64;
     option (game.net.response_max_body) = 64;
   }
-
-  rpc EnterWorld(EnterWorldRequest) returns (WorldResponse) {
-    option (game.net.opcode) = 1100;
-    option (game.net.route_kind) = ROUTE_KIND_RPC;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 64;
-    option (game.net.response_max_body) = 8192;
-  }
-
-  rpc RestoreWorld(RestoreWorldRequest) returns (WorldResponse) {
-    option (game.net.opcode) = 1101;
-    option (game.net.route_kind) = ROUTE_KIND_RPC;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 128;
-    option (game.net.response_max_body) = 8192;
-  }
-
-  rpc LeaveWorld(LeaveWorldRequest) returns (OperationResponse) {
-    option (game.net.opcode) = 1102;
-    option (game.net.route_kind) = ROUTE_KIND_RPC;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 64;
-    option (game.net.response_max_body) = 64;
-  }
-
-  rpc WorldEvent(WorldEvent) returns (google.protobuf.Empty) {
-    option (game.net.opcode) = 1200;
-    option (game.net.route_kind) = ROUTE_KIND_SERVER_PUSH;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 1024;
-  }
-
-  rpc WorldSnapshot(WorldSnapshot) returns (google.protobuf.Empty) {
-    option (game.net.opcode) = 1201;
-    option (game.net.route_kind) = ROUTE_KIND_SERVER_PUSH;
-    option (game.net.delivery) = DELIVERY_UNRELIABLE;
-    option (game.net.max_body) = 1118;
-  }
-
-  rpc MoveCommand(MoveCommand) returns (google.protobuf.Empty) {
-    option (game.net.opcode) = 1202;
-    option (game.net.route_kind) = ROUTE_KIND_CLIENT_SEND;
-    option (game.net.delivery) = DELIVERY_UNRELIABLE;
-    option (game.net.max_body) = 64;
-  }
-
-  rpc Echo(EchoRequest) returns (EchoResponse) {
-    option (game.net.opcode) = 1900;
-    option (game.net.route_kind) = ROUTE_KIND_RPC;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 1024;
-    option (game.net.response_max_body) = 1024;
-  }
-
 }

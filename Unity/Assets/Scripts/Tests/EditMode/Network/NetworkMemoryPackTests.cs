@@ -29,7 +29,7 @@ namespace GameFrame.Tests
         public void RouteFirstInitializationDoesNotCreateNullCatalogEntries()
         {
             Assert.AreEqual(1000u, GameNetRoutes.Login.Opcode);
-            Assert.AreEqual(11, GameNetProtocol.Catalog.RouteCount);
+            Assert.AreEqual(14, GameNetProtocol.Catalog.RouteCount);
             Assert.AreEqual(8192, GameNetProtocol.Catalog.MaxReliableBodyBytes);
             Assert.AreEqual(1118, GameNetProtocol.Catalog.MaxUnreliableBodyBytes);
             GameNetProtocol.Catalog.RequireRegistered(GameNetRoutes.Login);
@@ -44,10 +44,10 @@ namespace GameFrame.Tests
             LoginRequest decoded = GameNetRoutes.Login.RequestCodec.Decode(writer.WrittenSpan);
             Assert.AreEqual(login.Account, decoded.Account);
             Assert.AreEqual(login.Password, decoded.Password);
-            var world = new WorldResponse { Entities = new[] { new EntityState { EntityId = 42, X = 1.25f } } };
+            var world = new WorldResponse { Entities = new[] { new EntityState { EntityId = 42, Incarnation = 1, PositionXMm = 1250 } } };
             writer.Clear();
             GameNetRoutes.EnterWorld.ResponseCodec.Encode(writer, world);
-            Assert.AreEqual(1.25f, GameNetRoutes.EnterWorld.ResponseCodec.Decode(writer.WrittenSpan).Entities[0].X);
+            Assert.AreEqual(1250, GameNetRoutes.EnterWorld.ResponseCodec.Decode(writer.WrittenSpan).Entities[0].PositionXMm);
         }
 
         [Test]
@@ -111,6 +111,43 @@ namespace GameFrame.Tests
             catalog.CopyHashTo(copy);
             Assert.AreEqual(0, copy[0]);
             Assert.Throws<ArgumentException>(() => new NetProtocolCatalog(hash, GameNetRoutes.Login, GameNetRoutes.Login));
+        }
+
+        [Test]
+        public void UnknownBusinessResultIsRejectedBeforeDeserializationOrWriting()
+        {
+            var response = new OperationResponse { ResultCode = (ResultCode)999 };
+            byte[] bytes = MemoryPackSerializer.Serialize(response, MemoryPackSerializerOptions.Utf8);
+            Assert.Throws<NetworkProtocolException>(() => GameNetRoutes.Logout.ResponseCodec.Decode(bytes));
+            var writer = new ArrayBufferWriter<byte>();
+            Assert.Throws<ArgumentException>(() => GameNetRoutes.Logout.ResponseCodec.Encode(writer, response));
+            Assert.AreEqual(0, writer.WrittenCount);
+        }
+
+        [TestCase(ResultCode.Success)]
+        [TestCase(ResultCode.InvalidCredentials)]
+        [TestCase(ResultCode.InvalidInput)]
+        public void DeclaredBusinessResultUsesFourByteLittleEndianValue(ResultCode code)
+        {
+            var writer = new ArrayBufferWriter<byte>();
+            GameNetRoutes.Logout.ResponseCodec.Encode(writer, new OperationResponse { ResultCode = code });
+            Assert.AreEqual(5, writer.WrittenCount);
+            Assert.AreEqual((int)code, BinaryPrimitives.ReadInt32LittleEndian(writer.WrittenSpan.Slice(1)));
+            Assert.AreEqual(code, GameNetRoutes.Logout.ResponseCodec.Decode(writer.WrittenSpan).ResultCode);
+        }
+
+        [Test]
+        public void WorldModesUseDistinctRoutesWithSharedCodecs()
+        {
+            Assert.AreEqual(NetDelivery.Unreliable, GameNetRoutes.WorldSnapshot.Delivery);
+            Assert.AreEqual(NetDelivery.Reliable, GameNetRoutes.WorldSnapshotReliable.Delivery);
+            Assert.AreNotEqual(GameNetRoutes.WorldSnapshot.Opcode, GameNetRoutes.WorldSnapshotReliable.Opcode);
+            Assert.AreSame(GameNetRoutes.WorldSnapshot.Codec, GameNetRoutes.WorldSnapshotReliable.Codec);
+            Assert.AreEqual(NetDelivery.Unreliable, GameNetRoutes.MoveInput.Delivery);
+            Assert.AreEqual(NetDelivery.Reliable, GameNetRoutes.MoveInputReliable.Delivery);
+            Assert.AreSame(GameNetRoutes.MoveInput.Codec, GameNetRoutes.MoveInputReliable.Codec);
+            GameNetProtocol.Catalog.RequireRegistered(GameNetRoutes.WorldSnapshotReliable);
+            GameNetProtocol.Catalog.RequireRegistered(GameNetRoutes.MoveInputReliable);
         }
 
         private static IEnumerable<TestCaseData> GoldenVectors()
@@ -196,6 +233,32 @@ namespace GameFrame.Tests
             if (type == typeof(bool))
             {
                 return true;
+            }
+
+            if (type.IsEnum)
+            {
+                Array values = Enum.GetValues(type);
+                var sorted = new List<object>();
+                foreach (object value in values)
+                {
+                    sorted.Add(value);
+                }
+
+                sorted.Sort((left, right) => Convert.ToInt32(left).CompareTo(Convert.ToInt32(right)));
+                if (mode == "maximum")
+                {
+                    return sorted[sorted.Count - 1];
+                }
+
+                foreach (object value in sorted)
+                {
+                    if (Convert.ToInt32(value) != 0)
+                    {
+                        return value;
+                    }
+                }
+
+                return sorted[0];
             }
 
             if (type.IsPrimitive)

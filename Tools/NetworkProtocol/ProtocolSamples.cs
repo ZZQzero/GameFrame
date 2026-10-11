@@ -63,6 +63,12 @@ namespace GameFrame.ProtocolTools
                 return true;
             }
 
+            if (type.IsEnum)
+            {
+                object[] values = Enum.GetValues(type).Cast<object>().OrderBy(value => Convert.ToInt32(value)).ToArray();
+                return mode == "maximum" ? values[^1] : values.FirstOrDefault(value => Convert.ToInt32(value) != 0) ?? values[0];
+            }
+
             if (type.IsPrimitive)
             {
                 if (mode == "maximum")

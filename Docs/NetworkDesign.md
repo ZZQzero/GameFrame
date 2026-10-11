@@ -26,12 +26,12 @@
 
 | 项目 | 当前事实 | 本设计的后续工作 |
 | --- | --- | --- |
-| GameFrame 网络 | 尚无游戏网络模块；`GameMediaNetwork` 是媒体网络策略工具 | 新建 `GameFrame.Network` 命名空间，放入已有 `GameFrame.Runtime` 程序集 |
-| MemoryPack | 已安装 1.21.4；Editor 和 StandaloneOSX Player 脚本编译通过 | 加入正式 DTO、协议生成检查、跨端与 HybridCLR 实机测试 |
+| GameFrame 网络 | `GameFrame.Network` 已实现桌面 WSS、RPC、缓冲预算与主线程派发；`GameMediaNetwork` 是独立的媒体网络策略工具 | 补齐 KCP/DTLS、WebGL、业务会话与完整验收 |
+| MemoryPack | 已安装 1.21.4；Editor 和 StandaloneOSX Player 脚本编译通过 | 已有同源 DTO/生成检查/跨端向量；补齐 HybridCLR 实机测试 |
 | KCP | `Unity/Assets/Plugins/GameFrame/Kcp` 下已有 `ikcp.c`、`ikcp.h`、MIT LICENSE；已将 PR #467 的一行 ACK 聚合修复直接合入 `ikcp.c` | 保留文件路径和 GUID，新增固定 ABI 包装、UDP 集成及构建产物 |
 | KCP 版本 | 上游基线为 `b1a7a2101dcbb96017681a500d6b82bbe5a88766`，包含 `IKCPOPS`/`ikcp_setcc`；本地增加已记录的 #467 修复 | 锁定基线与本地源码 hash；不得直接按旧版 C# KCP 包的内部结构接入 |
-| 生命周期 | `GameRuntime` 尚不管理网络；GameEntry 当前启动本地五子棋 | 增加可选网络宿主，不让离线业务被迫连接 |
-| 服务端 | 已有 `DotNet/DotNet.sln`、`DotNet/DotNet.csproj`，与 `Unity/` 同级；目标 `net10.0`，当前为仅输出 Hello World 的控制台项目 | 在现有工程中实现服务端与本地联调模式，共用 C# 协议源码 |
+| 生命周期 | `GameRuntime` 已可选持有网络宿主；GameEntry 当前启动本地五子棋 | 保持离线默认，业务接入 GameNetworkSession |
+| 服务端 | `DotNet/DotNet.csproj` 已采用 Web SDK/net10.0，实现显式 local-wss Kestrel、登录/恢复/注销/Echo，共用生成协议 | 接入世界服务、DTLS listener 与生产认证 provider |
 
 MemoryPack 安装与当前验证边界见 [MemoryPack.md](MemoryPack.md)。启动、资源所有权与失败处理以 [Launch.md](Launch.md)、[Scope.md](Scope.md)、[ErrorContract.md](ErrorContract.md) 为基础；本文补充网络模块的固定策略。
 
@@ -103,7 +103,7 @@ DotNet/DotNet.sln                 已有服务端解决方案，与 Unity/ 同�
 DotNet/DotNet.csproj              已有 .NET 10 入口项目，承载服务端与联调模式
 ```
 
-除已注明的 KCP 源码、Native~ 原生回归测试和 DotNet 解决方案外，上述网络类型和工具均是计划项。不新建与已有模块重复的计时器、全局任务管理器或事件总线。`NetworkRuntime` 是必要的网络资源宿主，可由 `GameRuntime` 选配持有；业务只持有自己的 `NetworkClient`。
+上述目录表达职责划分；实际文件落点与完成范围见实施记录。WSS 核心、协议工具与 local-wss 已实现，KCP/DTLS bridge、GameNetworkSession 与世界功能仍待实现。不新建与已有模块重复的计时器、全局任务管理器或事件总线。`NetworkRuntime` 是必要的网络资源宿主，可由 `GameRuntime` 选配持有；业务只持有自己的 `NetworkClient`。
 
 服务端复用 `DotNet/DotNet.csproj`，初版在同一项目内按 Hosting、Network、Sessions、World、Diagnostics 组织实际需要的代码，先以单进程跑通 WSS/KCP 与世界业务。P1 接入 ASP.NET Core/Kestrel 时将项目 SDK 调整为 `Microsoft.NET.Sdk.Web`，目标框架保持 `net10.0`。本地联调通过显式 profile 启用测试账号与故障注入，生产配置不能启用这些功能；不另建 `Tools/NetworkTestServer`，也不提前拆成网关、账号、世界等多个可执行项目。第 14 节的职责与所有权边界保留，后续按实际容量需要拆分部署。
 
@@ -554,7 +554,7 @@ feed_udp 只进入有界原始输入缓存；tick 完成 DTLS 握手/定时器�
 
 上游基线仍锁定 `b1a7a2101dcbb96017681a500d6b82bbe5a88766`，当前本地 `ikcp.c` SHA-256 为 `3837dc313c120a62b37d1a5458dc0b2939bb917a1411e922f41a5a3caeddc558`；构建清单分别记录基线与实际源码 hash。原生回归入口、来源与验证边界见 [KCP 原生说明](../Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/README.md)。
 
-内存安全处理仍是待实现的 P3 任务：在 `Native~/patches/kcp-allocation-safety.patch` 保存最小安全补丁，构建时仅向临时源码副本应用。ACK 扩容返回可传播错误，接收 segment 先检查分配结果，预期分配失败不触发 assert/abort，失败返回后由包装层锁定 fatal 并释放连接。该补丁不改变线协议、重传与拥塞算法；应用前校验已包含 #467 的本地源码 hash，再应用精确补丁，不允许模糊匹配，补丁文件与应用后源码 hash 一并写 manifest。必须审计所有分配点并逐点故障注入，不能仅通过 `NDEBUG` 声称解决 `abort()`。
+KCP 分配安全补丁已保存在 `Native~/patches/kcp-allocation-safety.patch`，`build/prepare_kcp.py` 校验原始 c/h、补丁和结果 SHA，仅向 Unity 外的新源码副本按精确行号/上下文应用，不允许偏移或模糊匹配。ACK 扩容失败返回错误，接收 segment 先检查空指针，发送的预期分配失败不再触发 assert；另将队列偏移宏改为标准 offsetof，避免 UBSan 检出的空指针取成员偏移。input 分配失败返回 -4，send 保留 -2，create 返回 NULL、setmtu 返回 -2；均可能已有局部状态变化，未来包装层必须锁定 fatal 后销毁，禁止重试。补丁不改变线协议、结构布局、重传或拥塞算法；原 Unity KCP 资产与 GUID 未改。临时 manifest 记录基线/实际源码、补丁和结果 hash。KCP 全部分配调用已逐点注入并执行 assert/NDEBUG/ASan/UBSan 回归；DTLS 分配钩子及 gfnet fatal 边界仍是待实现 P3 工作，不能将此补丁视为整个原生模块安全验收。
 
 `ikcp_input` 的 `long` 在 C 内由 int32 length 转换；update/check 使用 uint32 毫秒差值的有符号环绕比较，不用直接 `now >= next` 跨回绕比较。测试必须覆盖约 49.7 天回绕和进程长时间挂起。
 
@@ -906,7 +906,7 @@ KCP MIT、MemoryPack MIT 及 mbedTLS 对应版本许可证/第三方声明随安
 
 P1 可使用手工固定测试 DTO，不能因此绕过 P2 直接投产。P3 原生安全任务可在 P0 冻结后独立推进，但 P4 依赖 P1/P2/P3。第一版交付需包括 Native~/ABI.md、Docs/Network.md（公开使用说明）与 DotNet/README.md（服务端运行、配置和联调 profile），并同步更新 Launch/Tools 中实际变化的契约。
 
-命令入口如下，从仓库根目录进入对应目录执行。协议工具已实现，默认仅生成或检查正式 C#；`--artifacts` 额外生成或检查仓库根 `Protocol/Generated/` 下的 manifest/hash/vector，供开发验证与 CI 使用。辅助文件不进入正式运行资源，协议指纹始终内嵌于 C# catalog。DotNet 网络 profile 与原生脚本仍**尚未实现**，不能把本文当成已运行日志：
+命令入口如下，从仓库根目录进入对应目录执行。协议工具已实现，默认仅生成或检查正式 C#；`--artifacts` 额外生成或检查仓库根 `Protocol/Generated/` 下的 manifest/hash/vector，供开发验证与 CI 使用。辅助文件不进入正式运行资源，协议指纹始终内嵌于 C# catalog。DotNet 的 `local-wss` 已实现（配置见 `DotNet/README.md`）；`local-kcp-dtls` 与 gfnet 构建/安装脚本仍尚未实现。以下后两个 native 命令及 KCP profile 是规划入口，不能当成已运行日志：
 
 ```sh
 (cd Tools && dotnet run --project NetworkProtocol -- generate)

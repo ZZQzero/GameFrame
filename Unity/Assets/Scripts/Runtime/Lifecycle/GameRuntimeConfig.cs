@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using GameFrame.Audio;
 using GameFrame.Input;
 using GameFrame.Localization;
+using GameFrame.Network;
 using GameFrame.Timing;
 using UnityEngine;
 using YooAsset;
@@ -23,6 +24,7 @@ namespace GameFrame
         public TimerSchedulerOptions TimerOptions { get; set; }
 
         // 可选模块：不传配置就不启动。
+        public NetworkRuntimeOptions NetworkOptions { get; set; }
         public InputRuntimeConfig InputConfig { get; set; }
         public AudioRuntimeConfig AudioConfig { get; set; }
         public Dictionary<string, LanguageTexts> LanguageTable { get; set; }

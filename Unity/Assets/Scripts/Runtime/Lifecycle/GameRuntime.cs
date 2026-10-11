@@ -4,6 +4,7 @@ using Cysharp.Threading.Tasks;
 using GameFrame.Audio;
 using GameFrame.Input;
 using GameFrame.Localization;
+using GameFrame.Network;
 using GameFrame.Pooling;
 using GameFrame.Scene;
 using GameFrame.Timing;
@@ -21,6 +22,22 @@ namespace GameFrame
         static Transform root;
         static bool ownsRoot;
         static bool timer, input, pool, scene, language, audio, ui;
+
+        static NetworkRuntime network;
+
+        public static NetworkRuntime Network
+        {
+            get
+            {
+                RequireMainThread();
+                if (network == null)
+                {
+                    throw new InvalidOperationException("GameRuntime 网络模块未启用。");
+                }
+
+                return network;
+            }
+        }
 
         public static bool IsInited => state == RuntimeState.Running;
         public static Transform PersistRoot => root;
@@ -53,17 +70,26 @@ namespace GameFrame
             try
             {
                 root = config.PersistRoot;
-                if (config.EnableTimer || config.InputConfig != null || config.EnablePool)
+                if (config.EnableTimer || config.InputConfig != null || config.EnablePool || config.NetworkOptions != null)
                 {
                     if (root == null)
                     {
                         root = new GameObject("[GameRuntime]").transform;
                         ownsRoot = true;
                         if (Application.isPlaying)
+                        {
                             UnityEngine.Object.DontDestroyOnLoad(root.gameObject);
+                        }
                     }
                     if (!root.gameObject.activeInHierarchy)
+                    {
                         throw new InvalidOperationException("GameRuntime 的持久根节点必须处于激活状态。");
+                    }
+                }
+
+                if (config.NetworkOptions != null)
+                {
+                    network = new NetworkRuntime(root, config.NetworkOptions);
                 }
 
                 // 记录由本入口启动的系统，显式关闭时也能处理初始化中途留下的状态。
@@ -138,6 +164,18 @@ namespace GameFrame
                 try { await GameAudio.ShutdownAsync(); }
                 catch (Exception exception) { failure.Capture(exception); }
             }
+            if (network != null)
+            {
+                try
+                {
+                    await network.ShutdownAsync();
+                }
+                catch (Exception exception)
+                {
+                    failure.Capture(exception);
+                }
+            }
+
             if (input && GameInput.IsInited) failure.Run(GameInput.Shutdown);
             if (pool && GamePool.IsInited) failure.Run(GamePool.Shutdown);
             if (timer && GameTimer.IsInited) failure.Run(GameTimer.Shutdown);
@@ -163,6 +201,7 @@ namespace GameFrame
         {
             state = RuntimeState.None;
             root = null;
+            network = null;
             ownsRoot = timer = input = pool = scene = language = audio = ui = false;
         }
     }

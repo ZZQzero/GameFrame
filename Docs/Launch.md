@@ -150,3 +150,6 @@ Editor 与正式包共用这些简单清理，两次生命周期回调不会重�
 Editor 停止播放时，资源系统由 YooAsset 自己的 Editor 驱动关闭。
 GameEntry 创建之前启动失败时，不执行额外的退出回滚；正式包退出由系统回收资源，
 Editor 重新播放使用默认 Domain Reload 重置静态状态。
+
+
+网络是 `GameRuntimeConfig.NetworkOptions` 控制的可选模块，默认 null，不自动创建客户端或连服。启用时驱动挂在既有持久根上；Hotfix 先停止业务并 await 客户端 Dispose，框架 Shutdown 再等待网络宿主关闭，最后释放 Timer/root 与资源包。网络业务初始化不增加 Launch 反射入口。API 与当前平台范围见 [Network.md](Network.md)。

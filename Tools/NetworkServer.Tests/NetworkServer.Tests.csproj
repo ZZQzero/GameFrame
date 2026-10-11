@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsTestProject>true</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+    <ProjectReference Include="../../DotNet/DotNet.csproj" />
+    <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/Connection/*.cs" Link="ClientCore/%(Filename)%(Extension)" />
+    <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/NetworkOptions.cs" Link="ClientCore/NetworkOptions.cs" />
+    <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/NetworkConnectOptions.cs" Link="ClientCore/NetworkConnectOptions.cs" />
+    <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/NetworkDiagnostics.cs" Link="ClientCore/NetworkDiagnostics.cs" />
+  </ItemGroup>
+</Project>

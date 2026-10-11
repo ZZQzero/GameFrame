@@ -80,6 +80,42 @@ namespace GameFrame.Network.Protocol
             }
         }
 
+        // Header-time validation prevents allocating a large control body before discovering
+        // that the selected fixed control packet cannot contain it.
+        public static void ValidateBodyLength(ControlOpcode opcode, int bodyLength, NetworkTransportKind transport)
+        {
+            ValidateTransport(transport);
+            bool valid;
+            switch (opcode)
+            {
+                case ControlOpcode.ClientHello:
+                    valid = transport == NetworkTransportKind.WebSocket ? bodyLength == 48 :
+                        bodyLength >= 49 && bodyLength <= 48 + MaxTicketBytes;
+                    break;
+                case ControlOpcode.ServerHello:
+                    valid = bodyLength == 64;
+                    break;
+                case ControlOpcode.Ping:
+                case ControlOpcode.Pong:
+                    valid = bodyLength == 8;
+                    break;
+                case ControlOpcode.Reject:
+                    valid = bodyLength == 36;
+                    break;
+                case ControlOpcode.Close:
+                    valid = bodyLength == 4;
+                    break;
+                default:
+                    valid = false;
+                    break;
+            }
+
+            if (!valid)
+            {
+                throw new NetworkProtocolException("Invalid control body length.");
+            }
+        }
+
         public static ClientHelloBody ReadClientHello(ReadOnlySpan<byte> body, NetworkTransportKind transport)
         {
             if (body.Length < 48)

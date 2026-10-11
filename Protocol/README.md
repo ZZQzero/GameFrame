@@ -18,7 +18,7 @@
 
 工具自身不编译磁盘上的旧生成代码，缺少或损坏产物时仍可 generate。工具会先在内存中编译新 DTO 和完整生成源码，并与 MemoryPack serialization-info 对照，再写入结果。临时编译信息在系统临时目录创建，完成后清理。
 
-工具入口为 `Program.cs`，`ProtoProtocolGenerator.cs` 负责解析 Proto 与生成 DTO，`MemoryPackProtocolGenerator.cs` 负责分析实际 MemoryPack 布局并生成 codec/catalog、校验器和向量。这些都是协议生成工具，`DotNet/` 才是服务端宿主；目前服务端入口仍为 Hello World，尚未实现监听、认证与会话处理。客户端连接配置与帧控制代码仅由测试工程链接，不作为生成工具的依赖。
+工具入口为 `Program.cs`，`ProtoProtocolGenerator.cs` 负责解析 Proto 与生成 DTO，`MemoryPackProtocolGenerator.cs` 负责分析实际 MemoryPack 布局并生成 codec/catalog、校验器和向量。这些都是协议生成工具，`DotNet/` 是实际服务端宿主；现已实现 Kestrel local-wss、登录/恢复/注销/Echo，运行配置见 [服务端说明](../DotNet/README.md)。世界服务与生产认证 provider 尚未实现。客户端连接配置与帧控制代码仅由测试工程链接，不作为生成工具的依赖。
 
 ## 命令
 
@@ -35,6 +35,8 @@
 ```
 
 `check` 比较正式 C#，`check --artifacts` 同时比较三个辅助文件；检查不改文件，缺失、字节差异或 C# 生成目录中的额外 C# 文件均返回非零。generate 不覆写字节未变化的文件，不自动删除多余文件，防止误删 Unity 资产和 `.meta`；移除过时产物时同时处理其 metadata。生成源码、开发验证辅助文件和 NuGet 锁文件应纳入版本管理，CI 使用 `check --artifacts` 检查漏生成。修改协议后在运行 Unity/.NET 向量测试前执行 `generate --artifacts`；正式构建只需默认 generate/check，不依赖外部辅助文件。
+
+`.github/workflows/network.yml` 对网络/协议改动执行锁文件 restore、`check --artifacts`、协议负例/向量与真实 local-wss 测试；独立 job 验证 KCP 基线、精确安全补丁与逐点分配失败。CI 不重新生成后掩盖漂移，也不代替 Unity/IL2CPP/设备验收。
 
 ## 消息与字段
 

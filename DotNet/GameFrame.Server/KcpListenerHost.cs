@@ -89,6 +89,7 @@ namespace GameFrame.Server.Network
             }
             internal bool Bound, RemoteClosed;
             internal bool ServerClosing, CloseSent;
+            internal volatile bool DiscardInput;
             internal volatile bool TransportEnded;
             internal bool InputDrained;
             internal long CloseDeadline;
@@ -342,7 +343,7 @@ namespace GameFrame.Server.Network
                     while (releaseReady.TryDequeue(out Child? completed))
                     {
                         children.Remove(completed.Event.Id);
-                        Retire(completed, completed.Failure == null);
+                        Retire(completed, completed.Failure == null && !completed.DiscardInput);
                         KcpNative.Check(KcpNative.ReleaseConnection(listener, completed.Event.Id, completed.Event.Generation), "release drained child");
                     }
                     PollEvents(listener);
@@ -464,7 +465,14 @@ namespace GameFrame.Server.Network
                     }
                     if (children.Remove(connectionEvent.Id, out Child? child))
                     {
-                        child.CloseReason = connectionEvent.Reason == 0 ? child.CloseReason : (ushort)1;
+                        if (child.CloseReason == 0)
+                        {
+                            child.CloseReason = child.Context?.RequestedCloseReason ?? 0;
+                            if (child.CloseReason == 0 && connectionEvent.Reason != 0)
+                            {
+                                child.CloseReason = 1;
+                            }
+                        }
                         if (connectionEvent.Reason != 0)
                         {
                             child.Failure ??= new NetworkException($"Native KCP connection closed ({connectionEvent.Reason}).");
@@ -488,9 +496,50 @@ namespace GameFrame.Server.Network
                 return;
             }
 
-            if (child.Failure != null)
+            ushort requestedReason = child.Context?.RequestedCloseReason ?? 0;
+            if (child.ApplicationReady && !child.RemoteClosed && requestedReason == 0 &&
+                child.Context!.Session.CheckDeadline(now) is ushort deadlineReason)
+            {
+                child.Context.RequestClose(deadlineReason);
+                requestedReason = child.Context.RequestedCloseReason;
+            }
+
+            if (child.Failure != null && requestedReason == 0)
             {
                 throw new NetworkException("Application handler failed.", child.Failure);
+            }
+
+            if (requestedReason != 0 && !child.RemoteClosed && !child.TransportEnded)
+            {
+                child.CloseReason = requestedReason;
+                child.ServerClosing = true;
+                child.RemoteClosed = true;
+                child.CloseDeadline = now + 2000;
+                lock (child.InputGate)
+                {
+                    child.DiscardInput = true;
+                    while (child.Incoming.TryDequeue(out OwnedFrame? pending))
+                    {
+                        pending.Dispose();
+                    }
+
+                    while (child.IncomingUnreliable.TryDequeue(out OwnedFrame? pending))
+                    {
+                        pending.Dispose();
+                    }
+
+                    while (child.Outgoing.Reader.TryRead(out OwnedFrame? pending))
+                    {
+                        pending.Dispose();
+                    }
+
+                    while (child.OutgoingUnreliable.Reader.TryRead(out OwnedFrame? pending))
+                    {
+                        pending.Dispose();
+                    }
+                }
+
+                CompleteInput(child);
             }
 
             for (int i = 0; i < 16 && !child.RemoteClosed && (!child.Bound || child.ApplicationReady); i++)
@@ -661,19 +710,6 @@ namespace GameFrame.Server.Network
                 return;
             }
 
-            if (child.ApplicationReady && !child.RemoteClosed)
-            {
-                ushort? reason = child.Context!.Session.CheckDeadline(now);
-                if (reason.HasValue)
-                {
-                    child.CloseReason = reason.Value;
-                    child.ServerClosing = true;
-                    child.RemoteClosed = true;
-                    child.CloseDeadline = now + 2000;
-                    CompleteInput(child);
-                }
-            }
-
             if (child.Bound && !child.RemoteClosed && now - child.PingAt >= 5000 && child.Nonce == 0)
             {
                 child.PingAt = now;
@@ -683,7 +719,7 @@ namespace GameFrame.Server.Network
                 QueueNonce(child, ControlOpcode.Ping, child.Nonce);
             }
 
-            if (child.PongDeadline != 0 && now >= child.PongDeadline)
+            if (!child.RemoteClosed && child.PongDeadline != 0 && now >= child.PongDeadline)
             {
                 throw new NetworkException("Child heartbeat deadline elapsed.");
             }
@@ -713,7 +749,7 @@ namespace GameFrame.Server.Network
             }
             if (child.RemoteClosed)
             {
-                if (child.ServerClosing && !child.CloseSent && (child.Dispatch == null || child.Dispatch.IsCompleted) &&
+                if (child.ServerClosing && !child.CloseSent && (child.DiscardInput || child.Dispatch == null || child.Dispatch.IsCompleted) &&
                     !child.Outgoing.Reader.TryPeek(out _) && !child.OutgoingUnreliable.Reader.TryPeek(out _))
                 {
                     OwnedFrame close = child.ControlMemory.Allocate(36);
@@ -735,7 +771,7 @@ namespace GameFrame.Server.Network
 
                 var stats = new KcpNative.Stats { Size = 168, Version = KcpNative.Version };
                 KcpNative.Check(KcpNative.GetStats(child.Event.Connection, ref stats), "closing child stats");
-                if (now >= child.CloseDeadline || ((child.Dispatch == null || child.Dispatch.IsCompleted) &&
+                if (now >= child.CloseDeadline || ((child.DiscardInput || child.Dispatch == null || child.Dispatch.IsCompleted) &&
                     child.Controls.Count == 0 && !child.Outgoing.Reader.TryPeek(out _) &&
                     !child.OutgoingUnreliable.Reader.TryPeek(out _) &&
                     stats.Waitsnd == 0 && stats.PlaintextCount == 0 && stats.OutputCount == 0))
@@ -928,6 +964,11 @@ namespace GameFrame.Server.Network
                     OwnedFrame? frame;
                     lock (child.InputGate)
                     {
+                        if (child.Context!.RequestedCloseReason != 0)
+                        {
+                            return;
+                        }
+
                         Queue<OwnedFrame> queue = child.IncomingUnreliable.Count != 0 && (child.Incoming.Count == 0 || reliableCount >= 16)
                             ? child.IncomingUnreliable : child.Incoming;
                         frame = queue.TryDequeue(out OwnedFrame? next) ? next : null;
@@ -963,7 +1004,7 @@ namespace GameFrame.Server.Network
                             {
                                 lock (child.InputGate)
                                 {
-                                    if (!child.TransportEnded && !child.Retired)
+                                    if (!child.TransportEnded && !child.Retired && !child.DiscardInput && child.Context!.RequestedCloseReason == 0)
                                     {
                                         child.Lifetime.Token.ThrowIfCancellationRequested();
                                         reply.AdmittedAt = NetworkClock.GetMilliseconds();
@@ -986,7 +1027,7 @@ namespace GameFrame.Server.Network
                         }
 
                         ushort reason = child.Context!.TakeCloseReason();
-                        if (reason != 0 && !child.TransportEnded)
+                        if (reason != 0 && !child.TransportEnded && child.Context!.RequestedCloseReason == 0)
                         {
                             await CommandAsync(_ =>
                             {
@@ -1007,14 +1048,28 @@ namespace GameFrame.Server.Network
             catch (OperationCanceledException) when (child.Lifetime.IsCancellationRequested)
             {
             }
+            catch (ServerConnectionContext.ClosingException) when (child.Context?.RequestedCloseReason is > 0)
+            {
+                // The native owner completes the requested Close even if an old handler
+                // attempts to send after its binding was revoked.
+            }
             catch (Exception error)
             {
                 child.Failure = error;
+                if (child.Context?.RequestedCloseReason is > 0)
+                {
+                    logger.LogError(error, "KCP handler failed while connection {ConnectionId}/{Generation} was closing.", child.Event.Id, child.Event.Generation);
+                }
             }
         }
 
         private void Retire(Child child, bool graceful = false)
         {
+            if (child.CloseReason == 0)
+            {
+                child.CloseReason = child.Context?.RequestedCloseReason ?? 0;
+            }
+
             // Retain ownership before cancellation invokes application registrations.
             retired.Add(child);
             if (!graceful)

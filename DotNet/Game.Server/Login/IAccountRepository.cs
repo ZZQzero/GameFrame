@@ -11,8 +11,6 @@ namespace Game.Server.Login
         }
     }
 
-    internal readonly record struct AuthenticatedAccount(ulong Id, ulong Epoch);
-
     internal interface IAccountRepository
     {
         Task<bool> CreateAsync(string account, byte[] salt, byte[] hash, int iterations, CancellationToken cancellation);

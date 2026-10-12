@@ -7,11 +7,13 @@ namespace Game.Server.Login
     internal sealed class AccountService : IDisposable
     {
         private readonly IAccountRepository repository;
+        private readonly AccountSessions sessions;
         private readonly SemaphoreSlim operations = new SemaphoreSlim(4, 4);
 
-        internal AccountService(IAccountRepository repository)
+        internal AccountService(IAccountRepository repository, AccountSessions sessions)
         {
             this.repository = repository;
+            this.sessions = sessions;
         }
 
         internal async Task<ResultCode> RegisterAsync(string account, string password, CancellationToken cancellation)
@@ -39,11 +41,12 @@ namespace Game.Server.Login
             }
         }
 
-        internal async Task<AuthenticatedAccount?> LoginAsync(string account, string password, CancellationToken cancellation)
+        internal async Task<(LoginResponse Response, AccountSessions.Binding? Binding)> LoginAsync(
+            string account, string password, Action<ushort> disconnect, CancellationToken cancellation)
         {
             if (!PasswordHasher.Valid(account, password))
             {
-                return null;
+                return (new LoginResponse { ResultCode = ResultCode.InvalidCredentials }, null);
             }
 
             await AdmitAsync(cancellation);
@@ -61,11 +64,11 @@ namespace Game.Server.Login
                 {
                     if (stored == null || !CryptographicOperations.FixedTimeEquals(hash, stored.PasswordHash))
                     {
-                        return null;
+                        return (new LoginResponse { ResultCode = ResultCode.InvalidCredentials }, null);
                     }
 
-                    ulong epoch = await repository.AdvanceEpochAsync(stored.Id, cancellation);
-                    return new AuthenticatedAccount(checked((ulong)stored.Id), epoch);
+                    return await sessions.LoginAsync(checked((ulong)stored.Id),
+                        token => repository.AdvanceEpochAsync(stored.Id, token), disconnect, cancellation);
                 }
                 finally
                 {
@@ -82,7 +85,7 @@ namespace Game.Server.Login
         {
             if (!await operations.WaitAsync(0, cancellation))
             {
-                throw new ServerRequestException(3);
+                throw new ServerRequestException(1);
             }
         }
 

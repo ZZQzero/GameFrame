@@ -163,7 +163,8 @@ namespace GameFrame.Server.Network
                 Task receiving = ReceiveLoopAsync();
                 Task dispatching = DispatchLoopAsync();
                 Task heartbeat = HeartbeatLoopAsync();
-                tasks.AddRange(new[] { sending, receiving, dispatching, heartbeat });
+                Task closing = CloseRequestedAsync();
+                tasks.AddRange(new[] { sending, receiving, dispatching, heartbeat, closing });
                 Task first = await Task.WhenAny(tasks);
                 await first;
                 if ((ReferenceEquals(first, receiving) || ReferenceEquals(first, dispatching)) && inputCompleted && !lifetime.IsCancellationRequested)
@@ -201,6 +202,7 @@ namespace GameFrame.Server.Network
             }
             finally
             {
+                Interlocked.CompareExchange(ref closeReason, Context.RequestedCloseReason, 0);
                 Context.EndTraffic();
                 Stop();
                 try
@@ -306,9 +308,10 @@ namespace GameFrame.Server.Network
                 bool transferred = false;
                 try
                 {
-                    if (Volatile.Read(ref terminating) != 0)
+                    if (Volatile.Read(ref terminating) != 0 || Context.RequestedCloseReason != 0)
                     {
-                        throw new NetworkProtocolException("Business input after server termination.");
+                        // Concurrent peer traffic cannot restart a connection already being closed.
+                        continue;
                     }
 
                     ApplyRateLimit(frame);
@@ -478,13 +481,29 @@ namespace GameFrame.Server.Network
                     {
                         try
                         {
+                            if (Volatile.Read(ref terminating) != 0 || Context.RequestedCloseReason != 0)
+                            {
+                                await Task.Delay(Timeout.Infinite, lifetime.Token);
+                            }
+
                             await DispatchAsync(frame);
+                        }
+                        catch (ServerConnectionContext.ClosingException) when (Context.RequestedCloseReason != 0)
+                        {
+                            // A revoked handler may still try to push or promote. The close owner
+                            // must finish sending the selected reason before stopping this task.
+                            await Task.Delay(Timeout.Infinite, lifetime.Token);
                         }
                         catch (Exception error) when (error is not NetworkException && error is not OperationCanceledException &&
                             error is not WebSocketException)
                         {
                             RecordFailure(error);
                             logger.LogError(error, "WSS handler failed for opcode {Opcode}.", frame.Header.Opcode);
+                            if (Context.RequestedCloseReason != 0)
+                            {
+                                await Task.Delay(Timeout.Infinite, lifetime.Token);
+                            }
+
                             if (frame.Header.Kind == FrameKind.Request)
                             {
                                 await QueueError(frame.Header, 3);
@@ -535,7 +554,8 @@ namespace GameFrame.Server.Network
             try
             {
                 lifetime.Token.ThrowIfCancellationRequested();
-                if (transportEnded && !closeOutput)
+                if ((transportEnded && !closeOutput) || (!control &&
+                    (Volatile.Read(ref terminating) != 0 || Context.RequestedCloseReason != 0)))
                 {
                     frame.Dispose();
                     return Task.CompletedTask;
@@ -601,7 +621,8 @@ namespace GameFrame.Server.Network
 
                 try
                 {
-                    if (transportEnded && !item.CloseOutput)
+                    if ((transportEnded && !item.CloseOutput) || (!item.Control &&
+                        (Volatile.Read(ref terminating) != 0 || Context.RequestedCloseReason != 0)))
                     {
                         item.Completion?.TrySetResult();
                         continue;
@@ -688,13 +709,20 @@ namespace GameFrame.Server.Network
             }
         }
 
+        private async Task CloseRequestedAsync()
+        {
+            ushort reason = await Context.CloseRequested.WaitAsync(lifetime.Token);
+            await TerminateAsync(reason);
+        }
+
         internal async Task CheckHeartbeatAsync()
         {
             long now = getMilliseconds();
             ushort? applicationReason = Context.Session.CheckDeadline(now);
             if (applicationReason.HasValue)
             {
-                await TerminateAsync(applicationReason.Value);
+                Context.RequestClose(applicationReason.Value);
+                await TerminateAsync(Context.RequestedCloseReason == 0 ? applicationReason.Value : Context.RequestedCloseReason);
                 return;
             }
 
@@ -734,13 +762,16 @@ namespace GameFrame.Server.Network
 
         private async Task TerminateAsync(ushort reason)
         {
-            Interlocked.CompareExchange(ref closeReason, reason, 0);
+            Context.EndTraffic();
             if (Interlocked.Exchange(ref terminating, 1) != 0)
             {
                 await Task.Delay(Timeout.Infinite, lifetime.Token);
                 return;
             }
 
+            ushort requestedReason = Context.RequestedCloseReason;
+            Interlocked.CompareExchange(ref closeReason, requestedReason == 0 ? reason : requestedReason, 0);
+            reason = (ushort)Volatile.Read(ref closeReason);
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             try
             {

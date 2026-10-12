@@ -73,7 +73,7 @@ ClientHello → ServerHello 后还未登录。10 秒内只能发送 Register/Log
 
 实现 Register、Login、ResumeLogin、Logout、Echo；所有业务路由使用生成的 `GameNetRoutes`。Register 创建 PostgreSQL 账号但不登录，客户端随后发送 Login。账号名区分大小写，拒绝空白、首尾空白和控制字符，上限 64 个 UTF-16 字符；密码长度 8～128，不自动裁剪。数据库唯一约束保证并发注册只成功一次，重复返回 AccountAlreadyExists。密码使用随机16字节盐、PBKDF2-SHA256 600000次、32字节哈希，原文不保存。不同账号独立，新 Login 仅撤销同账号旧 epoch/大厅连接。Resume 原子消费并轮换 32 字节恢复凭据，保留账号会话 ID/epoch；仅替换大厅绑定。服务端仅保留恢复凭据 SHA-256 摘要。账号期限最多 24 小时，TTL 使用服务端单调时钟；恢复不会延长账号期限。
 
-Logout 先撤销账号及恢复凭据，再发送成功响应并关闭。登录失败统一返回 InvalidCredentials，再关闭。Echo 仅注册在本地服务中，delayMs 接受 0～5000；系统错误响应为空正文，客户端不能把本地超时/取消视为服务端未执行。
+Logout 先撤销账号及恢复凭据，再发送成功响应并 Close1。密码校验后由账号会话所有者登记 epoch 分配与提交，注销/到期前已登记的迟到结果不能恢复会话；有界状态在会话与在途操作均结束后回收。顶号和 Resume 替换发送 Close2，到期发送4，账号撤销发送7；不同账号独立。登录失败统一返回 InvalidCredentials，再 Close5。认证过载返回空正文 status1；Login 随后 Close1，Register 释放处理资格，允许原期限内显式再次请求。Echo 仅注册在本地服务中，delayMs 接受 0～5000；系统错误响应为空正文，客户端不能把本地超时/取消视为服务端未执行。
 
 世界服务尚未接入大厅授权：RequestWorldGrant 返回 WorldUnavailable，其余世界请求返回权限错误，不创建世界或签发无效密钥。未经认证的这些请求在 DTO 解码前拒绝。
 
@@ -81,7 +81,7 @@ Logout 先撤销账号及恢复凭据，再发送成功响应并关闭。登录�
 
 local 默认网络容量在 `GameFrame.Server/WssServerOptions.cs`，账号 TTL、登录期限和登录尝试限额单独位于 `Game.Server/Login/LoginOptions.cs`：32 个连接、每 IP 4 个，其中未登录总计 16 个/每 IP 2 个；未登录每秒 5 包/16 KiB，账号与 IP 登录每秒 5 次。认证后每秒 128 包/128 KiB；可靠接收 128 条/2 MiB，业务发送 128 条/64 KiB，控制 64 条/16 KiB。缓冲按实际数组容量计账，包含在途发送、接收扩容的旧＋新峰值，释放前清零全部容量。全局 64 MiB、每连接 8 MiB。TLS/Kestrel 内部空间与内核缓冲不包含在可控制缓冲额度中。
 
-WssServer 注册为 hosted lifecycle service，在所有 hosted StopAsync（包括 Kestrel）之前的 StoppingAsync 阶段停止准入、取消并 join 连接，随后 HTTP host 排空请求。应用会话退出后归还连接配额，再发布连接终态；重复关闭等待同一结果。
+WssServer 注册为 hosted lifecycle service，在所有 hosted StopAsync（包括 Kestrel）之前的 StoppingAsync 阶段停止准入、取消并 join 连接，随后 HTTP host 排空请求。应用会话退出后归还连接配额，再发布连接终态；重复关闭等待同一结果。WSS 网络实例由 host DI 创建并注入 ILogger<WssServer>；KCP 入口注入由标准 LoggerFactory 创建的 logger，工厂晚于 listener 释放。网络 handler/数据库/清理异常沿框架日志边界记录，不记录消息正文和凭据。
 
 ## 验证
 
@@ -97,7 +97,7 @@ WssServerTests 同时运行确定性仓库与真实 PostgreSQL 两组；后者�
 
 ## 本地 KCP / DTLS
 
-先按 [原生说明](../Native/Kcp/README.md) 构建匹配 RID 的库，并用 install.py 的 `--server-output` 安装到服务可执行程序旁。`KcpListenerHost` 在一个 owner 线程管理共享 UDP socket/所有子 handle，应用 handler 在独立有界队列消费已校验 DTO；关闭 child 不关闭共享 socket。公开 RegisterGrantAsync/RevokeGrantAsync 是后续授权服务接入点；生产 provider 未配置仍拒绝启动。
+先按 [原生说明](../Native/Kcp/README.md) 构建匹配 RID 的库，并用 install.py 的 `--server-output` 安装到服务可执行程序旁。`KcpListenerHost` 在一个 owner 线程管理共享 UDP socket/所有子 handle，应用 handler 在独立有界队列消费已校验 DTO；关闭 child 不关闭共享 socket。公开 RegisterGrantAsync/RevokeGrantAsync 是后续授权服务接入点；生产 hosting 与世界授权业务未配置仍拒绝启动；这不表示玩家登录必须在启动时完成。
 
 源码与构建入口统一在仓库 `Native/Kcp`；服务端部署只需要对应平台的原生库和随附清单/许可证，无需复制 KCP C 源码，也无需安装 Unity。先发布 .NET，再安装原生库（下面以 macOS universal、已准备的锁定依赖为例；各目标使用独立构建目录）：
 

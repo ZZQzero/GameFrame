@@ -51,6 +51,13 @@ namespace GameFrame.Server.Network
 
     public sealed class ServerConnectionContext
     {
+        internal sealed class ClosingException : NetworkException
+        {
+            internal ClosingException() : base("Connection is already closing or closed.")
+            {
+            }
+        }
+
         private readonly NetProtocolCatalog catalog;
         private readonly FrameMemoryBudget sendMemory;
         private readonly Func<OwnedFrame, bool> enqueue;
@@ -61,6 +68,7 @@ namespace GameFrame.Server.Network
         private bool trafficEnded;
         internal Action<Exception> ReportSecondaryFailure { get; set; } = _ => { };
         private readonly TaskCompletionSource<ServerCloseInfo> completion = new TaskCompletionSource<ServerCloseInfo>(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<ushort> closeRequested = new TaskCompletionSource<ushort>(TaskCreationOptions.RunContinuationsAsynchronously);
         private int closeAfterResponse;
         private int restricted = 1;
         public ServerSession Session { get; internal set; } = null!;
@@ -73,6 +81,8 @@ namespace GameFrame.Server.Network
         public Task<ServerCloseInfo> Completion => completion.Task;
         public long NowMilliseconds => NetworkClock.GetMilliseconds();
         public bool IsRestricted => Volatile.Read(ref restricted) != 0;
+        internal Task<ushort> CloseRequested => closeRequested.Task;
+        internal ushort RequestedCloseReason => closeRequested.Task.IsCompletedSuccessfully ? closeRequested.Task.Result : (ushort)0;
 
         internal ServerConnectionContext(ulong id, ulong generation, ulong grantId, NetworkTransportKind transport,
             IPEndPoint remote, NetProtocolCatalog catalog, FrameMemoryBudget sendMemory, CancellationToken cancellation,
@@ -115,7 +125,7 @@ namespace GameFrame.Server.Network
             Cancellation.ThrowIfCancellationRequested();
             if (trafficEnded || Completion.IsCompleted)
             {
-                throw new NetworkException("Connection is already closing or closed.");
+                throw new ClosingException();
             }
         }
 
@@ -129,9 +139,33 @@ namespace GameFrame.Server.Network
 
         public void Disconnect() => stop();
 
-        public async Task CloseAsync()
+        // Safe for external account/session owners; the transport owner sends the reason.
+        public void RequestClose(ushort reason)
         {
-            if (!Completion.IsCompleted)
+            if (reason == 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(reason));
+            }
+
+            lock (lifecycleGate)
+            {
+                if (trafficEnded || Completion.IsCompleted || Cancellation.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                trafficEnded = true;
+                closeRequested.TrySetResult(reason);
+            }
+        }
+
+        public async Task CloseAsync(ushort? reason = null)
+        {
+            if (reason.HasValue)
+            {
+                RequestClose(reason.Value);
+            }
+            else if (!Completion.IsCompleted)
             {
                 stop();
             }
@@ -216,7 +250,11 @@ namespace GameFrame.Server.Network
                 route.Codec.Encode(writer, message);
                 writer.Complete(FrameKind.Push, route.Opcode, 0);
                 frame.Delivery = route.Delivery;
-                transferred = enqueue(frame);
+                lock (lifecycleGate)
+                {
+                    RequireActive();
+                    transferred = enqueue(frame);
+                }
                 return transferred;
             }
             finally

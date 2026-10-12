@@ -79,9 +79,9 @@ namespace GameFrame.Tests
             }
 
             IAccountRepository storage = database == null ? repository : new PostgresAccountRepository(database.Database);
-            service = new AccountService(storage);
-            await service.RegisterAsync("local-test", "local-secret", timeout.Token);
             accounts = new AccountSessions(settings);
+            service = new AccountService(storage, accounts);
+            await service.RegisterAsync("local-test", "local-secret", timeout.Token);
             server = new WssServer(new LobbyApplication(accounts, service, settings).Application, new WssServerOptions { HelloTimeout = TimeSpan.FromMilliseconds(500) });
             WebApplicationBuilder builder = WebApplication.CreateBuilder();
             builder.Logging.ClearProviders();
@@ -205,6 +205,16 @@ namespace GameFrame.Tests
         private Task<LoginResponse> Login(ClientWebSocket socket) => Rpc(socket, GameNetRoutes.Login,
             new LoginRequest { Account = "local-test", Password = "local-secret" });
 
+        private async Task AssertClose(ClientWebSocket socket, ushort reason)
+        {
+            using OwnedFrame close = (await Receive(socket))!;
+            Assert.That(close.Header.Opcode, Is.EqualTo((uint)ControlOpcode.Close));
+            Assert.That(ControlCodec.ReadClose(close.Body), Is.EqualTo(reason));
+            using OwnedFrame? end = await Receive(socket);
+            Assert.That(end, Is.Null);
+            await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, string.Empty, timeout.Token);
+        }
+
         [Test]
         public async Task RegisterThenLoginOnTheSameConnectionWithoutServerConfiguredPlayerCredentials()
         {
@@ -275,6 +285,7 @@ namespace GameFrame.Tests
             Assert.That(resumed.AuthEpoch, Is.EqualTo(login.AuthEpoch));
             Assert.That(resumed.AccountSessionId, Is.EqualTo(login.AccountSessionId));
             Assert.That(resumed.ResumeToken, Is.Not.EqualTo(login.ResumeToken));
+            await AssertClose(first, 2);
             using ClientWebSocket third = await Connect();
             await Hello(third);
             LoginResponse reused = await Rpc(third, GameNetRoutes.ResumeLogin,
@@ -295,6 +306,7 @@ namespace GameFrame.Tests
             LoginResponse replacement = await Login(second);
             Assert.That(replacement.AuthEpoch, Is.GreaterThan(old.AuthEpoch));
             Assert.That(replacement.AccountSessionId, Is.Not.EqualTo(old.AccountSessionId));
+            await AssertClose(first, 2);
             using ClientWebSocket third = await Connect();
             await Hello(third);
             LoginResponse refused = await Rpc(third, GameNetRoutes.ResumeLogin,

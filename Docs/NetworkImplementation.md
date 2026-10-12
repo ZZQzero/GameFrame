@@ -392,3 +392,9 @@ AccountSessions 从固定单账号改为有界多账号状态：每个账号一�
 实际 Debug Game.Server 入口在临时PostgreSQL数据库上启动，未设置玩家账号环境变量；真实TLS/GFNP Hello→Register→Login→Echo通过，活动连接Ctrl+C退出0。服务重启后同账号再次Login/Echo成功、accountId保留、authEpoch递增，正常退出0。临时数据库、证书和探针文件清理，系统证书信任未修改。
 
 Unity 6000.3.19f1 Editor脚本编译及Console错误0；网络相关EditMode146/146；StandaloneOSX Player脚本编译43程序集通过。Launch场景、播放状态、目标平台和序列化EditorSettings无变更，Player临时输出已清理。为验证安装了本机PostgreSQL18工具，只运行独立临时cluster，未启用brew开机服务；测试cluster停止后删除。compose与CI配置未实际运行，Windows/Linux/移动设备、IL2CPP原生构建与生产容量/多实例未验收。
+
+### 服务端账号与关闭审查修复（2026-10-12）
+
+第11轮服务器审查的四项问题已修复：账号所有者协调在途 epoch 分配与提交，注销/到期后旧结果不能恢复会话；认证过载统一 status1 并结束处理中阶段；绑定保留原因、WSS/KCP 通过外部 RequestClose/CloseAsync(reason) 发送顶号2/到期4/撤销7；实际启动组合注入标准 logger。框架继续保持业务无关，账号、数据库、协议与权限仍归 Game.Server。
+
+本轮新增23个回归用例；Release四工程0警告/错误，完整服务端120/120、框架10/10、协议/生成181/181，0跳过，生成 check --artifacts退出0。服务端包含独立临时PostgreSQL18、真实Kestrel/WSS与已有macOS mbedTLS4.2.0 DTLS库；数据库验证环境结束已清理。最后关闭原因保留路径修改后，受影响关闭/传输回归28/28通过；WSS 即时关闭检查的最终回归13/13通过。完整覆盖、方案与限制见 [服务端审查第12节](NetworkServerReview.md#12-第11节四项问题修复2026-10-12)。本轮未执行新的Unity/IL2CPP或其他平台实跑。

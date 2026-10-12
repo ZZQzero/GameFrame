@@ -7,12 +7,10 @@ namespace Game.Server
 {
     internal sealed class LobbyApplication
     {
-        private readonly AccountSessions accounts;
         internal ServerApplication Application { get; }
 
         internal LobbyApplication(AccountSessions accounts, AccountService service, LoginOptions options)
         {
-            this.accounts = accounts;
             var login = new LoginHandlers(accounts, service, options);
             Application = new ServerApplication(GameNetProtocol.Catalog, login.CreateSession);
             login.Register(Application);
@@ -33,9 +31,10 @@ namespace Game.Server
             }
 
             await Task.Delay((int)request.DelayMs, token);
-            if (!accounts.IsCurrent(((LoginSession)connection.Session).Binding))
+            ushort? reason = connection.Session.CheckDeadline(connection.NowMilliseconds);
+            if (reason.HasValue)
             {
-                throw new ServerRequestException(2, 5);
+                throw new ServerRequestException(2, reason.Value);
             }
 
             return new EchoResponse { Text = request.Text };

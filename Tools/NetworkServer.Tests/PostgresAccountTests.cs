@@ -11,6 +11,7 @@ namespace GameFrame.Tests
         private PostgresTestDatabase database = null!;
         private PostgresAccountRepository repository = null!;
         private AccountService service = null!;
+        private AccountSessions sessions = null!;
 
         [OneTimeSetUp]
         public void RequireDatabase()
@@ -26,7 +27,8 @@ namespace GameFrame.Tests
         {
             database = await PostgresTestDatabase.CreateAsync();
             repository = new PostgresAccountRepository(database.Database);
-            service = new AccountService(repository);
+            sessions = new AccountSessions(new LoginOptions());
+            service = new AccountService(repository, sessions);
             await repository.ValidateAsync(CancellationToken.None);
         }
 
@@ -34,6 +36,7 @@ namespace GameFrame.Tests
         public async Task Stop()
         {
             service.Dispose();
+            sessions.Dispose();
             await database.DisposeAsync();
         }
 
@@ -45,10 +48,11 @@ namespace GameFrame.Tests
             Assert.That(stored.Salt.Length, Is.EqualTo(16));
             Assert.That(stored.PasswordHash.Length, Is.EqualTo(32));
             Assert.That(stored.Iterations, Is.EqualTo(600000));
-            using var second = new AccountService(new PostgresAccountRepository(database.Database));
-            AuthenticatedAccount? login = await second.LoginAsync("player", "player-password", CancellationToken.None);
-            Assert.That(login!.Value.Id, Is.EqualTo((ulong)stored.Id));
-            Assert.That(await second.LoginAsync("player", "wrong-password", CancellationToken.None), Is.Null);
+            using var second = new AccountService(new PostgresAccountRepository(database.Database), sessions);
+            var login = await second.LoginAsync("player", "player-password", _ => { }, CancellationToken.None);
+            Assert.That(login.Response.AccountId, Is.EqualTo((ulong)stored.Id));
+            Assert.That((await second.LoginAsync("player", "wrong-password", _ => { }, CancellationToken.None)).Response.ResultCode, Is.EqualTo(ResultCode.InvalidCredentials));
+            AccountSessions.ClearResponse(login.Response);
         }
 
         [Test]
@@ -59,26 +63,29 @@ namespace GameFrame.Tests
                 service.RegisterAsync("same", "second-password", CancellationToken.None));
             Assert.That(results.Count(result => result == ResultCode.Success), Is.EqualTo(1));
             Assert.That(results.Count(result => result == ResultCode.AccountAlreadyExists), Is.EqualTo(1));
-            AuthenticatedAccount? first = await service.LoginAsync("same", "first-password", CancellationToken.None);
-            AuthenticatedAccount? second = await service.LoginAsync("same", "second-password", CancellationToken.None);
-            Assert.That(first.HasValue ^ second.HasValue, Is.True);
+            var first = await service.LoginAsync("same", "first-password", _ => { }, CancellationToken.None);
+            var second = await service.LoginAsync("same", "second-password", _ => { }, CancellationToken.None);
+            Assert.That((first.Binding != null) ^ (second.Binding != null), Is.True);
+            AccountSessions.ClearResponse(first.Response);
+            AccountSessions.ClearResponse(second.Response);
         }
 
         [Test]
-        public async Task DistinctAccountsRemainIndependentAndOutOfOrderLoginCannotReplaceNewerEpoch()
+        public async Task DistinctAccountsRemainIndependentAndNewLoginAdvancesEpoch()
         {
             await service.RegisterAsync("alice", "alice-password", CancellationToken.None);
             await service.RegisterAsync("bob", "bob-password", CancellationToken.None);
-            AuthenticatedAccount alice = (await service.LoginAsync("alice", "alice-password", CancellationToken.None))!.Value;
-            AuthenticatedAccount bob = (await service.LoginAsync("bob", "bob-password", CancellationToken.None))!.Value;
-            AuthenticatedAccount newerAlice = (await service.LoginAsync("alice", "alice-password", CancellationToken.None))!.Value;
-            using var sessions = new AccountSessions(new LoginOptions());
-            var newer = sessions.Login(newerAlice, () => { }, CancellationToken.None);
-            var independent = sessions.Login(bob, () => { }, CancellationToken.None);
-            Assert.That(sessions.Login(alice, () => { }, CancellationToken.None).Response.ResultCode, Is.EqualTo(ResultCode.InvalidCredentials));
-            Assert.That(sessions.IsCurrent(newer.Binding), Is.True);
-            Assert.That(sessions.Logout(independent.Binding), Is.True);
-            Assert.That(sessions.IsCurrent(newer.Binding), Is.True);
+            var alice = await service.LoginAsync("alice", "alice-password", _ => { }, CancellationToken.None);
+            var bob = await service.LoginAsync("bob", "bob-password", _ => { }, CancellationToken.None);
+            var newer = await service.LoginAsync("alice", "alice-password", _ => { }, CancellationToken.None);
+            Assert.That(newer.Response.AuthEpoch, Is.GreaterThan(alice.Response.AuthEpoch));
+            Assert.That(sessions.IsCurrent(alice.Binding!.Id), Is.False);
+            Assert.That(sessions.IsCurrent(newer.Binding!.Id), Is.True);
+            Assert.That(sessions.Logout(bob.Binding!.Id), Is.True);
+            Assert.That(sessions.IsCurrent(newer.Binding.Id), Is.True);
+            AccountSessions.ClearResponse(alice.Response);
+            AccountSessions.ClearResponse(bob.Response);
+            AccountSessions.ClearResponse(newer.Response);
         }
 
         [Test]
@@ -86,7 +93,9 @@ namespace GameFrame.Tests
         {
             string account = "player'; DROP TABLE accounts; --";
             Assert.That(await service.RegisterAsync(account, "player-password", CancellationToken.None), Is.EqualTo(ResultCode.Success));
-            Assert.That(await service.LoginAsync(account, "player-password", CancellationToken.None), Is.Not.Null);
+            var login = await service.LoginAsync(account, "player-password", _ => { }, CancellationToken.None);
+            Assert.That(login.Response.ResultCode, Is.EqualTo(ResultCode.Success));
+            AccountSessions.ClearResponse(login.Response);
             await repository.ValidateAsync(CancellationToken.None);
         }
 
@@ -106,7 +115,7 @@ namespace GameFrame.Tests
         {
             await using NpgsqlCommand drop = database.Database.CreateCommand("DROP TABLE accounts");
             await drop.ExecuteNonQueryAsync();
-            Assert.ThrowsAsync<PostgresException>(async () => await service.LoginAsync("player", "player-password", CancellationToken.None));
+            Assert.ThrowsAsync<PostgresException>(async () => await service.LoginAsync("player", "player-password", _ => { }, CancellationToken.None));
         }
 
         [Test]

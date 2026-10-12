@@ -10,6 +10,7 @@ using GameFrame.Network.Protocol;
 using GameFrame.Network.Transport;
 using GameFrame.Network.Transport.Kcp;
 using GameFrame.Server.Network;
+using Microsoft.Extensions.Logging;
 using NUnit.Framework;
 
 namespace GameFrame.Tests
@@ -182,6 +183,132 @@ namespace GameFrame.Tests
             {
                 first.FailHost(new NetworkException("Test cleanup."));
                 second.FailHost(new NetworkException("Test cleanup."));
+                await worker.ShutdownAsync();
+            }
+
+            await host.DisposeAsync();
+            Assert.That(host.OwnedBytes, Is.Zero);
+            Assert.That(memory.OwnedBytes, Is.Zero);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task ExternalCloseSendsReasonWhileHandlerIsBlockedAndLeavesOtherConnectionsHealthy(bool pushAfterClose)
+        {
+            var connected = Channel.CreateBounded<ServerConnectionContext>(2);
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            int oldCalls = 0;
+            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), Application(
+                async (connection, request, token) =>
+                {
+                    if (request.Text == "blocked")
+                    {
+                        Interlocked.Increment(ref oldCalls);
+                        entered.TrySetResult();
+                        await release.Task.WaitAsync(token);
+                        if (pushAfterClose)
+                        {
+                            await connection.PushAsync(GameNetRoutes.WorldSnapshotReliable, new WorldSnapshot());
+                        }
+                        else
+                        {
+                            await Task.Delay(Timeout.Infinite, token);
+                        }
+                    }
+
+                    return new EchoResponse { Text = request.Text };
+                }, session: _ => new CaptureSession(connected)));
+            var firstGrant = await Grant(host, 871);
+            var secondGrant = await Grant(host, 872);
+            var memory = new FrameMemoryBudget(64 * 1024 * 1024);
+            var worker = new KcpWorker();
+            ConnectionContext first = Context(firstGrant.Connect, memory, worker);
+            ConnectionContext second = Context(secondGrant.Connect, memory, worker);
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                await PumpUntil(first, first.ConnectTask);
+                await PumpUntil(second, second.ConnectTask);
+                ServerConnectionContext one = await connected.Reader.ReadAsync(timeout.Token);
+                ServerConnectionContext two = await connected.Reader.ReadAsync(timeout.Token);
+                ServerConnectionContext server = one.GrantId == firstGrant.Grant ? one : two;
+                Task<EchoResponse> blocked = first.Request(GameNetRoutes.Echo, new EchoRequest { Text = "blocked" },
+                    TimeSpan.FromSeconds(4), default);
+                await entered.Task.WaitAsync(timeout.Token);
+                Task<EchoResponse> queued = first.Request(GameNetRoutes.Echo, new EchoRequest { Text = "blocked" },
+                    TimeSpan.FromSeconds(4), default);
+                Exception? remoteError = null;
+                first.StateChanged = (_, error) => remoteError ??= error;
+                server.RequestClose(2);
+                server.RequestClose(7);
+                if (pushAfterClose)
+                {
+                    release.SetResult();
+                }
+
+                await PumpUntil(first, server.CloseAsync(7));
+                Assert.That((await server.Completion).Reason, Is.EqualTo(2));
+                Assert.That((await server.Completion).Error, Is.Null);
+                await PumpUntil(first, first.IoTask);
+                while (first.PumpOne())
+                {
+                }
+
+                Assert.That(remoteError?.Message, Does.Contain("(2)"));
+                Assert.CatchAsync<NetworkException>(async () => await blocked);
+                Assert.CatchAsync<NetworkException>(async () => await queued);
+                Assert.That(oldCalls, Is.EqualTo(1));
+                Task<EchoResponse> healthy = second.Request(GameNetRoutes.Echo, new EchoRequest { Text = "healthy" },
+                    TimeSpan.FromSeconds(2), default);
+                await PumpUntil(second, healthy);
+                Assert.That(healthy.Result.Text, Is.EqualTo("healthy"));
+                await Close(first);
+                await Close(second);
+            }
+            finally
+            {
+                first.FailHost(new NetworkException("Test cleanup."));
+                second.FailHost(new NetworkException("Test cleanup."));
+                await worker.ShutdownAsync();
+            }
+
+            await host.DisposeAsync();
+            Assert.That(host.OwnedBytes, Is.Zero);
+            Assert.That(memory.OwnedBytes, Is.Zero);
+        }
+
+        [Test]
+        public async Task InjectedLoggerRecordsKcpHandlerFailure()
+        {
+            var logs = new WssLifecycleTests.LogCapture();
+            using ILoggerFactory logging = LoggerFactory.Create(builder => builder.AddProvider(logs));
+            var connected = Channel.CreateBounded<ServerConnectionContext>(1);
+            var failure = new InvalidOperationException("Injected KCP handler failure.");
+            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0),
+                Application((_, _, _) => throw failure, session: _ => new CaptureSession(connected)),
+                logger: logging.CreateLogger<KcpListenerHost>());
+            var grant = await Grant(host, 881);
+            var memory = new FrameMemoryBudget(64 * 1024 * 1024);
+            var worker = new KcpWorker();
+            ConnectionContext client = Context(grant.Connect, memory, worker);
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                await PumpUntil(client, client.ConnectTask);
+                ServerConnectionContext server = await connected.Reader.ReadAsync(timeout.Token);
+                Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest { Text = "private-message" },
+                    TimeSpan.FromSeconds(3), default);
+                Assert.CatchAsync<NetworkException>(async () => await PumpUntil(client, request));
+                await server.Completion.WaitAsync(timeout.Token);
+                Assert.That(logs.Entries.Any(entry => entry.Category == typeof(KcpListenerHost).FullName &&
+                    entry.Error?.InnerException == failure), Is.True);
+                Assert.That(logs.Entries.All(entry => !entry.Text.Contains("private-message", StringComparison.Ordinal)), Is.True);
+                await Close(client);
+            }
+            finally
+            {
+                client.FailHost(new NetworkException("Test cleanup."));
                 await worker.ShutdownAsync();
             }
 

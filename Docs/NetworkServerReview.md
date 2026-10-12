@@ -608,3 +608,39 @@ Program
 - [x] [Unity/Assets/Scripts/Runtime/Network/Transport/WebSocketTransport.cs](../Unity/Assets/Scripts/Runtime/Network/Transport/WebSocketTransport.cs)
 - [x] [Unity/Assets/Scripts/Tests/EditMode/Network/NetworkMemoryPackTests.cs](../Unity/Assets/Scripts/Tests/EditMode/Network/NetworkMemoryPackTests.cs)
 - [x] [Unity/Assets/Scripts/Tests/EditMode/Network/NetworkProtocolTests.cs](../Unity/Assets/Scripts/Tests/EditMode/Network/NetworkProtocolTests.cs)
+
+## 12. 第11节四项问题修复（2026-10-12）
+
+本轮按用户授权修复第11节四项主要问题。源码核对沿用第11节完整文件清单与调用链，逐项复查本轮变更及相关调用、取消、释放、关闭和启动组合；历史复现记录保留，以下描述修复后的行为。
+
+### 已实现与方案取舍
+
+| 问题 | 最终实现 |
+| --- | --- |
+| 迟到 epoch 在注销/清理后重新建立会话 | AccountService 密码校验成功后调用 AccountSessions.LoginAsync：先在有界 AccountState 登记操作，再异步分配数据库 epoch，最后检查 revision/LatestEpoch 并提交。Logout/到期使撤销前已登记的操作失效；状态仅在仍有会话或在途操作时保留，finally 回收。不同账号不持锁等待 IO；没有新增历史账号永久记录、数据库复查或代际回滚。 |
+| 认证过载 status 与阶段收尾错误 | 全局4并发、账号状态容量、IP/账号认证限额使用空正文 status1。所有认证 handler 的 finally 清除敏感字段并结束 loginInFlight。Login 过载响应后 Close1；Register 全局/账号过载释放资格，客户端可在原登录期限内显式再次请求。IP 准入过载拒绝后关闭；不增加重试队列。 |
+| 顶号/到期/撤销的关闭原因丢失 | LoginSession 持有绑定记录，索引删除不删除其原因。Login/Resume 替换旧绑定使用 RequestClose(2)，期限使用4，撤销使用7，Logout 自身响应后1，凭据拒绝5。ServerConnectionContext 新增外部 RequestClose(reason)/CloseAsync(reason)，首次关闭原因保留；WSS/KCP 发送 owner 发送 Close，不等待阻塞 handler 才开始，丢弃待派发/未发送业务，有界结束传输后取消并 join。正常 EOF 仍排空已准入工作。已经关闭的绑定不能迟到提升权限；实际业务异常仍保留，不将任意 NetworkException 吞成正常关闭。 |
+| 实际服务入口使用 NullLogger | LocalWssService 由 host DI 创建 WssServer 并注入 ILogger<WssServer>；host 拥有网络生命周期，停止/join 后才释放账号服务与数据库。LocalKcpService 持有标准 LoggerFactory 并注入 listener logger，工厂晚于 listener 释放。沿用既有 handler/连接/清理日志，不新增日志系统，不记录请求正文和凭据。 |
+
+方案采用现有账号/连接所有者的生命周期协调。给原比较增加当前 Session 判断仍会在删除后失效；永久最大 epoch 表会扩大常驻内存；账号锁内等待网络会耦合两种生命周期。外部关闭独立交给发送 owner，响应后关闭保留给当前 handler，两种触发共用传输释放流程。
+
+### 本轮源码覆盖
+
+- [x] Login 全部实现：AccountService、AccountSessions、IAccountRepository、LoginHandlers、LoginSession，以及未改动的 LoginOptions、PasswordHasher、PostgresAccountRepository 的接口/取消调用关系。
+- [x] LobbyApplication、LocalWssService、LocalKcpService；核对 Program、LocalEnvironment、数据库检查、配置与 host/服务/证书的关闭顺序。启动检查仍只验证运行配置、证书、数据库和账号表结构，玩家校验仅由客户端请求触发。
+- [x] ServerApplication/ServerConnectionContext、ServerConnection、KcpListenerHost，及 WssServer 的配额/host 停机调用、网络选项和共享客户端的 Close 接收语义。检查短锁顺序、在途响应所有权、关闭期间 Push/权限提升、排队业务、peer close、native child retirement、取消与 Completion 发布。
+- [x] 三个新增测试文件 AccountLifecycleTests、ServerCloseTests、WssLifecycleTests，以及更新后的 KcpLoopbackTests、PostgresAccountTests、ServerHeartbeatTests、WssServerTests 与仓库/数据库测试辅助代码；源码和构建引用均核对。
+- [x] NetworkDesign、ServerAccounts、DotNet README、GameFrame.Server README、实施记录和验证入口。同步关闭 API、认证并发状态、logger 所有权；修正设计第18节已删除的 DotNet.csproj 示例及 hosting 门禁措辞。
+
+本轮未修改 proto/生成产物、数据库 schema、原生源码/ABI、Unity 脚本、已有本机配置或 CI。上述生成工具/第三方/native 的第11节全量审查记录仍适用；没有未读或受阻的修复路径。
+
+### 验证证据
+
+- 新增23个回归用例；已有顶号/Resume WSS 用例增加 GFNP Close2 与 WebSocket close 确认断言，两组仓库均执行。
+- AccountLifecycleTests：乱序提交、注销与到期清理后迟到结果、pending 容量、失败/取消/Dispose 回收、其他账号独立推进、Resume 轮换、过载收尾、IP 限额、撤销原因和迟到 Bind 权限。
+- 实际 Kestrel/WSS：过载 status1 先于 Close1；Register 在同连接显式再次请求成功；到期 Close4、撤销 Close7；实际 LocalWssService 的 DI/管线记录原 handler 异常与 logger category，正文未进入日志。
+- 实际 macOS KCP/DTLS：阻塞 handler 期间外部 Close2，重复 Close 不改原因，未派发请求不执行，新连接继续 Echo；handler 异常通过注入 logger 记录；关闭后 listener/客户端自有缓冲归零。WSS 可控 socket 同时验证关闭与 Push/权限提升的并发边界。
+- Release 四工程编译0警告/错误；完整服务端120/120、独立框架10/10、协议/生成181/181，均0跳过；生成 check --artifacts 退出0。初次完整服务端回归119/120，新增模拟 socket 用例过早确认关闭导致断言落在取消后；调整其确认时序后完整复跑通过，不改变运行时取消语义。
+- 数据库使用独立临时 PostgreSQL18 cluster/随机端口，测试创建各自 schema；运行结束已停止并删除 cluster。原生使用已有 shared-macos-universal-release 的 mbedTLS4.2.0 验证库，没有重新构建。
+- 最后关闭故障路径补充保留已请求原因后，重新编译并复跑 ServerCloseTests、KcpLoopbackTests、ServerHeartbeatTests、WssLifecycleTests，共28/28通过、0跳过；涵盖正常 EOF、响应后关闭、外部关闭、顶号原因、原生 child 释放与 logger。随后收紧 WSS 收/发 owner 对已请求关闭的即时业务检查，重新编译并复跑受影响 WSS 关闭/watchdog/启动组合13/13通过、0跳过。
+- 未执行新的 Unity Editor/Player/IL2CPP、Windows/Linux/移动设备、远程 CI、生产多实例或容量验收。没有操作用户正在运行的 Rider 服务、开发 PostgreSQL、证书信任或 Unity 设置。

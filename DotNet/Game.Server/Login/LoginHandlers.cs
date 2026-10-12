@@ -94,7 +94,7 @@ namespace Game.Server.Login
             {
                 if (!AdmitAccount(request.Account))
                 {
-                    throw new ServerRequestException(3);
+                    throw new ServerRequestException(1);
                 }
 
                 ResultCode result = await service.RegisterAsync(request.Account, request.Password, token);
@@ -103,7 +103,7 @@ namespace Game.Server.Login
             finally
             {
                 request.Password = string.Empty;
-                ((LoginSession)connection.Session).FinishRegistration();
+                ((LoginSession)connection.Session).FinishAuthentication();
             }
         }
 
@@ -113,13 +113,10 @@ namespace Game.Server.Login
             {
                 if (!AdmitAccount(request.Account))
                 {
-                    throw new ServerRequestException(3, 5);
+                    throw new ServerRequestException(1, 1);
                 }
 
-                AuthenticatedAccount? account = await service.LoginAsync(request.Account, request.Password, token);
-                token.ThrowIfCancellationRequested();
-                var result = account.HasValue ? accounts.Login(account.Value, connection.Disconnect, token) :
-                    (Response: new LoginResponse { ResultCode = ResultCode.InvalidCredentials }, Binding: 0L);
+                var result = await service.LoginAsync(request.Account, request.Password, connection.RequestClose, token);
                 try
                 {
                     ((LoginSession)connection.Session).Bind(result.Binding);
@@ -131,9 +128,16 @@ namespace Game.Server.Login
                     throw;
                 }
             }
+            catch (ServerRequestException error)
+            {
+                ((LoginSession)connection.Session).BeginClosing();
+                connection.CloseAfterResponse(error.CloseReason == 0 ? (ushort)1 : error.CloseReason);
+                throw;
+            }
             finally
             {
                 request.Password = string.Empty;
+                ((LoginSession)connection.Session).FinishAuthentication();
             }
         }
 
@@ -141,7 +145,7 @@ namespace Game.Server.Login
         {
             try
             {
-                var result = accounts.Resume(request, connection.Disconnect);
+                var result = accounts.Resume(request, connection.RequestClose);
                 try
                 {
                     ((LoginSession)connection.Session).Bind(result.Binding);
@@ -155,6 +159,7 @@ namespace Game.Server.Login
             }
             finally
             {
+                ((LoginSession)connection.Session).FinishAuthentication();
                 CryptographicOperations.ZeroMemory(request.ResumeToken);
                 CryptographicOperations.ZeroMemory(request.AccountSessionId);
             }
@@ -169,7 +174,7 @@ namespace Game.Server.Login
         private Task<OperationResponse> Logout(ServerConnectionContext connection, LogoutRequest request, CancellationToken token)
         {
             var session = (LoginSession)connection.Session;
-            session.BeginLogout();
+            session.BeginClosing();
             bool revoked = accounts.Logout(session.Binding);
             connection.CloseAfterResponse(1);
             return Task.FromResult(new OperationResponse { ResultCode = revoked ? ResultCode.Success : ResultCode.SessionRevoked });

@@ -42,7 +42,7 @@ handler 不接收原始帧、预算或借用 native handle。codec 在解码前�
 
 `await context.PushAsync(reliableRoute, dto)` 同步编码并向有界可靠队列准入；成功只表示框架接受，后续传输失败通过 Completion 报告，不表示对端已收到。不可靠 Push 使用 `TryPushUnreliable`，容量不足返回 false；不可靠协商缺失明确抛错。路由必须属于该连接 catalog。
 
-`Disconnect()` 请求立即停止。`CloseAsync()` 请求停止并等待 owner、handler、Closed 和资源释放；终态有错误时抛出首因。`Completion` 返回 `ServerCloseInfo`，包含首个关闭原因和错误，对端正常 Close 的原因也会保留，供外部 owner 观察。RPC/Notify handler、Connected/Closed hook 不得 await 自己的 CloseAsync/Completion，否则等待自身退出；内部主动关闭用 Disconnect，响应后关闭用 `CloseAfterResponse(reason)`。后者属于当前 handler 的终止决定，不能作为独立后台定时关闭接口。
+`Disconnect()` 请求立即停止。`CloseAsync()` 请求停止并等待 owner、handler、Closed 和资源释放；终态有错误时抛出首因。`RequestClose(reason)` 是外部会话所有者使用的有原因关闭接口，reason 非零且首次请求生效，重复调用不改写原因；它立即停止新 Push/权限提升，由 WSS/KCP 的发送 owner 尽力发送 GFNP Close，关闭发送/排空最多2秒，随后取消并 join handler。关闭丢弃尚未派发的业务及未发送的业务回复；已经交给传输的字节无法撤回。`CloseAsync(reason)` 请求同一关闭并等待最终释放；对端不确认或传输失败时仍通过 Completion 报告原因与错误，不保证 Close 一定送达。`Completion` 返回 `ServerCloseInfo`，包含首个关闭原因和错误，对端正常 Close 的原因也会保留，供外部 owner 观察。RPC/Notify handler、Connected/Closed hook 不得 await 自己的 CloseAsync/Completion，否则等待自身退出；内部有原因关闭用 RequestClose，需要立即中止时用 Disconnect；响应后关闭用 `CloseAfterResponse(reason)`。后者属于当前 handler 的终止决定，不能作为独立后台定时关闭接口。
 
 正常物理 EOF 停止发送、排空已接受可靠工作，再关闭并清理；故障/显式停机取消 handler 并 join。处理器必须响应取消，框架不会超时后丢弃仍拥有资源的任务。取消回调或 Closed 抛错不会跳过其余释放；首因与额外清理错误分别保留/记录。连接完成在缓冲释放之后发布，WSS 同时已归还 host 配额。单连接业务失败不关闭共享 listener。
 
@@ -51,14 +51,17 @@ handler 不接收原始帧、预算或借用 native handle。codec 在解码前�
 WSS 由应用配置 Kestrel HTTPS、证书和路由，将 `WssServer.HandleAsync` 映射到路径；框架只接受 HTTPS WebSocket，拒绝 query/Authorization 凭据和未允许的 Origin。禁用应用压缩，保留证书正常验证。
 
 ```csharp
-await using var network = new WssServer(application, new WssServerOptions());
-builder.Services.AddSingleton(network);
+builder.Services.AddSingleton(provider => new WssServer(application, new WssServerOptions(),
+    provider.GetRequiredService<ILogger<WssServer>>()));
 builder.Services.AddHostedService(provider => provider.GetRequiredService<WssServer>());
 await using WebApplication app = builder.Build();
+WssServer network = app.Services.GetRequiredService<WssServer>();
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.Zero });
 app.MapGet("/network", network.HandleAsync);
 await app.RunAsync();
 ```
+
+应用组合入口传入标准 ILogger；省略 logger 的独立类库调用仍使用 NullLogger，不能依靠 Kestrel 的 HTTP 日志代替网络 handler/清理错误日志。DI 创建的 WssServer 由 host 释放，账号服务与数据库在 host 结束后释放。KCP 独立入口同样持有 LoggerFactory 直到 listener 完成释放。
 
 WssServer 的 hosted lifecycle `StoppingAsync` 在 Kestrel 等所有 hosted StopAsync 之前停止准入并 join 网络；只按注册顺序或等 RunAsync 返回再清理都不足以保证该顺序。重复 Dispose 等待同一停机结果。应用取消回调/Closed 清理故障会使停机失败；已经关闭的普通协议/业务故障从各连接 Completion 观察。
 

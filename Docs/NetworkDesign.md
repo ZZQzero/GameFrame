@@ -112,7 +112,7 @@ DotNet/Game.Server/               唯一业务可执行入口、local 配置、�
 
 服务端保留单进程、单业务入口，通过四个程序集落实职责边界。Core 不引用游戏协议/Unity/业务，Server 只依赖 Core 与 ASP.NET Core；Game.Protocol 导入生成源码并引用 Core/MemoryPack，Game.Server 组合 Server 与 Protocol。账号、恢复、顶号、登录期限和权限策略全部属于 Game.Server；网络框架仅通过 ServerSession 的头部准入、派发复查和期限 hook 接入应用策略。RPC/Notify 处理器只使用 DTO，框架负责关联、编码、队列与释放；Push 与连接关闭采用公开强类型接口，不暴露借用 native handle。具体契约见 [服务端框架 API](../DotNet/GameFrame.Server/README.md)。
 
-Game.Server 使用 Web SDK/net10.0，local 功能需显式 profile；生产未配置认证时拒绝启动。WssServer 通过 hosted lifecycle 的 StoppingAsync 阶段在 Kestrel 等 StopAsync 前 join 网络，不能仅依赖注册先后或 RunAsync 返回后的清理。不提前增加网关/账号/世界等可执行项目；第 14 节业务契约保留供后续实现。
+Game.Server 使用 Web SDK/net10.0，local 功能需显式 profile；PostgreSQL 注册/密码认证已接入，生产 hosting（监听/部署与跨进程会话）未配置时拒绝启动，启动不校验玩家凭据。WssServer 通过 hosted lifecycle 的 StoppingAsync 阶段在 Kestrel 等 StopAsync 前 join 网络，不能仅依赖注册先后或 RunAsync 返回后的清理。不提前增加网关/账号/世界等可执行项目；第 14 节业务契约保留供后续实现。
 
 Game.Server 内按业务功能建目录：Login/ 集中账号、PostgreSQL 仓库、注册/登录/恢复/注销处理器和每连接登录状态。LobbyApplication 作为大厅组合入口显式注册模块与路由；Program 仅校验 profile 并选择 LocalWssService/LocalKcpService。启动入口负责配置校验、资源创建、运行及关闭所有权，不增加反射注册或额外生命周期管理器。配置或初始化失败停止后续步骤，已创建资源按原所有权释放。
 
@@ -650,7 +650,7 @@ Login 成功响应至少包含 accountId、accountSessionId（16 字节）、aut
 
 accountSession 默认最长有效期 24 小时；resumeToken 有效期不超过该会话，到期返回明确认证失败。resumeToken 是 CSPRNG 生成的不透明凭据，服务端保存摘要，客户端只保存在账号会话内存中。ResumeLogin 成功原子消费旧凭据并返回新凭据；响应丢失时不自动复用旧 token 或退回密码登录，由调用者显式重新登录。首次登录与恢复都执行服务端账号/封禁/顶号策略，不通过客户端声明恢复旧权限。
 
-ResumeLogin 只替换大厅连接绑定并轮换恢复凭据，保持仍有效的 accountSessionId/authEpoch，不撤销同一账号会话的正常 KCP 世界连接。首次 Login 创建新账号会话；本版每个账号只允许一个活跃账号会话，多个账号独立，新 Login 按顶号策略撤销旧 epoch，而不是模拟一次 ResumeLogin。
+ResumeLogin 只替换大厅连接绑定并轮换恢复凭据，保持仍有效的 accountSessionId/authEpoch，不撤销同一账号会话的正常 KCP 世界连接。首次 Login 创建新账号会话；本版每个账号只允许一个活跃账号会话，多个账号独立，新 Login 按顶号策略撤销旧 epoch，而不是模拟一次 ResumeLogin。密码校验后由账号会话所有者登记在途操作，再分配数据库 epoch 并提交；较新提交按 epoch 仲裁，Logout/到期撤销使撤销前已登记的在途结果失去资格。会话及操作记录有界，仅在活跃会话或在途操作需要时保留，不保存无界历史账号墓碑，也不持账号锁等待数据库或网络。
 
 TLS 信任使用平台正常证书验证与可信域名配置；不能连接任意外部 WSS 再发送凭据。WSS 返回的 UDP 端点仍须满足环境允许的域名/IP/端口策略，不能将授权 RPC 变成任意地址转发接口。
 
@@ -673,7 +673,7 @@ TLS 信任使用平台正常证书验证与可信域名配置；不能连接任�
 
 未登录 WSS 在 ServerHello 后只允许 Register/Login/ResumeLogin 和 Ping/Pong/Close；注册不自动登录且不延长原登录期限，同一连接最多一个认证请求在执行，不允许并行尝试多组凭据。默认登录等待 10 秒，从 ServerHello 移交传输起计时，Ping 不续期。未登录输入 Body 上限 2048 字节、总消息 5 条/秒、16 KiB/秒，超过即关闭；在反序列化之前按帧头与阶段拒绝。登录成功后才切换到正常消息与队列额度。
 
-已识别且合法的越阶段 Request 可尽力返回 `StatusCode=2`、空 Body，随后 Close reason=5；Notify/非法帧直接关闭，不先解析敏感业务 DTO。凭据无效以 Login/ResumeLogin 响应 DTO 的统一拒绝结果表示，随后关闭当前登录尝试；内部故障仍按 RPC 系统错误传播，不伪装成凭据无效。登录等待超时使用 Close reason=6。返回失败响应不保证客户端一定收到，客户端仍需处理断线与未知结果。
+已识别且合法的越阶段 Request 可尽力返回 `StatusCode=2`、空 Body，随后 Close reason=5；Notify/非法帧直接关闭，不先解析敏感业务 DTO。凭据无效以 Login/ResumeLogin 响应 DTO 的统一拒绝结果表示，随后关闭当前登录尝试；内部故障仍按 RPC 系统错误传播，不伪装成凭据无效。系统认证并发/容量及 IP/账号限额使用空正文 StatusCode=1；Login 过载回复后 Close1，Register 的全局/账号限额拒绝释放资格，客户端可在原期限内显式再次请求，IP 准入限额拒绝后关闭。所有认证请求均在 finally 结束处理中阶段。顶号/Resume 替换通过框架 RequestClose(2) 发送控制关闭，到期使用4，账号撤销使用7；即使索引已删除，旧绑定也保留原因。外部关闭不等待旧 handler 才发送，停止新业务、丢弃待派发工作，有界关闭后取消并 join，正常 EOF 继续排空已接受工作。登录等待超时使用 Close reason=6。返回失败响应不保证客户端一定收到，客户端仍需处理断线与未知结果。
 
 Hello 之前、登录等待中和认证后分别限制全局/每 IP 连接数与内存；登录还须按账号/IP 限频，不能只依靠客户端按钮防重。未登录连接不创建角色、AOI、世界订阅或 native KCP 状态。认证后仍限制 bytes/s、packets/s、opcode 频率、pending 与订阅规模；位置、伤害、奖励与购买都由权威服务端验证。
 
@@ -946,8 +946,8 @@ P1 可使用手工固定测试 DTO，不能因此绕过 P2 直接投产。P3 原
 (cd Tools && dotnet run --project NetworkProtocol -- generate --artifacts)
 (cd Tools && dotnet run --project NetworkProtocol -- check --artifacts)
 (cd Tools && dotnet test NetworkProtocol.Tests)
-(cd DotNet && dotnet run --project DotNet.csproj -- --profile local-wss)
-(cd DotNet && dotnet run --project DotNet.csproj -- --profile local-kcp-dtls)
+(cd DotNet && dotnet run --project Game.Server -- --profile local-wss)
+(cd DotNet && dotnet run --project Game.Server -- --profile local-kcp-dtls)
 python3 Native/Kcp/build/build.py --help
 python3 Native/Kcp/build/install.py --help
 ```

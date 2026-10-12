@@ -51,7 +51,9 @@ namespace Game.Server
                 psk = Convert.FromHexString(credentials.Psk);
                 ticket = Convert.FromHexString(credentials.Ticket);
                 credentials.Identity = credentials.Psk = credentials.Ticket = string.Empty;
-                await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, port), CreateApplication());
+                using ILoggerFactory logging = LoggerFactory.Create(builder => builder.AddSimpleConsole());
+                await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, port), CreateApplication(),
+                    logger: logging.CreateLogger<KcpListenerHost>());
                 await host.RegisterGrantAsync(credentials.Conv, identity, psk, ticket);
                 CryptographicOperations.ZeroMemory(psk);
                 Console.WriteLine($"Local KCP/DTLS listening on {host.LocalEndpoint}; the explicitly configured grant expires in 30 seconds. Ctrl+C stops the listener.");

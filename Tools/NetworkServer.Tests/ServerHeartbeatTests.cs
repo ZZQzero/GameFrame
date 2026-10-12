@@ -33,9 +33,9 @@ namespace GameFrame.Tests
             guard = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             settings = new LoginOptions();
             repository = new TestAccountRepository();
-            service = new AccountService(repository);
-            await service.RegisterAsync("test", "test-secret", guard.Token);
             accounts = new AccountSessions(settings);
+            service = new AccountService(repository, accounts);
+            await service.RegisterAsync("test", "test-secret", guard.Token);
             memory = new FrameMemoryBudget(64 * 1024 * 1024);
             socket = new ConnectionRaceTests.ControlledSocket(FrameDirection.ServerToClient);
             server = new ServerConnection(new WssServerOptions(), new LobbyApplication(accounts, service, settings).Application, memory, () => { }, guard.Token,

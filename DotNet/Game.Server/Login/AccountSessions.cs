@@ -7,28 +7,71 @@ namespace Game.Server.Login
 {
     internal sealed class AccountSessions : IDisposable
     {
+        // The connection owns this lease even after the session indexes remove its binding.
+        internal sealed class Binding
+        {
+            private int closeReason;
+            internal long Id { get; }
+            private readonly long deadline;
+            internal ushort? CloseReason
+            {
+                get
+                {
+                    int reason = Volatile.Read(ref closeReason);
+                    return reason != 0 ? (ushort)reason : Now >= deadline ? (ushort)4 : null;
+                }
+            }
+
+            internal Binding(long id, long deadline)
+            {
+                Id = id;
+                this.deadline = deadline;
+            }
+
+            internal void Revoke(ushort reason) => Interlocked.CompareExchange(ref closeReason, reason, 0);
+        }
+
         private sealed class Session
         {
             internal ulong AccountId;
             internal ulong Epoch;
-            internal long Binding;
+            internal required Binding Binding;
             internal byte[] Id = Array.Empty<byte>();
             internal byte[] ResumeDigest = Array.Empty<byte>();
             internal long Deadline;
             internal long ExpiresUtc;
-            internal Action? Disconnect;
+            internal Action<ushort>? Disconnect;
             internal long AttemptWindow;
             internal int Attempts;
         }
 
+        private sealed class AccountState
+        {
+            internal Session? Session;
+            internal ulong LatestEpoch;
+            internal ulong Revision;
+            internal int PendingLogins;
+        }
+
         private readonly object gate = new object();
         private readonly LoginOptions options;
-        private readonly Dictionary<ulong, Session> accounts = new Dictionary<ulong, Session>();
+        private readonly Dictionary<ulong, AccountState> accounts = new Dictionary<ulong, AccountState>();
         private readonly Dictionary<string, Session> sessions = new Dictionary<string, Session>();
         private readonly Dictionary<long, Session> bindings = new Dictionary<long, Session>();
         private long nextBinding;
         private bool disposed;
         internal static long Now => NetworkClock.GetMilliseconds();
+
+        internal int TrackedAccountCount
+        {
+            get
+            {
+                lock (gate)
+                {
+                    return accounts.Count;
+                }
+            }
+        }
 
         internal AccountSessions(LoginOptions options)
         {
@@ -36,79 +79,124 @@ namespace Game.Server.Login
             this.options = options;
         }
 
-        internal (LoginResponse Response, long Binding) Login(AuthenticatedAccount account, Action disconnect, CancellationToken cancellation)
+        internal async Task<(LoginResponse Response, Binding? Binding)> LoginAsync(ulong accountId,
+            Func<CancellationToken, Task<ulong>> advanceEpoch, Action<ushort> disconnect, CancellationToken cancellation)
         {
-            Action? revoke;
-            (LoginResponse Response, long Binding) result;
+            if (accountId == 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(accountId));
+            }
+
+            AccountState state;
+            ulong revision;
             lock (gate)
             {
                 ObjectDisposedException.ThrowIf(disposed, this);
                 cancellation.ThrowIfCancellationRequested();
-                if (account.Id == 0 || account.Epoch == 0)
+                foreach (var pair in accounts.Where(pair => pair.Value.Session != null &&
+                    Now >= pair.Value.Session.Deadline).ToArray())
                 {
-                    throw new ArgumentException("Authenticated account identity must be nonzero.");
+                    Remove(pair.Value.Session!, 4);
                 }
 
-                if (accounts.TryGetValue(account.Id, out Session? previous) && previous.Epoch >= account.Epoch)
+                if (!accounts.TryGetValue(accountId, out state!))
                 {
-                    return (Failure(), 0);
+                    // A pending first login reserves the same slot its committed session will own.
+                    if (accounts.Count >= options.MaxSessions)
+                    {
+                        throw new ServerRequestException(1);
+                    }
+
+                    state = new AccountState();
+                    accounts.Add(accountId, state);
                 }
 
-                foreach (Session expired in accounts.Values.Where(value => Now >= value.Deadline).ToArray())
-                {
-                    Remove(expired);
-                }
-
-                accounts.TryGetValue(account.Id, out previous);
-                if (previous == null && accounts.Count >= options.MaxSessions)
-                {
-                    throw new ServerRequestException(3);
-                }
-
-                revoke = previous?.Disconnect;
-                if (previous != null)
-                {
-                    Remove(previous);
-                }
-
-                var session = new Session
-                {
-                    AccountId = account.Id,
-                    Epoch = account.Epoch,
-                    Binding = NextBinding(),
-                    Id = RandomNumberGenerator.GetBytes(16),
-                    Deadline = checked(Now + (long)options.AccountLifetime.TotalMilliseconds),
-                    ExpiresUtc = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + (long)options.AccountLifetime.TotalMilliseconds,
-                    Disconnect = disconnect
-                };
-                accounts.Add(account.Id, session);
-                sessions.Add(Convert.ToHexString(session.Id), session);
-                bindings.Add(session.Binding, session);
-                result = (RotateToken(session), session.Binding);
+                state.PendingLogins++;
+                revision = state.Revision;
             }
 
             try
             {
-                revoke?.Invoke();
-                return result;
+                ulong epoch = await advanceEpoch(cancellation).ConfigureAwait(false);
+                Action<ushort>? revoke;
+                (LoginResponse Response, Binding? Binding) result;
+                lock (gate)
+                {
+                    ObjectDisposedException.ThrowIf(disposed, this);
+                    cancellation.ThrowIfCancellationRequested();
+                    if (epoch == 0)
+                    {
+                        throw new InvalidOperationException("Authentication generation must be nonzero.");
+                    }
+
+                    if (state.Session != null && Now >= state.Session.Deadline)
+                    {
+                        Remove(state.Session, 4);
+                    }
+
+                    if (state.Revision != revision || epoch <= state.LatestEpoch)
+                    {
+                        return (Failure(), null);
+                    }
+
+                    Session? previous = state.Session;
+                    revoke = previous?.Disconnect;
+                    if (previous != null)
+                    {
+                        // A newer login may replace this login too; only revocation invalidates
+                        // all in-flight operations, while epoch orders competing login commits.
+                        Remove(previous, 2, invalidatePending: false);
+                    }
+
+                    long deadline = checked(Now + (long)options.AccountLifetime.TotalMilliseconds);
+                    var session = new Session
+                    {
+                        AccountId = accountId,
+                        Epoch = epoch,
+                        Binding = new Binding(NextBinding(), deadline),
+                        Id = RandomNumberGenerator.GetBytes(16),
+                        Deadline = deadline,
+                        ExpiresUtc = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + (long)options.AccountLifetime.TotalMilliseconds,
+                        Disconnect = disconnect
+                    };
+                    state.Session = session;
+                    state.LatestEpoch = epoch;
+                    sessions.Add(Convert.ToHexString(session.Id), session);
+                    bindings.Add(session.Binding.Id, session);
+                    result = (RotateToken(session), session.Binding);
+                }
+
+                try
+                {
+                    revoke?.Invoke(2);
+                    return result;
+                }
+                catch
+                {
+                    ClearResponse(result.Response);
+                    throw;
+                }
             }
-            catch
+            finally
             {
-                ClearResponse(result.Response);
-                throw;
+                lock (gate)
+                {
+                    state.PendingLogins--;
+                    ReleaseState(accountId, state);
+                }
             }
         }
 
-        internal (LoginResponse Response, long Binding) Resume(ResumeLoginRequest request, Action disconnect)
+        internal (LoginResponse Response, Binding? Binding) Resume(ResumeLoginRequest request, Action<ushort> disconnect)
         {
             if (request.AccountSessionId.Length != 16 || request.ResumeToken.Length != 32)
             {
-                return (Failure(), 0);
+                return (Failure(), null);
             }
 
             byte[] digest = SHA256.HashData(request.ResumeToken);
-            Action? revoke;
-            (LoginResponse Response, long Binding) result;
+            Action<ushort>? revoke;
+            (LoginResponse Response, Binding? Binding) result;
             try
             {
                 lock (gate)
@@ -118,15 +206,16 @@ namespace Game.Server.Login
                         Now >= session.Deadline || !AllowAttempt(session) ||
                         !CryptographicOperations.FixedTimeEquals(digest, session.ResumeDigest))
                     {
-                        return (Failure(), 0);
+                        return (Failure(), null);
                     }
 
-                    long binding = NextBinding();
+                    var binding = new Binding(NextBinding(), session.Deadline);
                     revoke = session.Disconnect;
-                    bindings.Remove(session.Binding);
+                    session.Binding.Revoke(2);
+                    bindings.Remove(session.Binding.Id);
                     session.Binding = binding;
                     session.Disconnect = disconnect;
-                    bindings.Add(binding, session);
+                    bindings.Add(binding.Id, session);
                     result = (RotateToken(session), binding);
                 }
             }
@@ -137,7 +226,7 @@ namespace Game.Server.Login
 
             try
             {
-                revoke?.Invoke();
+                revoke?.Invoke(2);
                 return result;
             }
             catch
@@ -151,7 +240,7 @@ namespace Game.Server.Login
         {
             lock (gate)
             {
-                return bindings.TryGetValue(binding, out Session? session) && Now < session.Deadline;
+                return bindings.TryGetValue(binding, out Session? session) && session.Binding.CloseReason == null;
             }
         }
 
@@ -159,12 +248,12 @@ namespace Game.Server.Login
         {
             lock (gate)
             {
-                if (!bindings.TryGetValue(binding, out Session? session) || Now >= session.Deadline)
+                if (!bindings.TryGetValue(binding, out Session? session) || session.Binding.CloseReason != null)
                 {
                     return false;
                 }
 
-                Remove(session);
+                Remove(session, 7);
                 return true;
             }
         }
@@ -230,14 +319,30 @@ namespace Game.Server.Login
             CryptographicOperations.ZeroMemory(response.AccountSessionId);
         }
 
-        private void Remove(Session session)
+        private void Remove(Session session, ushort reason, bool invalidatePending = true)
         {
-            accounts.Remove(session.AccountId);
+            AccountState state = accounts[session.AccountId];
+            if (invalidatePending)
+            {
+                state.Revision = checked(state.Revision + 1);
+            }
+
+            session.Binding.Revoke(reason);
+            state.Session = null;
             sessions.Remove(Convert.ToHexString(session.Id));
-            bindings.Remove(session.Binding);
+            bindings.Remove(session.Binding.Id);
             session.Disconnect = null;
             CryptographicOperations.ZeroMemory(session.Id);
             CryptographicOperations.ZeroMemory(session.ResumeDigest);
+            ReleaseState(session.AccountId, state);
+        }
+
+        private void ReleaseState(ulong accountId, AccountState state)
+        {
+            if (state.Session == null && state.PendingLogins == 0)
+            {
+                accounts.Remove(accountId);
+            }
         }
 
         public void Dispose()
@@ -245,9 +350,12 @@ namespace Game.Server.Login
             lock (gate)
             {
                 disposed = true;
-                foreach (Session session in accounts.Values.ToArray())
+                foreach (AccountState state in accounts.Values.ToArray())
                 {
-                    Remove(session);
+                    if (state.Session != null)
+                    {
+                        Remove(state.Session, 7);
+                    }
                 }
             }
         }

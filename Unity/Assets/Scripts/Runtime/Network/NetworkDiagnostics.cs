@@ -1,4 +1,5 @@
 using System;
+using GameFrame.Network.Transport.Kcp;
 
 namespace GameFrame.Network
 {
@@ -30,8 +31,73 @@ namespace GameFrame.Network
         }
     }
 
+    public readonly struct KcpMetricsSnapshot
+    {
+        public bool Available { get; }
+        public int NativeState { get; }
+        public int FatalCode { get; }
+        public int NativeError { get; }
+        public long NativeReservedBytes { get; }
+        public ulong NativeOwnedBytes { get; }
+        public ulong NativePeakBytes { get; }
+        public ulong RawDropped { get; }
+        public long TransportUnreliableDropped { get; }
+        public ulong NativeUnreliableDropped { get; }
+        public uint Waitsnd { get; }
+        public uint SrttMilliseconds { get; }
+        public uint RtoMilliseconds { get; }
+        public uint SendWindow { get; }
+        public uint ReceiveWindow { get; }
+        public uint RemoteWindow { get; }
+        public ulong PendingReliableBytes { get; }
+        public ulong InflightReliableBytes { get; }
+        public ulong TimeoutRetransmits { get; }
+        public uint OutputQueueBytes { get; }
+        public uint OutputQueueCount { get; }
+        public uint PlaintextQueueBytes { get; }
+        public long SocketSentBytes { get; }
+        public long SocketSentPackets { get; }
+        public ulong ReceivedUdpBytes { get; }
+        public int SocketReceiveBufferBytes { get; }
+        public int SocketSendBufferBytes { get; }
+
+        internal KcpMetricsSnapshot(KcpNative.Stats stats, long reservedBytes, long socketSentBytes,
+            long socketSentPackets, int socketReceiveBuffer, int socketSendBuffer, long transportUnreliableDropped = 0)
+        {
+            Available = true;
+            NativeState = (int)stats.State;
+            FatalCode = stats.FatalCode;
+            NativeError = stats.NativeError;
+            NativeReservedBytes = reservedBytes;
+            NativeOwnedBytes = stats.OwnedBytes;
+            NativePeakBytes = stats.PeakBytes;
+            RawDropped = stats.RawDropped;
+            NativeUnreliableDropped = stats.UnreliableDropped;
+            TransportUnreliableDropped = transportUnreliableDropped;
+            Waitsnd = stats.Waitsnd;
+            SrttMilliseconds = stats.SrttMs;
+            RtoMilliseconds = stats.RtoMs;
+            SendWindow = stats.SendWindow;
+            ReceiveWindow = stats.ReceiveWindow;
+            RemoteWindow = stats.RemoteWindow;
+            PendingReliableBytes = stats.PendingReliableBytes;
+            InflightReliableBytes = stats.InflightReliableBytes;
+            TimeoutRetransmits = stats.TimeoutRetransmits;
+            OutputQueueBytes = stats.OutputBytes;
+            OutputQueueCount = stats.OutputCount;
+            PlaintextQueueBytes = stats.PlaintextBytes;
+            SocketSentBytes = socketSentBytes;
+            SocketSentPackets = socketSentPackets;
+            ReceivedUdpBytes = stats.ReceivedBytes;
+            SocketReceiveBufferBytes = socketReceiveBuffer;
+            SocketSendBufferBytes = socketSendBuffer;
+        }
+    }
+
     public readonly struct NetworkMetricsSnapshot
     {
+        public KcpMetricsSnapshot Kcp { get; }
+        public long UnreliableDropped { get; }
         public long Generation { get; }
         public long OwnedBytes { get; }
         public int ReliableSendCount { get; }
@@ -47,7 +113,7 @@ namespace GameFrame.Network
 
         internal NetworkMetricsSnapshot(long generation, long ownedBytes, int sendCount, int receiveCount,
             int pendingCount, int deadlineCount, long sentFrames, long receivedFrames, long lateResponses,
-            long timeouts, long cancellations, long queueAgeWarnings)
+            long timeouts, long cancellations, long queueAgeWarnings, KcpMetricsSnapshot kcp = default, long unreliableDropped = 0)
         {
             Generation = generation;
             OwnedBytes = ownedBytes;
@@ -61,6 +127,8 @@ namespace GameFrame.Network
             RequestTimeouts = timeouts;
             RequestCancellations = cancellations;
             SendQueueAgeWarnings = queueAgeWarnings;
+            Kcp = kcp;
+            UnreliableDropped = unreliableDropped;
         }
     }
 }

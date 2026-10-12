@@ -26,6 +26,8 @@ namespace GameFrame.Tests
             private WebSocketState state = WebSocketState.Open;
             public bool HoldBusiness;
             public bool HoldPing;
+            public Exception? DisposeFailure;
+            public int Disposals;
             public override WebSocketCloseStatus? CloseStatus => null;
             public override string? CloseStatusDescription => null;
             public override WebSocketState State => state;
@@ -84,7 +86,15 @@ namespace GameFrame.Tests
                 CloseOutputAsync(status, description, token);
 
             public override void Abort() => state = WebSocketState.Aborted;
-            public override void Dispose() => state = WebSocketState.Closed;
+            public override void Dispose()
+            {
+                Interlocked.Increment(ref Disposals);
+                state = WebSocketState.Closed;
+                if (DisposeFailure != null)
+                {
+                    throw DisposeFailure;
+                }
+            }
         }
 
         private ControlledSocket socket = null!;
@@ -119,7 +129,15 @@ namespace GameFrame.Tests
         public async Task Close()
         {
             client.BeginClose();
-            await PumpUntil(client.CloseTask);
+            if (socket.DisposeFailure == null)
+            {
+                await PumpUntil(client.CloseTask);
+            }
+            else
+            {
+                Exception? error = Assert.ThrowsAsync<InvalidOperationException>(async () => await PumpUntil(client.CloseTask));
+                Assert.That(error, Is.SameAs(socket.DisposeFailure));
+            }
             Assert.That(client.IoTask.IsCompleted, Is.True);
             Assert.That(memory.OwnedBytes, Is.Zero);
             guard.Dispose();
@@ -183,6 +201,64 @@ namespace GameFrame.Tests
             FrameCodec.WriteHeader(frame, new FrameHeader(FrameKind.Response, GameNetRoutes.Echo.Opcode, correlation, body.Length));
             body.CopyTo(frame, 32);
             socket.Enqueue(frame);
+        }
+
+        private void EnqueueClose()
+        {
+            byte[] frame = new byte[36];
+            FrameCodec.WriteHeader(frame, new FrameHeader(FrameKind.Control, (uint)ControlOpcode.Close, 0, 4));
+            ControlCodec.WriteClose(frame.AsSpan(32), 0);
+            socket.Enqueue(frame);
+        }
+
+        [Test]
+        public async Task PushFaultSupersedesAlreadyReceivedOrderlyClose()
+        {
+            var expected = new InvalidOperationException("push failure");
+            int calls = 0;
+            Exception? observed = null;
+            client.Push = (_, _) =>
+            {
+                calls++;
+                throw expected;
+            };
+            client.StateChanged = (_, error) => observed = error ?? observed;
+            for (int i = 0; i < 2; i++)
+            {
+                byte[] frame = new byte[33];
+                FrameCodec.WriteHeader(frame, new FrameHeader(FrameKind.Push, GameNetRoutes.WorldSnapshotReliable.Opcode, 0, 1));
+                socket.Enqueue(frame);
+            }
+
+            EnqueueClose();
+            await WaitFor(() => client.IoTask.IsCompleted);
+            while (client.PumpOne())
+            {
+            }
+
+            Assert.That(calls, Is.EqualTo(1));
+            Assert.That(client.State, Is.EqualTo(NetworkClientState.Faulted));
+            Assert.That(observed, Is.SameAs(expected));
+        }
+
+        [Test]
+        public async Task ResponseDecodeFaultFailsLaterReservedResponseBeforeOrderlyClose()
+        {
+            Task<EchoResponse> first = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
+            FrameHeader firstHeader = Header(await socket.NextSend(guard.Token));
+            Task<EchoResponse> second = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
+            FrameHeader secondHeader = Header(await socket.NextSend(guard.Token));
+            Respond(firstHeader.CorrelationId, malformed: true);
+            Respond(secondHeader.CorrelationId);
+            EnqueueClose();
+            await WaitFor(() => client.IoTask.IsCompleted);
+            while (client.PumpOne())
+            {
+            }
+
+            Assert.That(first.IsFaulted, Is.True);
+            Assert.That(second.IsFaulted, Is.True);
+            Assert.That(second.Exception!.InnerException, Is.SameAs(first.Exception!.InnerException));
         }
 
         [TestCase(1999, true)]
@@ -319,6 +395,38 @@ namespace GameFrame.Tests
             Assert.That(client.State, Is.EqualTo(NetworkClientState.Faulted));
             Assert.That(observed, Is.TypeOf<NetworkProtocolException>());
             Assert.That(observed?.Message, Is.EqualTo("Unmatched Pong."));
+        }
+
+        [Test]
+        public async Task MatchingPongAtDeadlineCannotBeatTheWatchdog()
+        {
+            Advance(6000);
+            Assert.That(Tick(), Is.Null);
+            byte[] ping = await socket.NextSend(guard.Token);
+            await WaitFor(() => client.Metrics().SentFrames == 1);
+            Advance(21000);
+            byte[] pong = new byte[40];
+            FrameCodec.WriteHeader(pong, new FrameHeader(FrameKind.Control, (uint)ControlOpcode.Pong, 0, 8));
+            ControlCodec.WriteNonce(pong.AsSpan(32), ControlCodec.ReadNonce(ping.AsSpan(32)));
+            socket.Enqueue(pong);
+            await WaitFor(() => client.IoTask.IsCompleted);
+            Assert.That(client.State, Is.EqualTo(NetworkClientState.Faulted));
+        }
+
+        [Test]
+        public async Task DisposeFailureStillCompletesCloseAndReleasesFramesWithoutRetry()
+        {
+            socket.HoldBusiness = true;
+            Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(2), default);
+            await socket.NextSend(guard.Token);
+            socket.DisposeFailure = new InvalidOperationException("Injected transport disposal failure.");
+            client.BeginClose();
+            Exception? error = Assert.ThrowsAsync<InvalidOperationException>(async () => await PumpUntil(client.CloseTask));
+            Assert.That(error, Is.SameAs(socket.DisposeFailure));
+            Assert.That(request.IsCompleted, Is.True);
+            Assert.That(memory.OwnedBytes, Is.Zero);
+            Assert.That(socket.Disposals, Is.EqualTo(1));
+            Assert.That(client.IoTask.IsCompletedSuccessfully, Is.True);
         }
     }
 }

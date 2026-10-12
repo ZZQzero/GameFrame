@@ -9,6 +9,9 @@ namespace GameFrame.Network.Transport
     // Exact-size allocations avoid hidden pool capacity. Every lease includes in-flight bytes.
     internal sealed class FrameMemoryBudget
     {
+        // Conservative allowance for the array/lease, queue entry and transport handoff records.
+        // This is admission reservation, not a claim about CLR/IL2CPP object layout or RSS.
+        internal const int FrameRecordReservation = 512;
         private readonly object gate = new object();
         private readonly long limit;
         private readonly FrameMemoryBudget parent;
@@ -66,14 +69,15 @@ namespace GameFrame.Network.Transport
 
         public OwnedFrame Allocate(int capacity)
         {
-            Reserve(capacity);
+            int reservation = checked(capacity + FrameRecordReservation);
+            Reserve(reservation);
             try
             {
                 return new OwnedFrame(this, new byte[capacity]);
             }
             catch
             {
-                Release(capacity);
+                Release(reservation);
                 throw;
             }
         }
@@ -87,6 +91,8 @@ namespace GameFrame.Network.Transport
         public int Capacity => Bytes.Length;
         public int Length { get; internal set; }
         public FrameHeader Header { get; internal set; }
+        internal bool AcceptedByTransport { get; set; }
+        public NetDelivery Delivery { get; internal set; } = NetDelivery.Reliable;
         public long AdmittedAt { get; internal set; }
 
         internal OwnedFrame(FrameMemoryBudget budget, byte[] bytes)
@@ -103,7 +109,7 @@ namespace GameFrame.Network.Transport
             if (released != null)
             {
                 Array.Clear(released, 0, released.Length);
-                budget.Release(released.Length);
+                budget.Release(checked(released.Length + FrameMemoryBudget.FrameRecordReservation));
             }
         }
     }

@@ -8,12 +8,14 @@
 
 建立可用于大厅、房间、即时战斗和大型在线游戏客户端的网络模块，交付内容包括 Unity Runtime、Hotfix 接入示例、协议工具、原生插件、.NET 联调服务和自动化验证。实现优先保证协议正确、资源可回收、失败可观察、内存有上限，再依据测量优化分配和吞吐。
 
+当前开发阶段按用户要求只实现框架底层：传输、原生桥接与构建安装、协议/RPC、资源预算、诊断及验证。游戏世界会话、角色权限、AOI/移动和入场/恢复等业务实现延后；本文保留业务接入契约供后续使用。WebGL WSS 也不在第一版范围内。
+
 第一版必须提供：
 
 - WSS 可靠有序消息；原版 C KCP over UDP 的可靠有序消息，以及同一加密 UDP 会话上的不可靠消息。
 - MemoryPack 强类型业务协议、强类型 RPC/推送、取消、超时、心跳、连接代际隔离。
 - 明确的字节数与条数限额、背压、帧派发预算、可观测指标、可重复网络故障测试。
-- Windows、macOS、Android、iOS 的原生插件与 IL2CPP 验证；WebGL 只提供浏览器 WSS。
+- Windows、macOS、Android、iOS 的原生插件与 IL2CPP 验证；第一版不实现 WebGL WSS。
 - 服务端鉴权、协议一致性校验、加密、会话绑定、限流与幂等的接口契约。
 
 不在通用 Runtime 内实现角色、房间、AOI、预测回滚、经济系统或业务恢复。文档会定义这些功能如何接入，但不会用一个通用 `NetworkManager` 代替游戏服务端架构。资源下载、热更包、录像和大型快照文件走 HTTPS/YooAsset，不通过实时消息通道传输。
@@ -26,10 +28,10 @@
 
 | 项目 | 当前事实 | 本设计的后续工作 |
 | --- | --- | --- |
-| GameFrame 网络 | `GameFrame.Network` 已实现桌面 WSS、RPC、缓冲预算与主线程派发；`GameMediaNetwork` 是独立的媒体网络策略工具 | 补齐 KCP/DTLS、WebGL、业务会话与完整验收 |
+| GameFrame 网络 | `GameFrame.Network` 已实现桌面 WSS、RPC、缓冲预算与主线程派发；`GameMediaNetwork` 是独立的媒体网络策略工具 | 补齐 KCP/DTLS、业务会话与完整验收；WebGL WSS 延后 |
 | MemoryPack | 已安装 1.21.4；Editor 和 StandaloneOSX Player 脚本编译通过 | 已有同源 DTO/生成检查/跨端向量；补齐 HybridCLR 实机测试 |
-| KCP | `Unity/Assets/Plugins/GameFrame/Kcp` 下已有 `ikcp.c`、`ikcp.h`、MIT LICENSE；已将 PR #467 的一行 ACK 聚合修复直接合入 `ikcp.c` | 保留文件路径和 GUID，新增固定 ABI 包装、UDP 集成及构建产物 |
-| KCP 版本 | 上游基线为 `b1a7a2101dcbb96017681a500d6b82bbe5a88766`，包含 `IKCPOPS`/`ikcp_setcc`；本地增加已记录的 #467 修复 | 锁定基线与本地源码 hash；不得直接按旧版 C# KCP 包的内部结构接入 |
+| KCP | `Unity/Assets/Plugins/GameFrame/Kcp` 下已有 `ikcp.c`、`ikcp.h`、MIT LICENSE；已直接合入 #467 ACK 修复、分配失败处理及标准 offsetof 修正 | 保留文件路径和 GUID，新增固定 ABI 包装、UDP 集成及构建产物 |
+| KCP 版本 | 上游基线为 `b1a7a2101dcbb96017681a500d6b82bbe5a88766`，包含 `IKCPOPS`/`ikcp_setcc`；本地修正与当前 c/h hash 已锁定 | 锁定基线与本地源码 hash；不得直接按旧版 C# KCP 包的内部结构接入 |
 | 生命周期 | `GameRuntime` 已可选持有网络宿主；GameEntry 当前启动本地五子棋 | 保持离线默认，业务接入 GameNetworkSession |
 | 服务端 | `DotNet/DotNet.csproj` 已采用 Web SDK/net10.0，实现显式 local-wss Kestrel、登录/恢复/注销/Echo，共用生成协议 | 接入世界服务、DTLS listener 与生产认证 provider |
 
@@ -94,7 +96,7 @@ GameFrame.Runtime / GameFrame.Network
   Diagnostics/                    指标快照、限额错误、脱敏日志
              ↓
 Transport/Kcp/Native~             ABI、构建脚本、原生测试、DTLS 依赖锁
-Assets/Plugins/GameFrame/Kcp      用户已放置的 KCP 源码与 LICENSE，已合入 #467
+Assets/Plugins/GameFrame/Kcp      KCP 源码与 LICENSE，已合入 #467 与分配安全修正
 Assets/Plugins/GameFrame/Native/Kcp/<platform>
                                 gameframe_kcp 原生安装产物
 Protocol/                        唯一手写 .proto 协议源、共享 MSBuild 引用与编写说明
@@ -103,7 +105,7 @@ DotNet/DotNet.sln                 已有服务端解决方案，与 Unity/ 同�
 DotNet/DotNet.csproj              已有 .NET 10 入口项目，承载服务端与联调模式
 ```
 
-上述目录表达职责划分；实际文件落点与完成范围见实施记录。WSS 核心、协议工具与 local-wss 已实现，KCP/DTLS bridge、GameNetworkSession 与世界功能仍待实现。不新建与已有模块重复的计时器、全局任务管理器或事件总线。`NetworkRuntime` 是必要的网络资源宿主，可由 `GameRuntime` 选配持有；业务只持有自己的 `NetworkClient`。
+上述目录表达职责划分；实际文件落点与完成范围见实施记录。WSS 核心、协议工具、local-wss、C KCP/DTLS bridge、C# worker 与 local-kcp-dtls 已实现；GameNetworkSession 与世界业务按当前范围延后，平台/容量发布验收仍待完成。不新建与已有模块重复的计时器、全局任务管理器或事件总线。`NetworkRuntime` 是必要的网络资源宿主，可由 `GameRuntime` 选配持有；业务只持有自己的 `NetworkClient`。
 
 服务端复用 `DotNet/DotNet.csproj`，初版在同一项目内按 Hosting、Network、Sessions、World、Diagnostics 组织实际需要的代码，先以单进程跑通 WSS/KCP 与世界业务。P1 接入 ASP.NET Core/Kestrel 时将项目 SDK 调整为 `Microsoft.NET.Sdk.Web`，目标框架保持 `net10.0`。本地联调通过显式 profile 启用测试账号与故障注入，生产配置不能启用这些功能；不另建 `Tools/NetworkTestServer`，也不提前拆成网关、账号、世界等多个可执行项目。第 14 节的职责与所有权边界保留，后续按实际容量需要拆分部署。
 
@@ -205,10 +207,10 @@ Faulted 立即拒绝新请求并发起内部清理；显式 `CloseAsync` 等待�
 ### 6.1 IO 与主线程
 
 - WSS：每连接最多一个接收任务和一个发送任务；不能并发调用两次 WebSocket Send 或 Receive。主机平台首选 `System.Net.WebSockets.ClientWebSocket`，其当前 Unity/IL2CPP 平台行为必须逐平台验收。
-- KCP：宿主单工作线程串行执行 UDP 非阻塞收发、DTLS 状态机、KCP input/update/send/recv 和 deadline。第一版每连接按单调时间固定 10ms 推进 update；UDP/发送/取消、DTLS 定时器和最近 deadline 可提前唤醒，但不重置既定 KCP tick。晚到 tick 只用当前时间推进一次，不补跑遗漏 tick。
+- KCP：宿主单工作线程串行执行 UDP 非阻塞收发、DTLS 状态机、KCP input/update/send/recv 和 deadline。第一版由 native 按每连接单调时间固定 10ms 推进 update；托管发送/取消信号与最近 deadline 可提前唤醒，UDP/DTLS timer 最晚在下一驱动点检查，不重置既定 KCP tick。晚到 tick 只用当前时间推进一次，不补跑遗漏 tick。
 - 主线程：执行 DTO 序列化、生成的业务验证器、接收反序列化、订阅回调和所有业务任务完成。后台不得访问 Unity 对象或调用 Hotfix 业务委托。
 - 控制 Ping/Pong、固定头校验、RPC 响应到达仲裁由 IO 层完成；合法响应依然按可靠通道顺序交给主线程完成。
-- WebGL：使用 `.jslib` 浏览器 WebSocket 桥接；浏览器回调进入同一有界状态机，由 PlayerLoop 派发。不承诺浏览器标签页被挂起期间持续计时或维持连接。
+- WebGL：第一版不实现 WSS，建连明确报平台不支持，不进入桌面 socket 路径。后续若支持，使用 `.jslib` 浏览器 WebSocket 桥接，浏览器回调进入同一有界状态机，由 PlayerLoop 派发；不承诺标签页挂起期间持续计时或维持连接。
 
 原生工作线程与主线程之间使用有界队列；不可用每个数据包一个线程池任务或一个 PlayerLoop 回调替代队列。deadline 使用一个共享最小堆或时间轮；第一版选最小堆，完成时删除节点，不为每个请求独立 `UniTask.Delay`。取消记录与 deadline 节点均计入 pending 上限。
 
@@ -427,6 +429,8 @@ MiB/KiB 均按 1024 换算。以下是客户端起始配置，服务端必须独
 
 所有阶段按**实际租用容量**记账，不只按有效长度。活跃缓冲、队列节点、in-flight、池内保留、native segment、DTLS 内存、取消与完成记录均有归属，资源转移不重复扣同一份额度，但不能在最终使用前先归还。扩容时新旧缓冲并存的峰值先预留后分配，不能检查后再绕过预算。
 
+当前实现帧数组按精确容量分配，额外每帧预留 512 bytes 覆盖 lease/队列/传输交接记录，pending 另预留 512 bytes；保守预留计入同一层级额度，不能将其称为实测 CLR/IL2CPP 对象尺寸。常驻对象与平台内部内存审计继续作为独立验收项。
+
 这些数值均是上限，缓冲按需分配；不在连接建立时预分配全部队列与 8 MiB 内存，服务端同样如此。
 
 网络模块总额指模块实际拥有且可控制的分配，不是整个进程 RSS 的硬上限。平台 TLS/WebSocket 内部缓冲、内核 socket buffer、GC 尚未回收空间和业务保留的 DTO 单独测量；socket buffer 初值请求收/发各 256 KiB，报告系统返回的真实值，不声称请求值等于实际占用。每帧 DTO 节点上限防止单包放大；业务无限保留 DTO 的内存责任属于业务。
@@ -473,13 +477,15 @@ WSS 同样有应用 admission 与有界队列；不可靠 API 在 WSS 上直接�
 
 接收每个分片前按 remaining capacity 提供有限缓冲；收到分片后先 checked 累加长度、检查协商最大值，才允许增长。32 字节头齐全即可检查声明长度与硬上限，但直到 EndOfMessage 才可派发。拒绝文本消息、声明与实际长度不符和未结束的超长消息。
 
-浏览器 WebSocket 不能设置任意 HTTP headers，因此所有平台统一先发送无 ticket 的 ClientHello，再通过 Login/ResumeLogin RPC 正文发送凭据，不依赖 Authorization header，不把 token 放 URL/query/log。浏览器入口还须验证 Origin allowlist；原生客户端不能仅凭 Origin 获得认证，所有平台仍需账号凭据。第一版不以浏览器 cookie 作为游戏登录凭据。
+第一版不实现浏览器适配；以下浏览器约束用于后续版本设计，不能计入当前交付。浏览器 WebSocket 不能设置任意 HTTP headers，因此消息认证统一先发送无 ticket 的 ClientHello，再通过 Login/ResumeLogin RPC 正文发送凭据，不依赖 Authorization header，不把 token 放 URL/query/log。浏览器入口还须验证 Origin allowlist；原生客户端不能仅凭 Origin 获得认证，所有平台仍需账号凭据。不以浏览器 cookie 作为游戏登录凭据。
 
 浏览器发送前检查 `bufferedAmount`；自有队列与浏览器待发量的合计不得超过发送策略上限，一条帧发送前预留其长度。接收回调到 JS/WASM 时消息已由浏览器分配，模块能限制后续复制并关闭超限连接，但不能宣称能控制浏览器内部首次分配；网关必须同步限制消息长度。
 
 WebSocket 库本身负责标准 ping/close 帧。应用 Ping/Pong 仍保留，用于区分代理连接尚在与游戏服务是否响应。TLS、代理、DNS、IPv6、取消、后台切换和证书错误均纳入平台测试；若某平台 `ClientWebSocket` 不满足，明确替换该平台适配器并重新验收，不增加运行时静默回退。
 
 ## 12. 原版 C KCP 与 DTLS 原生集成
+
+具体落地方案见 [C KCP / DTLS 底层实施方案](NetworkNativeDesign.md)，细化 C/C# 职责、listener 绑定、跨层额度、文件落点与构建验收。当前先实现框架底层，游戏世界业务与 WebGL WSS 延后；该方案不表示插件已经完成。
 
 ### 12.1 组合关系
 
@@ -526,41 +532,43 @@ int32_t gfnet_feed_udp(void* handle, const uint8_t* data, int32_t length);
 int32_t gfnet_tick(void* handle, uint32_t now_ms);
 int32_t gfnet_send_reliable(void* handle, const uint8_t* data, int32_t length);
 int32_t gfnet_send_unreliable(void* handle, const uint8_t* data, int32_t length);
-int32_t gfnet_poll_udp(void* handle, uint8_t* dst, int32_t capacity);
+int32_t gfnet_poll_udp(void* handle, uint8_t* dst, int32_t capacity, uint32_t* enqueued_ms);
 int32_t gfnet_peek_frame(void* handle, int32_t* channel, int32_t* length);
+int32_t gfnet_peek_frame_header(void* handle, uint8_t* dst, int32_t capacity);
 int32_t gfnet_recv_frame(void* handle, uint8_t* dst, int32_t capacity);
 int32_t gfnet_get_stats(void* handle, gfnet_stats_v1* stats);
 int32_t gfnet_get_state(void* handle, int32_t* state);
 int32_t gfnet_destroy(void* handle);
 ```
 
-config/stats 首字段为 struct_size 与 abi_version；显式规定字段偏移、对齐和所有 bool 的 u32 表示，由 C 静态断言与 C# size/offset 测试锁定。配置传入 conv、角色 client/server、限额、参数、PSK/identity 的指针长度；create 同步复制，不能持有托管临时指针。MTU、时钟定时、错误码、state 枚举必须写入同目录 ABI 文档。
+config/stats 首字段为 struct_size 与 abi_version；显式规定字段偏移、对齐和所有 bool 的 u32 表示，由 C 静态断言与 C# size/offset 测试锁定。配置传入 conv、角色 client/server、限额、参数、PSK/identity 的指针长度；create 同步复制，不能持有托管临时指针。MTU、时钟定时、错误码、state 枚举精确布局与函数状态矩阵见 [ABI.md](../Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/ABI.md)。
 
 包装 send 成功统一返回 0，错误返回固定负码。**不能因此假设原版 `ikcp_send` 成功返回 0**：当前源码返回实际接收字节数；包装层只有返回值等于输入长度才成功，负数/短写一律标记句柄 fatal。分配失败可能已经入队部分 segment，不能对同一请求再调用一次 send。
 
 poll_udp 返回 >0 的完整 datagram 长度，0 表示无数据；容量不足返回负码且不弹出。peek_frame 无帧时返回 0，有帧返回 1 并写长度/通道；recv_frame 返回 >0 的完整应用帧长度，0 无帧，失败负码。native state 至少区分 DTLSHandshaking、Established、PeerClosed、Fatal。所有函数的错误码按 ABI 分类为无数据、参数错误、容量错误、协议错误、分配错误与内部错误，不能将 Fatal 当成“本轮没数据”。
 
-feed_udp 只进入有界原始输入缓存；tick 完成 DTLS 握手/定时器、KCP input/update 与收发缓存推进，并执行第 10.3 节按实际 flush 计数的输入预算；握手超时由托管连接 deadline 控制。包装层在所有 native 入口后检查 fatal latch；KCP state=0xFFFFFFFF、output 队列溢出、异常 input 均可终止实例。操作只能由 owner 线程调用，destroy 必须在最后一次 native 调用返回之后执行。
+feed_udp 只进入有界原始输入缓存；tick 完成 DTLS 握手/定时器、KCP input、到期的 update 与收发缓存推进，并执行第 10.3 节按实际 flush 计数的输入预算。提前调用 tick 不产生额外 KCP flush；握手超时由托管连接 deadline 控制。包装层在所有 native 入口后检查 fatal latch；KCP state=0xFFFFFFFF、output 队列溢出、异常 input 均可终止实例。操作只能由 owner 线程调用，destroy 必须在最后一次 native 调用返回之后执行。
 
 ### 12.4 避免托管反向回调
 
 第一版选择原生内部回调 + 有界原生输出队列 + 托管 poll，不让 C 调用 Hotfix/C# 委托。KCP output 在 C 内同步复制，DTLS BIO 同样使用原生有界输入/输出队列；托管只同步 feed/poll 数据，因此无需业务层 reverse P/Invoke、委托保活和 GCHandle。
 
-`ikcp_allocator` 在本动态库初始化时只配置一次。分配头记录 owner quota 与大小，入口设置线程本地当前 owner，free 根据分配头回收额度；create/destroy 同样处于 owner 上下文。DTLS 通过库支持的分配钩子纳入同一统计。禁止连接运行期间替换全局 allocator，禁止分配统计依赖“当前释放线程恰好是分配线程”。服务端全局配置、cookie 状态等共享分配另属宿主额度。
+KCP output 副本先进入有界明文队列，再由 owner 的 DTLS 阶段加密；WANT_READ/WANT_WRITE 按库约定保留同一待写缓冲续调，不再次发送整个应用帧。所有中间副本计原生额度，避免在接收回调栈内递归驱动 SSL。可靠接收直接 peek/recv KCP 完整消息，不额外维护另一套原生可靠帧副本队列；不可靠明文队列有界并按第 10 节丢弃策略处理。
 
-**锁定源码存在需处理的内存失败路径**：`ikcp_ack_push` 分配失败会 `abort()`；`ikcp_input` 中新接收 segment 分配后有未检查空指针的使用；send 路径在 NULL 检查前有 assert。直接让限额 allocator 返回 NULL 会造成进程退出，包装层事后检查错误码无法补救。
+`ikcp_allocator` 在本动态库初始化时只配置一次。分配头记录 owner quota 与大小，入口设置线程本地当前 owner，free 根据分配头回收额度；create/destroy 同样处于 owner 上下文。DTLS 通过库支持的分配钩子纳入同一统计。禁止连接运行期间替换全局 allocator，禁止分配统计依赖“当前释放线程恰好是分配线程”。服务端全局配置、cookie 状态等共享分配另属宿主额度。
 
 已确认采用 [PR #467](https://github.com/skywind3000/kcp/pull/467)，直接将 ACK 聚合中 `_itimediff(ts, latest_ts) > 0` 改为 `>= 0`。同一次 flush 产生的 ACK 可具有相同时间戳，应允许更大序号成为 maxack；仍保留逐 segment 的旧时间戳检查和每次 input 最多一次 fastack 增量。此修复不改变线协议、ABI 或拥塞算法，不再保存独立补丁供构建重复应用；其余扩展 PR 不纳入第一版。
 
-上游基线仍锁定 `b1a7a2101dcbb96017681a500d6b82bbe5a88766`，当前本地 `ikcp.c` SHA-256 为 `3837dc313c120a62b37d1a5458dc0b2939bb917a1411e922f41a5a3caeddc558`；构建清单分别记录基线与实际源码 hash。原生回归入口、来源与验证边界见 [KCP 原生说明](../Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/README.md)。
+分配安全修正也已直接合入 c/h：ACK 扩容和接收 segment 检查分配失败，send 不在 NULL 检查前 assert，队列偏移使用标准 offsetof。input 分配失败返回 -4、send/setmtu 返回 -2、create 返回 NULL；发生局部状态修改的失败必须由包装层锁定 fatal 后销毁，禁止重试。这些修正不改变线协议、结构布局、重传或拥塞算法。`prepare_kcp.py` 校验当前 c/h hash 后仅向 Unity 外的新目录逐字节复制，不应用独立补丁。上游基线、本地来源/hash 和逐分配点回归证据统一见 [KCP 原生说明](../Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/README.md)；DTLS 分配与 gfnet Fatal 边界已落地；源码回归和 host harness 不等于完整平台安全验收。
 
-KCP 分配安全补丁已保存在 `Native~/patches/kcp-allocation-safety.patch`，`build/prepare_kcp.py` 校验原始 c/h、补丁和结果 SHA，仅向 Unity 外的新源码副本按精确行号/上下文应用，不允许偏移或模糊匹配。ACK 扩容失败返回错误，接收 segment 先检查空指针，发送的预期分配失败不再触发 assert；另将队列偏移宏改为标准 offsetof，避免 UBSan 检出的空指针取成员偏移。input 分配失败返回 -4，send 保留 -2，create 返回 NULL、setmtu 返回 -2；均可能已有局部状态变化，未来包装层必须锁定 fatal 后销毁，禁止重试。补丁不改变线协议、结构布局、重传或拥塞算法；原 Unity KCP 资产与 GUID 未改。临时 manifest 记录基线/实际源码、补丁和结果 hash。KCP 全部分配调用已逐点注入并执行 assert/NDEBUG/ASan/UBSan 回归；DTLS 分配钩子及 gfnet fatal 边界仍是待实现 P3 工作，不能将此补丁视为整个原生模块安全验收。
+认证后的 KCP datagram 仍须在 input 前完整检查 segment 头、长度、conv、command、PUSH 分片范围及尾随字节；`ikcp_input` 成功不替代项目边界验证。非法数据故障当前连接，不改变正常 KCP 算法。
 
 `ikcp_input` 的 `long` 在 C 内由 int32 length 转换；update/check 使用 uint32 毫秒差值的有符号环绕比较，不用直接 `now >= next` 跨回绕比较。测试必须覆盖约 49.7 天回绕和进程长时间挂起。
 
 ### 12.5 DTLS 依赖与授权
 
-KCP 自身不加密。第一版安全适配选 **mbedTLS 3.6 LTS**，以已核对包含目标套件的 3.6.4 作为接口参考；实际集成必须锁定 3.6 LTS 当时受维护的补丁版本和源码 SHA，并完成安全公告检查。补丁锁定属于开工交付，不是允许运行时浮动升级。该依赖当前尚未安装。
+KCP 自身不加密。第一版安全适配锁定 **mbedTLS 3.6.7 LTS**，版本/commit/archive SHA-256 在 `Native~/third_party/mbedtls.lock.json`，最小配置在 `Native~/config/mbedtls_config.h`。该版本发布说明及关联安全修复已核对，依赖独立静态编入插件；普通构建不下载、不浮动升级。升级时重新审查安全公告、配置、ABI 与跨平台验证。
+
 
 固定 DTLS 1.2、`TLS_PSK_WITH_AES_128_GCM_SHA256`、系统 CSPRNG、anti-replay 和服务端 cookie 校验，禁用明文/CBC/匿名套件、会话恢复与 CID。PSK 模式不额外提供前向保密；本版使用短时、单连接随机 PSK，通过已登录 WSS 的 RequestWorldGrant RPC 下发，不能在客户端安装包中写全服共享密钥。若项目要求前向保密，必须单独变更安全配置并重新联调，不能口头把 PSK 说成具备该能力。
 
@@ -570,11 +578,19 @@ KCP 自身不加密。第一版安全适配选 **mbedTLS 3.6 LTS**，以已核�
 
 第 12.3 节是已知凭据的单连接 ABI；服务端不能在收到陌生 UDP 后预先知道 PSK。P3 同时新增 server-listener ABI：create/destroy listener、register/revoke grant、feed UDP(peer,data,now)、poll UDP(peer,dst)、poll connection event、release connection。所有 peer 使用固定 addressFamily、16-byte 地址和 u16 port 结构，不把平台 sockaddr 布局暴露给 C#。
 
+listener 还提供统一 tick 和 confirm/reject Hello binding；子 handle 仅借用应用帧收发/状态接口，不重复执行单连接 tick/feed/poll UDP。Hello 校验通过后由 owner 原子确认一次性授权绑定，细节见 [底层实施方案](NetworkNativeDesign.md)。客户端 create 前在托管连接/宿主预算中预留完整 native allowance，C 分配器在 allowance 内检查实际容量；预留与使用指标分开，避免跨层配额依赖统计采样或反向回调。
+
+listener output 同时提供 connectionId/generation 和原始入队时间，托管在途 datagram 保留这些元数据；关闭或槽位复用后不得继续发送旧连接数据，总队龄不能因 poll 转移到 C# 而重置。
+
 大厅服务在返回 RequestWorldGrant 响应前，将 `{grantId, identity, PSK, conv, ticket摘要, accountSessionId, authEpoch, 目标世界, expiry}` 注册到目标网关；native listener 保存握手所需的有界凭据索引，PSK lookup 在 native 内完成，不调用 Unity/Hotfix 委托。目标网关确认注册成功后才允许向客户端返回 grant，不通过延时或自动重试掩盖未就绪状态。
 
 listener 先执行 DTLS cookie 地址校验，再保留握手状态；完成 PSK 校验后发布携带 grantId 的 Established 事件与 connection handle，该 handle 接入第 12.3 节收发 API。PSK 身份必须与后续 Hello ticket 指向同一 grant，网关还须验证其账号 epoch 与目标世界，不能拼接不同授权。
 
+Established 仅表示 DTLS 完成。Hello 绑定前只允许当前协议握手所需的可靠控制帧；Hello/Connect/grant 期限均不重置。绑定确认成功后才能发送 ServerHello 并开放已授权路由；并发握手使用同一 grant 时最多一个确认成功。
+
 listener 拥有所有 server handle；.NET 仅借用。Closed 事件后停止使用，最后由 release connection 归还 native 所有权；destroy listener 尝试清理全部未释放连接。事件与 UDP output 同样有界，Closed 使用每连接终态槽，不能因普通事件满额丢失释放信号。未验证地址的 transient 握手在 HelloVerifyRequest 后释放，不永久按攻击者五元组建表。
+
+服务端共享 UDP socket 属于 listener host；关闭/释放一个子连接不关闭共享 socket。listener 整体关闭时先停止新调用、关闭共享 socket，再清理全部子连接，所有借用 handle 随之失效。单连接错误与 listener/socket 错误分别故障对应连接和整个 listener。
 
 本地测试服务默认最多 64 个已连接、16 个握手、256 个 grant、native 全局 256 MiB；任何一项达到上限明确拒绝，不照搬为生产容量。listener/source-IP 速率与全局 handshake CPU 预算在 native 调用前控制；服务端所有权线程按 listener 分片固定，不能并发调用同一实例。
 
@@ -673,7 +689,7 @@ Logout RPC 只有在权威撤销提交、相关网关停止该 epoch 的新业�
 
 默认总 Connect timeout=10 秒（包含传输握手与 Hello），首次 Hello 等待最多 5 秒且不超过总 deadline。应用在距离上次 Ping 至少 5 秒且没有未确认 nonce 时发送新 Ping；每个 Ping 从移交传输起有 15 秒 Pong deadline，排队等待另受 15 秒控制包发送 deadline 约束。只允许一个未确认 nonce，超时即连接故障，不反复更换 nonce 推迟超时。RTT 取本地单调时间差，不比较客户端与服务端 UTC 时钟；nonce 使用单调递增 u64。
 
-收到任何包不自动当成 Pong；匹配的 Pong 先在 IO 层更新存活/RTT，再触发主线程指标更新。KCP ACK 是传输状态，不能证明游戏逻辑可响应。服务端需明确 Ping 由网关还是业务进程回应，指标区分 gateway RTT 与应用 RPC 延迟，不把网关活着当成世界服健康。
+收到任何包不自动当成 Pong；匹配的 Pong 必须在单调时钟严格早于 deadline 时才可清除等待，等于或超过期限不能抢在 watchdog 前延长存活。匹配的 Pong 先在 IO 层更新存活/RTT，再触发主线程指标更新。KCP ACK 是传输状态，不能证明游戏逻辑可响应。服务端需明确 Ping 由网关还是业务进程回应，指标区分 gateway RTT 与应用 RPC 延迟，不把网关活着当成世界服健康。
 
 登录 RPC 默认 timeout=10 秒；客户端从 ClientHello 移交传输起记录 10 秒登录总预算，实际请求 timeout 取默认值与该预算剩余时间的较小值，不能在收到 ServerHello 后重置。服务端仍从 ServerHello 移交传输起执行自己的 10 秒硬期限，客户端更早开始预算以保守覆盖网络耗时。RequestWorldGrant 默认 timeout=5 秒，新 KCP Connect 仍使用 10 秒总期限且不得超过 grant 剩余时间。
 
@@ -870,7 +886,7 @@ UI 使用 `OpenScope.Token` 取消请求，将 IDisposable 注册到 OpenScope/L
 | Android | ClientWebSocket | arm64-v8a `.so`；其他 ABI 按发布目标显式构建 | NDK、后台切换、IPv6/移动网络、IL2CPP |
 | iOS | ClientWebSocket | arm64 `.a`，P/Invoke `__Internal` | Xcode 链接/裁剪、真机、ATS、签名 |
 | iOS Simulator | 平台栈 | 独立 simulator 构建 | 不能使用设备 .a 代替 |
-| WebGL | `.jslib` 浏览器 WSS | 不支持 | JS 缓冲限制、前后台、构建条件隔离 |
+| WebGL | 第一版不支持；后续可用 `.jslib` 浏览器 WSS | 不支持 | 当前保留平台拒绝与条件隔离；JS 缓冲限制及前后台验收延后 |
 
 构建脚本计划位于 `Runtime/Network/Transport/Kcp/Native~/build/build.py` 与 `install.py`，安装到 `Assets/Plugins/GameFrame/Native/Kcp/<platform>`，遵循 [Tools/README.md](../Tools/README.md) 的产物/元数据习惯。已合入 #467 的 KCP 源码保留当前路径，通过构建参数引用，不移动资产。
 
@@ -894,6 +910,8 @@ KCP MIT、MemoryPack MIT 及 mbedTLS 对应版本许可证/第三方声明随安
 
 各阶段都应形成可评审变更；未通过前一阶段契约验证不直接进入业务接入。
 
+下表为完整项目路线；当前按用户要求只推进框架底层，P5 及 P4 中实际入场/世界业务部分延后。底层 P3/P4 先以受控授权、Hello/Echo、双通道和撤销完成验收，实施顺序见 [底层实施方案](NetworkNativeDesign.md)。
+
 | 阶段 | 具体任务与主要文件 | 退出条件 |
 | --- | --- | --- |
 | P0 协议冻结 | FrameCodec、ProtocolContracts、登录/授权路由、错误类型、配置、协议工具骨架 | 无 ticket WSS/有 ticket KCP Hello、hash 规范、长度/溢出用例通过 |
@@ -902,7 +920,7 @@ KCP MIT、MemoryPack MIT 及 mbedTLS 对应版本许可证/第三方声明随安
 | P3 原生与安全 | gfnet ABI/listener、KCP 安全补丁、DTLS、分配统计、原生 build/install/test | macOS/Windows 本地 UDP 安全闭环；错误 PSK/重放失败；逐分配点故障注入、native 配额与清理通过 |
 | P4 KCP 整合 | KcpTransport、worker、业务入口限流、两个 channel、WSS 授权与撤销链路 | WSS 取 grant→KCP 入场闭环；整窗 flush、慢 socket、丢包/乱序/拥塞/回绕、注销撤销通过 |
 | P5 会话与样例 | GameRuntime 可选配置、Hotfix 双连接状态、入场/离场/恢复/幂等示例、Docs/Network.md | 离线行为保留；WSS-only/KCP 两模式、故障隔离、恢复不重复结算 |
-| P6 平台与发布 | Android/iOS/WebGL、HybridCLR、新 DTO、压测/浸泡/部署演练 | 所有发布平台门禁通过，形成实际设备与容量报告 |
+| P6 平台与发布 | Android/iOS、HybridCLR、新 DTO、压测/浸泡/部署演练；WebGL WSS 延后 | 所有第一版发布平台门禁通过，形成实际设备与容量报告 |
 
 P1 可使用手工固定测试 DTO，不能因此绕过 P2 直接投产。P3 原生安全任务可在 P0 冻结后独立推进，但 P4 依赖 P1/P2/P3。第一版交付需包括 Native~/ABI.md、Docs/Network.md（公开使用说明）与 DotNet/README.md（服务端运行、配置和联调 profile），并同步更新 Launch/Tools 中实际变化的契约。
 
@@ -920,7 +938,7 @@ python3 Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/build.p
 python3 Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/install.py --help
 ```
 
-本地 WSS 使用显式信任的开发证书，不修改生产证书验证。联调服务提供测试 Login/ResumeLogin、RequestWorldGrant、Logout、入场/离场、echo RPC、顺序 Push、错误响应与延迟/断线注入。`local-kcp-dtls` profile 同时启动 WSS 大厅与 UDP listener，客户端必须从已登录 WSS 获取 ticket/PSK，不提供绕过认证的取票 HTTP 接口；测试账号/密钥不进入正式资源。服务端本机可走 loopback，但仍应有真实 IPv6/WAN 网络阶段。
+本地 WSS 使用显式信任的开发证书，不修改生产证书验证。联调服务提供测试 Login/ResumeLogin、RequestWorldGrant、Logout、入场/离场、echo RPC、顺序 Push、错误响应与延迟/断线注入。完整业务联调阶段再由同一profile接入WSS大厅与UDP listener，并从已登录WSS取得ticket/PSK；当前按用户确认只实现底层，`local-kcp-dtls`仅监听loopback，以显式短时测试凭据验证Hello/Echo/撤销，不提供取票HTTP接口，也不实施世界入场。生产未配置认证/授权provider拒绝启动；测试账号/密钥不进入正式资源。服务端本机可走 loopback，但仍应有真实 IPv6/WAN 网络阶段。
 
 ## 19. 测试矩阵与商业发布门禁
 
@@ -942,7 +960,7 @@ python3 Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/install
 
 纯逻辑测试使用可注入单调时钟与 fake transport，精确控制竞态顺序，不靠真实 sleep 让测试偶然通过。传输集成必须同时有真实 WSS/UDP socket 与 .NET 服务；不能仅用双方同一 mock 编码证明互通。native 用确定性网络模拟器注入丢包/重复/乱序，并配合 ASan/UBSan 与可用平台泄漏检查。
 
-当前已有 #467 原生回归入口，使用项目实际源码与临时还原的上游对照，覆盖 PR/项目参数、升序/逆序 ACK、普通/回绕时钟和 assert/NDEBUG 构建，并验证 check/update 的同刻调度边界：
+当前已有 #467 原生回归入口，使用项目实际源码与仅还原 ACK 时间戳比较的临时对照；双方保留相同分配安全修正，不将对照称为未修改上游源码。覆盖 PR/项目参数、升序/逆序 ACK、普通/回绕时钟和 assert/NDEBUG 构建，并验证 check/update 的同刻调度边界：
 
 ```sh
 python3 Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/tests/verify_fastack.py
@@ -972,7 +990,7 @@ Unity 测试按现有 `GameFrame.Tests.EditMode`/PlayMode 边界组织；若直�
 上线必须同时满足：
 
 1. Editor 编译与相关 EditMode/PlayMode 通过；所有发布平台 Player 脚本编译通过。
-2. Windows/macOS/Android/iOS 对应原生库、ABI、签名/链接检查通过；WebGL 隔离编译通过。
+2. Windows/macOS/Android/iOS 对应原生库、ABI、签名/链接检查通过；第一版不包含 WebGL WSS 功能验收，保留平台拒绝与代码条件隔离。
 3. 实际 IL2CPP 包与服务端互通，Android/iOS 真机弱网/后台测试通过；新增 Hotfix DTO 测试通过。
 4. WSS 登录白名单、账号恢复、grant/注销撤销、限流、分配攻击、幂等恢复、24h soak 与服务端容量报告通过。
 5. 协议 manifest/hash、客户端最低包版本、Hotfix 发布版本、服务端版本绑定；部署演练能拒绝旧 hash 并提示更新。
@@ -987,7 +1005,7 @@ Unity 测试按现有 `GameFrame.Tests.EditMode`/PlayMode 边界组织；若直�
 | --- | --- | --- |
 | 服务端技术栈与工程 | 已确认 C#/.NET 10，已有 `DotNet/DotNet.sln` 与入口项目 | 复用现有工程；服务端、工具与跨端测试目标固定为 `net10.0`；共享源码保持 Unity 可编译 |
 | 登录与授权入口 | 已确认 WSS 登录/恢复与 KCP grant RPC | WSS Hello 不带 ticket；KCP 必须经已登录大厅取票；认证逻辑不依赖 HTTPS 接口 |
-| 第一批发布平台 | Windows/macOS/Android/iOS；WebGL WSS 可选 | 缩小/扩大 native 与实机验收矩阵 |
+| 第一批发布平台 | Windows/macOS/Android/iOS；用户确认第一版不实现 WebGL WSS | WebGL WSS 延后，不作为第一版完成条件 |
 | UDP 安全库 | mbedTLS 3.6 LTS，开工锁补丁与 SHA | 影响安全 ABI/构建，不改变应用帧 |
 | 业务峰值与最低设备 | 待产品给定；以第 14 节示例作起算 | 决定 AOI、频率、分配和服务端容量门槛 |
 | 登录凭据与域名 | 已确认第一版本地联调使用账号＋密码，只在显式 local profile 启用；生产未配置认证时拒绝启动。生产账号校验、WSS/UDP 域名/端口和证书仍待服务端确定 | 决定 Login DTO、环境配置与生产联调；HTTPS 资源域名单独配置 |

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the integrated KCP fast-ACK fix against a temporary pre-fix baseline."""
+"""Verify the integrated KCP fast-ACK fix against an ACK-only control copy."""
 
 import argparse
 import hashlib
@@ -10,8 +10,8 @@ from pathlib import Path
 
 
 SOURCE_SHA256 = {
-    "ikcp.c": "3837dc313c120a62b37d1a5458dc0b2939bb917a1411e922f41a5a3caeddc558",
-    "ikcp.h": "d67a0e67ba5701f1e882894b4415c4d3ad3d7d9f7231dd2ca68c6037c5217933",
+    "ikcp.c": "cc3dae4e8b215f281c0900fd19137c495d80bb779d65f3d430fb821d09f14d29",
+    "ikcp.h": "51bb50e747cac6ffd8b29ffd489cf6d300eff231a0a149d6065af353ef38490c",
 }
 
 
@@ -44,8 +44,9 @@ def main():
     if originals["ikcp.c"].count(fixed) != 1:
         raise RuntimeError("expected exactly one integrated fast-ACK fix")
     baseline = originals["ikcp.c"].replace(fixed, old, 1)
-    if hashlib.sha256(baseline).hexdigest() != "8654038a70d1bbe605aa94f066554ffb30bf28580a58769970221de3ba5027f0":
-        raise RuntimeError("pre-fix baseline does not match the locked upstream source")
+    # Keep allocation safety identical on both sides; isolate only the ACK comparison.
+    if hashlib.sha256(baseline).hexdigest() != "cbf9c7faa39a271651950ae4f73f788e6127d989a1c502e5f38182940d63530c":
+        raise RuntimeError("ACK control does not match its locked source hash")
 
     with tempfile.TemporaryDirectory(prefix="gameframe-kcp-fastack-") as temporary:
         for variant in ("baseline", "patched"):
@@ -67,7 +68,7 @@ def main():
     for name, data in originals.items():
         if (source / name).read_bytes() != data:
             raise RuntimeError(f"original source changed during verification: {name}")
-    print("\nPASS: baseline reproduced; patched ACK cases 16/16; scheduler cases 4/4.")
+    print("\nPASS: ACK-only control reproduced; integrated ACK cases 16/16; scheduler cases 4/4.")
     print("Project KCP files unchanged during verification; temporary build files removed.")
 
 

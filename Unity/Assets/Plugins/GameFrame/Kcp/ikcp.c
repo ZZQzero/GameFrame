@@ -489,7 +489,6 @@ int ikcp_send(ikcpcb *kcp, const char *buffer, int len)
 				int capacity = kcp->mss - old->len;
 				int extend = (len < capacity)? len : capacity;
 				seg = ikcp_segment_new(kcp, old->len + extend);
-				assert(seg);
 				if (seg == NULL) {
 					return -2;
 				}
@@ -527,7 +526,6 @@ int ikcp_send(ikcpcb *kcp, const char *buffer, int len)
 	for (i = 0; i < count; i++) {
 		int size = len > (int)kcp->mss ? (int)kcp->mss : len;
 		seg = ikcp_segment_new(kcp, size);
-		assert(seg);
 		if (seg == NULL) {
 			return -2;
 		}
@@ -665,7 +663,7 @@ static void ikcp_parse_fastack(ikcpcb *kcp, IUINT32 sn, IUINT32 ts)
 //---------------------------------------------------------------------
 // ack append
 //---------------------------------------------------------------------
-static void ikcp_ack_push(ikcpcb *kcp, IUINT32 sn, IUINT32 ts)
+static int ikcp_ack_push(ikcpcb *kcp, IUINT32 sn, IUINT32 ts)
 {
 	IUINT32 newsize = kcp->ackcount + 1;
 	IUINT32 *ptr;
@@ -678,8 +676,7 @@ static void ikcp_ack_push(ikcpcb *kcp, IUINT32 sn, IUINT32 ts)
 		acklist = (IUINT32*)ikcp_malloc(newblock * sizeof(IUINT32) * 2);
 
 		if (acklist == NULL) {
-			assert(acklist != NULL);
-			abort();
+			return -1;
 		}
 
 		if (kcp->acklist != NULL) {
@@ -699,6 +696,7 @@ static void ikcp_ack_push(ikcpcb *kcp, IUINT32 sn, IUINT32 ts)
 	ptr[0] = sn;
 	ptr[1] = ts;
 	kcp->ackcount++;
+	return 0;
 }
 
 static void ikcp_ack_get(const ikcpcb *kcp, int p, IUINT32 *sn, IUINT32 *ts)
@@ -860,9 +858,10 @@ int ikcp_input(ikcpcb *kcp, const char *data, long size)
 					"input psh: sn=%lu ts=%lu", (unsigned long)sn, (unsigned long)ts);
 			}
 			if (_itimediff(sn, kcp->rcv_nxt + kcp->rcv_wnd) < 0) {
-				ikcp_ack_push(kcp, sn, ts);
+				if (ikcp_ack_push(kcp, sn, ts) < 0) return -4;
 				if (_itimediff(sn, kcp->rcv_nxt) >= 0) {
 					seg = ikcp_segment_new(kcp, len);
+					if (seg == NULL) return -4;
 					seg->conv = conv;
 					seg->cmd = cmd;
 					seg->frg = frg;

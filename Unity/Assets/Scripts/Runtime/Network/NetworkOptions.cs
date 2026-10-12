@@ -88,6 +88,13 @@ namespace GameFrame.Network
 
         internal void ValidateKcpNegotiation(int reliableLimit, int unreliableLimit)
         {
+            if (NativeBytes < 65536 || NativeBytes > 4 * 1024 * 1024 || MaxOwnedBytes < NativeBytes + 64 * 1024 ||
+                ReliableReceiveBytes < reliableLimit + 512 || ReliableSendBytes < reliableLimit + 512 ||
+                (unreliableLimit != 0 && UnreliableQueueBytes < unreliableLimit + 512))
+            {
+                throw new ArgumentException("KCP memory limits cannot carry the negotiated frames and native allowance.");
+            }
+
             if (BusinessBurstBytes < reliableLimit || (unreliableLimit != 0 && UnreliableBurstBytes < unreliableLimit))
             {
                 throw new ArgumentException("The token bucket burst must accommodate the negotiated frame limits.");

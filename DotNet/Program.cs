@@ -13,15 +13,22 @@ namespace GameFrame.Server
             {
                 if (args[i] != "--profile" || i + 1 >= args.Length || profile != null)
                 {
-                    throw new ArgumentException("Usage: dotnet run -- --profile local-wss");
+                    throw new ArgumentException("Usage: dotnet run -- --profile local-wss|local-kcp-dtls");
                 }
 
                 profile = args[++i];
             }
 
+            if (profile == "local-kcp-dtls")
+            {
+                await LocalKcpService.RunAsync(Required("GF_LOCAL_KCP_GRANT"),
+                    int.Parse(Environment.GetEnvironmentVariable("GF_LOCAL_KCP_PORT") ?? "7450"));
+                return;
+            }
+
             if (profile != "local-wss")
             {
-                throw new InvalidOperationException("Production authentication is not configured. Only explicit local-wss is available.");
+                throw new InvalidOperationException("Production authentication is not configured. Only explicit local profiles are available.");
             }
 
             using var settings = new ServerSettings(Required("GF_LOCAL_ACCOUNT"), Required("GF_LOCAL_PASSWORD"))

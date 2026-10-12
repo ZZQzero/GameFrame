@@ -36,7 +36,7 @@
 
 `check` 比较正式 C#，`check --artifacts` 同时比较三个辅助文件；检查不改文件，缺失、字节差异或 C# 生成目录中的额外 C# 文件均返回非零。generate 不覆写字节未变化的文件，不自动删除多余文件，防止误删 Unity 资产和 `.meta`；移除过时产物时同时处理其 metadata。生成源码、开发验证辅助文件和 NuGet 锁文件应纳入版本管理，CI 使用 `check --artifacts` 检查漏生成。修改协议后在运行 Unity/.NET 向量测试前执行 `generate --artifacts`；正式构建只需默认 generate/check，不依赖外部辅助文件。
 
-`.github/workflows/network.yml` 对网络/协议改动执行锁文件 restore、`check --artifacts`、协议负例/向量与真实 local-wss 测试；独立 job 验证 KCP 基线、精确安全补丁与逐点分配失败。CI 不重新生成后掩盖漂移，也不代替 Unity/IL2CPP/设备验收。
+`.github/workflows/network.yml` 对网络/协议改动执行锁文件 restore、`check --artifacts`、协议负例/向量与真实 local-wss 测试；独立 job 验证 KCP ACK 对照、已合入修正的源码 hash 与逐点分配失败。CI 不重新生成后掩盖漂移，也不代替 Unity/IL2CPP/设备验收。
 
 ## 消息与字段
 

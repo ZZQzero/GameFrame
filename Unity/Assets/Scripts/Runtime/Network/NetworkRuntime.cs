@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using GameFrame.Network.Transport;
+using GameFrame.Network.Transport.Kcp;
 using UnityEngine;
 
 namespace GameFrame.Network
@@ -19,6 +20,14 @@ namespace GameFrame.Network
         private Task shutdownTask;
         private Exception failure;
         private bool faultCleanupRunning;
+        private KcpWorker kcpWorker;
+        internal KcpWorker GetKcpWorker()
+        {
+            RequireMainThread();
+            RequireAvailable();
+            return kcpWorker ?? (kcpWorker = new KcpWorker(options.MaxClients));
+        }
+
         internal FrameMemoryBudget Memory { get; }
 
         internal NetworkRuntime(Transform root, NetworkRuntimeOptions options)
@@ -61,6 +70,13 @@ namespace GameFrame.Network
 
             try
             {
+                Exception workerFailure = kcpWorker?.Failure;
+                if (workerFailure != null)
+                {
+                    FailHost(workerFailure);
+                    return;
+                }
+
                 PumpClients();
             }
             catch (Exception error)
@@ -187,39 +203,88 @@ namespace GameFrame.Network
             RequireMainThread();
             if (shutdownTask == null)
             {
-                shutdownTask = ShutdownCoreAsync();
+                var completion = new TaskCompletionSource<bool>();
+                shutdownTask = completion.Task;
+                _ = ShutdownCoreAsync(completion);
             }
 
             await shutdownTask;
         }
 
-        private async Task ShutdownCoreAsync()
+        private async Task ShutdownCoreAsync(TaskCompletionSource<bool> completion)
         {
             stopping = true;
-            var tasks = new List<Task>();
-            foreach (NetworkClient client in clients.ToArray())
+            Exception failure = null;
+            try
             {
-                tasks.Add(client.DisposeAsync().AsTask());
+                var tasks = new List<Task>();
+                foreach (NetworkClient client in clients.ToArray())
+                {
+                    tasks.Add(client.DisposeAsync().AsTask());
+                }
+
+                await Task.WhenAll(tasks);
+            }
+            catch (Exception error)
+            {
+                failure = error;
             }
 
             try
             {
-                await Task.WhenAll(tasks);
+                if (kcpWorker != null)
+                {
+                    await kcpWorker.ShutdownAsync();
+                }
+            }
+            catch (Exception error)
+            {
+                if (failure == null)
+                {
+                    failure = error;
+                }
+                else
+                {
+                    UnityEngine.Debug.LogException(error);
+                }
             }
             finally
             {
                 stopped = true;
-                if (driver != null)
+                try
                 {
-                    if (Application.isPlaying)
+                    if (driver != null)
                     {
-                        UnityEngine.Object.Destroy(driver.gameObject);
+                        if (Application.isPlaying)
+                        {
+                            UnityEngine.Object.Destroy(driver.gameObject);
+                        }
+                        else
+                        {
+                            UnityEngine.Object.DestroyImmediate(driver.gameObject);
+                        }
+                    }
+                }
+                catch (Exception error)
+                {
+                    if (failure == null)
+                    {
+                        failure = error;
                     }
                     else
                     {
-                        UnityEngine.Object.DestroyImmediate(driver.gameObject);
+                        UnityEngine.Debug.LogException(error);
                     }
                 }
+            }
+
+            if (failure == null)
+            {
+                completion.TrySetResult(true);
+            }
+            else
+            {
+                completion.TrySetException(failure);
             }
         }
 

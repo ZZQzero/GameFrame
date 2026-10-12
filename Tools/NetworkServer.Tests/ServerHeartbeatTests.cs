@@ -158,5 +158,22 @@ namespace GameFrame.Tests
             Assert.That(socket.TryNextSend(out _), Is.False, "The expired Ping must never be passed to WebSocket Send.");
             Assert.That(memory.OwnedBytes, Is.Zero);
         }
+
+        [Test]
+        public async Task MatchingPongAtDeadlineCannotClearTheServersTimeout()
+        {
+            Advance(6000);
+            await server.CheckHeartbeatAsync();
+            byte[] ping = await socket.NextSend(guard.Token);
+            await socket.NextCompletedSend(guard.Token);
+            await WaitForPongDeadline();
+            Advance(21000);
+            byte[] pong = new byte[40];
+            FrameCodec.WriteHeader(pong, new FrameHeader(FrameKind.Control, (uint)ControlOpcode.Pong, 0, 8));
+            ControlCodec.WriteNonce(pong.AsSpan(32), ControlCodec.ReadNonce(ping.AsSpan(32)));
+            socket.Enqueue(pong);
+            await running.WaitAsync(guard.Token);
+            Assert.That(socket.State, Is.EqualTo(System.Net.WebSockets.WebSocketState.Aborted));
+        }
     }
 }

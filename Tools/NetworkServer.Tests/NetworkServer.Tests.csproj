@@ -13,8 +13,5 @@
     <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
     <ProjectReference Include="../../DotNet/DotNet.csproj" />
     <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/Connection/*.cs" Link="ClientCore/%(Filename)%(Extension)" />
-    <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/NetworkOptions.cs" Link="ClientCore/NetworkOptions.cs" />
-    <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/NetworkConnectOptions.cs" Link="ClientCore/NetworkConnectOptions.cs" />
-    <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/NetworkDiagnostics.cs" Link="ClientCore/NetworkDiagnostics.cs" />
   </ItemGroup>
 </Project>

@@ -85,11 +85,6 @@ namespace GameFrame.Network
 
             connect.Validate(options, catalog, NetworkClock.GetMilliseconds());
             cancellationToken.ThrowIfCancellationRequested();
-            if (connect.Transport != NetworkTransportKind.WebSocket)
-            {
-                throw new PlatformNotSupportedException("KCP/DTLS transport has not been installed.");
-            }
-
 #if UNITY_WEBGL && !UNITY_EDITOR
             throw new PlatformNotSupportedException("The browser WebSocket adapter has not been installed.");
 #else
@@ -98,7 +93,8 @@ namespace GameFrame.Network
                 throw new NetworkException("Connection generation exhausted.");
             }
 
-            context = new ConnectionContext(++generation, options, catalog, connect, runtime.Memory, cancellationToken);
+            context = new ConnectionContext(++generation, options, catalog, connect, runtime.Memory, cancellationToken,
+                kcpWorker: connect.Transport == NetworkTransportKind.Kcp ? runtime.GetKcpWorker() : null);
             ConnectionContext started = context;
             started.StateChanged = (state, error) => Notify(stateObservers, new NetworkStateChange(state, started.Generation, error));
             started.MessageFault = (opcode, error) => Notify(faultObservers, new NetworkMessageFault(opcode, started.Generation, error));
@@ -134,7 +130,7 @@ namespace GameFrame.Network
         {
             RequireConnected();
             catalog.RequireRegistered(route);
-            throw new PlatformNotSupportedException("WebSocket connections do not carry unreliable routes.");
+            return context.TrySendUnreliable(route, message);
         }
 
         public IDisposable Subscribe<T>(NetPush<T> route, Action<T> handler) where T : class
@@ -208,56 +204,101 @@ namespace GameFrame.Network
 
         public async UniTask CloseAsync()
         {
-            RequireAlive();
-            if (context == null)
+            NetworkRuntime.RequireMainThread();
+            if (disposed || context == null)
             {
                 return;
             }
 
-            if (closeTask == null)
+            Task task = closeTask;
+            if (task == null)
             {
                 ConnectionContext closing = context;
-                closing.BeginClose();
-                closeTask = FinishCloseAsync(closing);
+                var completion = new TaskCompletionSource<bool>();
+                task = completion.Task;
+                closeTask = task;
+                _ = FinishCloseAsync(closing, completion);
                 runtime.EnsureFaultCleanup();
             }
 
-            await closeTask;
+            await task;
         }
 
-        private async Task FinishCloseAsync(ConnectionContext closing)
+        private async Task FinishCloseAsync(ConnectionContext closing, TaskCompletionSource<bool> completion)
         {
-            await closing.CloseTask;
-            lastMetrics = closing.Metrics();
-            context = null;
-            closeTask = null;
+            Exception failure = null;
+            try
+            {
+                // Publish the shared task before BeginClose can synchronously reenter CloseAsync.
+                closing.BeginClose();
+                await closing.CloseTask;
+            }
+            catch (Exception error)
+            {
+                failure = error;
+            }
+            finally
+            {
+                if (closing.CloseTask.IsCompleted && ReferenceEquals(context, closing) && ReferenceEquals(closeTask, completion.Task))
+                {
+                    lastMetrics = closing.Metrics();
+                    context = null;
+                    closeTask = null;
+                }
+            }
+
+            if (failure == null)
+            {
+                completion.TrySetResult(true);
+            }
+            else
+            {
+                completion.TrySetException(failure);
+            }
         }
 
         public ValueTask DisposeAsync()
         {
             NetworkRuntime.RequireMainThread();
-            if (disposed)
-            {
-                return default;
-            }
-
             if (disposeTask == null)
             {
-                disposeTask = FinishDisposeAsync();
+                var completion = new TaskCompletionSource<bool>();
+                disposeTask = completion.Task;
+                _ = FinishDisposeAsync(completion);
             }
 
             return new ValueTask(disposeTask);
         }
 
-        private async Task FinishDisposeAsync()
+        private async Task FinishDisposeAsync(TaskCompletionSource<bool> completion)
         {
-            await CloseAsync();
-            disposed = true;
-            pushes.Clear();
-            Notify(stateObservers, new NetworkStateChange(NetworkClientState.Disposed, generation, null));
-            stateObservers.Clear();
-            faultObservers.Clear();
-            runtime.Remove(this);
+            Exception failure = null;
+            try
+            {
+                await CloseAsync();
+            }
+            catch (Exception error)
+            {
+                failure = error;
+            }
+            finally
+            {
+                disposed = true;
+                pushes.Clear();
+                Notify(stateObservers, new NetworkStateChange(NetworkClientState.Disposed, generation, null));
+                stateObservers.Clear();
+                faultObservers.Clear();
+                runtime.Remove(this);
+            }
+
+            if (failure == null)
+            {
+                completion.TrySetResult(true);
+            }
+            else
+            {
+                completion.TrySetException(failure);
+            }
         }
 
         internal bool PumpOne() => context?.PumpOne() ?? false;

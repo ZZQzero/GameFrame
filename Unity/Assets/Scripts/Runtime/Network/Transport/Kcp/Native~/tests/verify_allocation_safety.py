@@ -1,4 +1,4 @@
-"""Verify exact KCP patch application and inject failure at every allocation call."""
+"""Verify integrated KCP source integrity and failure at every allocation call."""
 
 import argparse
 import importlib.util
@@ -29,29 +29,40 @@ def main():
     prepare = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(prepare)
     source = native.parents[5] / "Plugins/GameFrame/Kcp"
-    originals = {name: (source / name).read_bytes() for name in prepare.SOURCE_SHA256}
-    patch = (native / "patches/kcp-allocation-safety.patch").read_bytes().split(b"--- a/ikcp.h\n")[0]
-    # A context change, line offset or corrupt hunk must fail instead of searching nearby lines.
-    invalid = (
-        patch.replace(b"int capacity =", b"int different =", 1),
-        patch.replace(b"@@ -489,7", b"@@ -490,7", 1),
-        patch.replace(b"@@ -489,7", b"@@ -489,8", 1),
-    )
-    for changed in invalid:
-        try:
-            prepare.apply_exact_patch(originals["ikcp.c"], changed)
-        except ValueError:
-            pass
-        else:
-            raise RuntimeError("Malformed/offset patch was accepted")
+    originals = prepare.read_sources(source)
+    metadata = {name: (source / name).read_bytes() for name in ("ikcp.c.meta", "ikcp.h.meta")}
 
     modes = [("assertions", []), ("ndebug", ["-DNDEBUG"])]
     if not args.no_sanitizers:
         modes.append(("asan-ubsan", ["-fsanitize=address,undefined", "-fno-sanitize-recover=all",
                                     "-fno-omit-frame-pointer"]))
     with tempfile.TemporaryDirectory(prefix="gameframe-kcp-allocation-") as temporary:
+        drift = Path(temporary) / "drift"
+        drift.mkdir()
+        for name, data in originals.items():
+            (drift / name).write_bytes(data)
+        for name, data in originals.items():
+            (drift / name).write_bytes(data + b"\r\n")
+            try:
+                prepare.read_sources(drift)
+            except ValueError:
+                pass
+            else:
+                raise RuntimeError(f"Source drift was accepted: {name}")
+            (drift / name).write_bytes(data)
+
+        try:
+            prepare.prepare(source)
+        except ValueError:
+            pass
+        else:
+            raise RuntimeError("Preparation allowed an output inside Unity")
+
         work = Path(temporary) / "prepared"
         prepare.prepare(work)
+        for name, data in originals.items():
+            if (work / name).read_bytes() != data:
+                raise RuntimeError(f"Preparation changed integrated source: {name}")
         try:
             prepare.prepare(work)
         except FileExistsError:
@@ -66,7 +77,7 @@ def main():
             run([args.cc, "-std=c11", "-O1", "-g", *flags, "-I", str(work),
                  str(native / "tests/allocation_safety.c"), str(obj), "-o", str(executable)], work)
             run([str(executable)], work)
-            # Safety changes must retain the real-endpoint fast-ACK and wraparound behavior.
+            # Exercise the same integrated source used by future plugin builds.
             fastack = work / "fastack_regression"
             run([args.cxx, "-std=c++98", "-O1", "-g", *flags, "-I", str(work),
                  str(native / "tests/fastack_regression.cpp"), str(obj), "-o", str(fastack)], work)
@@ -74,8 +85,11 @@ def main():
     for name, original in originals.items():
         if (source / name).read_bytes() != original:
             raise RuntimeError(f"Original {name} changed during verification")
-    print(f"\nPASS: exact patch guards; {25 * len(modes)} allocation cases; ACK/wraparound regressions.")
-    print("Original Unity assets unchanged; all temporary sources/build files removed.")
+    for name, original in metadata.items():
+        if (source / name).read_bytes() != original:
+            raise RuntimeError(f"Unity metadata changed during verification: {name}")
+    print(f"\nPASS: source hash/copy guards; {25 * len(modes)} allocation cases; ACK/wraparound regressions.")
+    print("Integrated Unity sources and metadata unchanged during verification; temporary files removed.")
 
 
 if __name__ == "__main__":

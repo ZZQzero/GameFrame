@@ -4,8 +4,9 @@ Native source and build scripts live in:
 
 - `Unity/Assets/Scripts/Runtime/Sqlite/Native~`
 - `Unity/Assets/Scripts/Runtime/MediaBackup/Native~`
+- `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~`
 
-Both installers publish to `Unity/Assets/Plugins/GameFrame/Native/<module>/<platform>`.
+Installers publish to `Unity/Assets/Plugins/GameFrame/Native/<module>/<platform>`.
 Build and install Sqlite first, then build MediaBackup against that same core build
 and install it. Keep binaries together with their `.meta`, `artifact.json` and
 `build-manifest.json` files. Restart Unity after replacing a loaded native library.
@@ -13,9 +14,19 @@ and install it. Keep binaries together with their `.meta`, `artifact.json` and
 KCP source-fix notes and native regression tests live in
 `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~`.
 Its [README](../Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/README.md)
-documents the integrated fast-ACK fix, exact allocation-safety patch preparation
-and native regression commands. The gfnet build/install scripts and UDP/DTLS
-bridge are still planned; these tests do not install a plugin.
+documents the integrated fast-ACK and allocation-safety fixes, hash-locked source copying
+and native regression commands. The C gfnet/mbedTLS library, managed UDP bridge,
+`build/build.py` and `build/install.py` are implemented; KCP installs to
+`Unity/Assets/Plugins/GameFrame/Native/Kcp`. macOS universal, Android arm64 and
+iOS device/simulator arm64 artifacts are installed; the simulator archive is
+disabled by default. Windows x64 is also built and installed locally using the
+same explicit LLVM-MinGW UCRT cross-toolchain as Sqlite (`--llvm-mingw`). The
+installer verifies PE architecture, ABI exports and system-only dependencies.
+Cross-built tests are marked built but not executed. The MSVC CI runner provides
+Windows execution, with Linux and macOS native/UDP jobs alongside it. CI
+configuration is not evidence of a run.
+The implementation plan, C/C# boundary and platform gates are documented in
+[NetworkNativeDesign.md](../Docs/NetworkNativeDesign.md).
 
 On macOS, Backup searches `@loader_path` for a built Player's adjacent SQLite
 library, and `@loader_path/../../Sqlite/macOS` for the Editor directory layout.

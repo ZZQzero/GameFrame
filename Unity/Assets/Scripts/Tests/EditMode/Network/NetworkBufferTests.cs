@@ -10,8 +10,8 @@ namespace GameFrame.Tests
         [Test]
         public void AllocationReservesParentAndChildAndClearsFullCapacityOnRelease()
         {
-            var parent = new FrameMemoryBudget(128);
-            var child = new FrameMemoryBudget(64, parent);
+            var parent = new FrameMemoryBudget(128 + FrameMemoryBudget.FrameRecordReservation);
+            var child = new FrameMemoryBudget(64 + FrameMemoryBudget.FrameRecordReservation, parent);
             OwnedFrame frame = child.Allocate(64);
             byte[] bytes = frame.Bytes;
             for (int i = 0; i < bytes.Length; i++)
@@ -20,8 +20,8 @@ namespace GameFrame.Tests
             }
 
             frame.Length = 32;
-            Assert.AreEqual(64, parent.OwnedBytes);
-            Assert.AreEqual(64, child.OwnedBytes);
+            Assert.AreEqual(64 + FrameMemoryBudget.FrameRecordReservation, parent.OwnedBytes);
+            Assert.AreEqual(64 + FrameMemoryBudget.FrameRecordReservation, child.OwnedBytes);
             Assert.Throws<NetworkBackpressureException>(() => child.Allocate(1));
             frame.Dispose();
             frame.Dispose();
@@ -34,7 +34,7 @@ namespace GameFrame.Tests
         public void FailedParentReservationDoesNotLeakChildCapacity()
         {
             var parent = new FrameMemoryBudget(32);
-            var child = new FrameMemoryBudget(64, parent);
+            var child = new FrameMemoryBudget(64 + FrameMemoryBudget.FrameRecordReservation, parent);
             Assert.Throws<NetworkBackpressureException>(() => child.Allocate(64));
             Assert.AreEqual(0, child.OwnedBytes);
             Assert.AreEqual(0, parent.OwnedBytes);
@@ -43,7 +43,7 @@ namespace GameFrame.Tests
         [Test]
         public void WriterRejectsOversizeBeforeExposingMemory()
         {
-            var budget = new FrameMemoryBudget(64);
+            var budget = new FrameMemoryBudget(64 + FrameMemoryBudget.FrameRecordReservation);
             using OwnedFrame frame = budget.Allocate(64);
             var writer = new BoundedFrameWriter(frame);
             Assert.Throws<NetworkProtocolException>(() => writer.GetMemory(33));

@@ -381,6 +381,11 @@ namespace GameFrame.Server.Network
                         throw new NetworkProtocolException("Pong does not match the outstanding nonce.");
                     }
 
+                    if (pongDeadline != 0 && getMilliseconds() >= pongDeadline)
+                    {
+                        throw new NetworkException("Application heartbeat timed out.");
+                    }
+
                     pendingNonce = 0;
                     pongDeadline = 0;
                 }
@@ -655,7 +660,8 @@ namespace GameFrame.Server.Network
                         if (item.Frame.Header.Kind == FrameKind.Control && item.Frame.Header.Opcode == (uint)ControlOpcode.Ping &&
                             pendingNonce != 0 && pendingNonce == ControlCodec.ReadNonce(item.Frame.Body))
                         {
-                            pongDeadline = getMilliseconds() + 15000;
+                            lastPing = getMilliseconds();
+                            pongDeadline = lastPing + 15000;
                         }
                     }
 

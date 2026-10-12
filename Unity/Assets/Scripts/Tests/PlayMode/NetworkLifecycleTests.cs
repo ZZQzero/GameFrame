@@ -50,6 +50,34 @@ namespace GameFrame.Tests
         });
 
         [UnityTest]
+        public IEnumerator DisposedObserverCanReenterRuntimeShutdown() => UniTask.ToCoroutine(async () =>
+        {
+            await Initialize(new NetworkRuntimeOptions());
+            NetworkRuntime runtime = GameRuntime.Network;
+            // Exercise worker shutdown even when there is no active UDP connection.
+            runtime.GetKcpWorker();
+            NetworkClient client = runtime.CreateClient(new NetworkClientOptions(), GameNetProtocol.Catalog);
+            Task reentered = null;
+            int notifications = 0;
+            using IDisposable observer = client.ObserveState(change =>
+            {
+                if (change.State == NetworkClientState.Disposed)
+                {
+                    notifications++;
+                    reentered = runtime.ShutdownAsync().AsTask();
+                }
+            });
+
+            await runtime.ShutdownAsync().Timeout(TimeSpan.FromSeconds(5));
+            Assert.IsNotNull(reentered);
+            await reentered.AsUniTask().Timeout(TimeSpan.FromSeconds(5));
+            Assert.AreEqual(1, notifications);
+            Assert.AreEqual(NetworkClientState.Disposed, client.State);
+            Assert.AreEqual(0, runtime.Memory.OwnedBytes);
+            Assert.Throws<InvalidOperationException>(() => runtime.CreateClient(new NetworkClientOptions(), GameNetProtocol.Catalog));
+        });
+
+        [UnityTest]
         public IEnumerator ClientQuotaIsReleasedOnlyByDispose() => UniTask.ToCoroutine(async () =>
         {
             await Initialize(new NetworkRuntimeOptions { MaxClients = 1 });
@@ -176,6 +204,69 @@ namespace GameFrame.Tests
             Assert.AreEqual(NetworkClientState.Disposed, connecting.State);
             Assert.AreEqual(NetworkClientState.Disposed, idle.State);
         });
+
+        [UnityTest]
+        public IEnumerator ClosingObserverReusesTheActiveCloseTask() => UniTask.ToCoroutine(async () =>
+        {
+            await VerifyClosingReentry(false);
+        });
+
+        [UnityTest]
+        public IEnumerator ClosingObserverReusesTheActiveDisposeTask() => UniTask.ToCoroutine(async () =>
+        {
+            await VerifyClosingReentry(true);
+        });
+
+        private static async UniTask VerifyClosingReentry(bool dispose)
+        {
+            await Initialize(new NetworkRuntimeOptions());
+            var endpoint = new Uri("wss://localhost:7443/network");
+            NetworkClient client = GameRuntime.Network.CreateClient(new NetworkClientOptions
+            {
+                TrustedWebSocketEndpoints = new[] { endpoint }
+            }, GameNetProtocol.Catalog);
+            Task first = null;
+            Task second = null;
+            int closingNotifications = 0;
+            int disposedNotifications = 0;
+            using IDisposable observer = client.ObserveState(change =>
+            {
+                if (change.State == NetworkClientState.Connecting)
+                {
+                    first = dispose ? client.DisposeAsync().AsTask() : client.CloseAsync().AsTask();
+                }
+                else if (change.State == NetworkClientState.Closing)
+                {
+                    closingNotifications++;
+                    second = dispose ? client.DisposeAsync().AsTask() : client.CloseAsync().AsTask();
+                }
+                else if (change.State == NetworkClientState.Disposed)
+                {
+                    disposedNotifications++;
+                }
+            });
+
+            Exception failure = null;
+            try
+            {
+                await client.ConnectAsync(NetworkConnectOptions.WebSocket(endpoint)).Timeout(TimeSpan.FromSeconds(5));
+            }
+            catch (Exception error)
+            {
+                failure = error;
+            }
+
+            Assert.IsNotNull(failure);
+            Assert.IsNotNull(first);
+            Assert.IsNotNull(second);
+            await first.AsUniTask().Timeout(TimeSpan.FromSeconds(5));
+            await second.AsUniTask().Timeout(TimeSpan.FromSeconds(5));
+            Assert.AreEqual(1, closingNotifications);
+            Assert.AreEqual(dispose ? 1 : 0, disposedNotifications);
+            Assert.AreEqual(dispose ? NetworkClientState.Disposed : NetworkClientState.Idle, client.State);
+            Assert.AreEqual(0, GameRuntime.Network.Memory.OwnedBytes);
+            await client.DisposeAsync();
+        }
 
         [UnityTest]
         public IEnumerator DisabledRootStopsAdmissionAndStillAllowsShutdown() => UniTask.ToCoroutine(async () =>

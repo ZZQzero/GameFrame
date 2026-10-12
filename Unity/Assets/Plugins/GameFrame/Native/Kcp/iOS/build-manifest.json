@@ -1,0 +1,107 @@
+{
+  "abi": 1,
+  "platform": "ios",
+  "arch": "arm64",
+  "configuration": "Release",
+  "sanitized": false,
+  "sources": {
+    "CMakeLists.txt": "9184525c0f96108591190576a292648f1826474d2db0ca81811202f1bd20b2e1",
+    "build/build.py": "51a5e81aa384fe0115be43a9292f7a0a52c2c19da98224ecf9aeff83ca94fb66",
+    "build/install.py": "57bc2feea4c81899e0b29f588e3402a0c7b53fb1cf7aac66c95c9a4e52ce38dd",
+    "build/prepare_kcp.py": "8866386a19673dc36aab923cb39fe72c008dd4d2c746fbe18885173ded0e4fd7",
+    "build/prepare_mbedtls.py": "b66966ec47da831d94755aa977c0fbb191ff254bd86bbfd9debf9bfaa49fd233",
+    "build/verify_windows.py": "6c07e8757730ce347a5280f01e0c2b06c7c3c65a5dd2423f4af153f1c18b127c",
+    "build/windows-llvm-mingw.cmake": "368cabacf46539417f0c08b668d76c2017929081822669c0d9f9241a8e24411b",
+    "config/mbedtls_config.h": "6a9ca22f27d7be9380ebe16e2af03edf3ccc7dd2635a82df72921966e852e20b",
+    "include/gfnet.h": "48499e4d81c895f92195711ef330f39086e69f784176c399370d28c12cdfc25c",
+    "src/gfnet_connection.c": "aa3f367e82a5563166468e9e058fb5a331aeb619503629958678124341230ff4",
+    "src/gfnet_internal.h": "0a0403bca649c4f9bdadad59bc3214a6a5c767eb606b1041e59abe2bdf961968",
+    "src/gfnet_listener.c": "bda8d5022dc2ac7506e6bbe962003234185b49ffc2b6dadefff3e1249b1c309d",
+    "src/gfnet_memory.c": "b6b2ec63d9cadba681731f3dc4be4be604e70d74117e9a58d1eac394bc426c11",
+    "tests/allocation_safety.c": "312cac0aea85064c0380c94a0a1a39461624bad6d48b45bf56a090fbc617bbcc",
+    "tests/gfnet_regression.c": "07af52087b83cdcec043913088bbc77eea2b4be64624d6b70b6d806d7207400a",
+    "tests/verify_allocation_safety.py": "86fe67e67a741bdcd34d72eeb71f40a5007c5f621bd9702c8cca4e5539344f37",
+    "tests/verify_fastack.py": "bdfaa9553ee9ab09e667b22993db1541bba1c6a042d7bf97a84444e7d1fc585e",
+    "third_party/mbedtls.lock.json": "1291d8e63664be06e922fa525215d4fc5f8f04a33f591e4dbe2adf92e6b02596"
+  },
+  "mbedtls": {
+    "version": "3.6.7",
+    "tag": "v3.6.7",
+    "commit": "068ff080b369adfac81509f9b57b2afabaf82dc5",
+    "archive_url": "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7.tar.bz2",
+    "archive_sha256": "a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6",
+    "checksum_url": "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7-sha256sum.txt",
+    "release_url": "https://github.com/Mbed-TLS/mbedtls/releases/tag/mbedtls-3.6.7",
+    "security_review_date": "2026-10-11",
+    "security_review": "Reviewed 3.6.7 release advisories, including corrupted DTLS record/renegotiation, extended master secret and TLS 1.2 PSK fixes. Use DTLS 1.2 pure PSK AES-128-GCM only; no renegotiation, resumption, CID, RSA, ECC or TLS 1.3.",
+    "lts_support_until_at_least": "2027-03",
+    "license": "Apache-2.0 OR GPL-2.0-or-later",
+    "source_tree_sha256": "2f709c0aca3e00908421cf203e4c476c71493ad53893f246d6b891c9657f9aaa"
+  },
+  "kcp": {
+    "upstream_commit": "b1a7a2101dcbb96017681a500d6b82bbe5a88766",
+    "integrated_pr": 467,
+    "local_fixes": [
+      "allocation-failure-handling",
+      "standard-offsetof"
+    ],
+    "source_sha256": {
+      "ikcp.c": "cc3dae4e8b215f281c0900fd19137c495d80bb779d65f3d430fb821d09f14d29",
+      "ikcp.h": "51bb50e747cac6ffd8b29ffd489cf6d300eff231a0a149d6065af353ef38490c"
+    }
+  },
+  "commands": [
+    [
+      "/Users/zzq/Library/Android/sdk/cmake/3.22.1/bin/cmake",
+      "-S",
+      "/Users/zzq/GameFrame/Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~",
+      "-B",
+      "/Users/zzq/GameFrame/Tools/Artifacts/NetworkNative/ios-arm64-release",
+      "-DGFNET_MBEDTLS_SOURCE=/Users/zzq/GameFrame/Tools/Artifacts/NetworkNative/mbedtls-3.6.7-verified",
+      "-DGFNET_KCP_SOURCE=/Users/zzq/GameFrame/Tools/Artifacts/NetworkNative/ios-arm64-release/kcp-source",
+      "-DCMAKE_BUILD_TYPE=Release",
+      "-DGFNET_TESTS=OFF",
+      "-DGFNET_SANITIZERS=OFF",
+      "-DCMAKE_SYSTEM_NAME=iOS",
+      "-DCMAKE_OSX_SYSROOT=iphoneos",
+      "-DCMAKE_OSX_ARCHITECTURES=arm64",
+      "-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0"
+    ],
+    [
+      "/Users/zzq/Library/Android/sdk/cmake/3.22.1/bin/cmake",
+      "--build",
+      "/Users/zzq/GameFrame/Tools/Artifacts/NetworkNative/ios-arm64-release",
+      "--config",
+      "Release",
+      "--parallel",
+      "8"
+    ]
+  ],
+  "cmake_version": "cmake version 3.22.1-g37088a8",
+  "toolchain": {
+    "CMAKE_C_COMPILER:FILEPATH": "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/cc",
+    "CMAKE_C_FLAGS:STRING": "",
+    "CMAKE_C_FLAGS_DEBUG:STRING": "-g",
+    "CMAKE_C_FLAGS_MINSIZEREL:STRING": "-Os -DNDEBUG",
+    "CMAKE_C_FLAGS_RELEASE:STRING": "-O3 -DNDEBUG",
+    "CMAKE_C_FLAGS_RELWITHDEBINFO:STRING": "-O2 -g -DNDEBUG",
+    "CMAKE_OSX_DEPLOYMENT_TARGET:UNINITIALIZED": "13.0",
+    "CMAKE_OSX_SYSROOT:STRING": "iphoneos",
+    "CMAKE_C_FLAGS-ADVANCED:INTERNAL": "1",
+    "CMAKE_C_FLAGS_DEBUG-ADVANCED:INTERNAL": "1",
+    "CMAKE_C_FLAGS_MINSIZEREL-ADVANCED:INTERNAL": "1",
+    "CMAKE_C_FLAGS_RELEASE-ADVANCED:INTERNAL": "1",
+    "CMAKE_C_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL": "1",
+    "CMAKE_C_COMPILER_ID": "AppleClang",
+    "CMAKE_C_COMPILER_VERSION": "21.0.0.21000334",
+    "sdk_version": "27.0"
+  },
+  "native_tests": {
+    "built": false,
+    "executed": false
+  },
+  "artifacts": {
+    "libgameframe_kcp-combined.a": "29b982c385bdfc13640aed82a340c1ccaacb0a9fe12ef1ea3220e3feb8e0dabf"
+  },
+  "build_id": "2e5cc3a021ab3419289f4265239edbd35ed3924f00d87426c95a85edc4c14b4d"
+}

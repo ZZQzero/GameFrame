@@ -1,13 +1,19 @@
 #include "gfnet_internal.h"
-#include "mbedtls/sha256.h"
 #include <stdio.h>
-static int checks;
-#define REQUIRE(expression) do { checks++; if (!(expression)) { fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#expression); exit(1); } } while(0)
+#if defined(_WIN32)
+static LONG checks;
+#define COUNT_CHECK() InterlockedIncrement(&checks)
+#else
+#include <stdatomic.h>
+static _Atomic int checks;
+#define COUNT_CHECK() atomic_fetch_add(&checks,1)
+#endif
+#define REQUIRE(expression) do { COUNT_CHECK(); if (!(expression)) { fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#expression); exit(1); } } while(0)
 static uint8_t identity[16]={1,2,3,4};
 static uint8_t key[32]={9,8,7,6};
-static gfnet_config_v1 config(uint32_t role, uint32_t conv)
+static gfnet_config_v2 config(uint32_t role, uint32_t conv)
 {
-    gfnet_config_v1 value={sizeof(value),1,role,conv,4*1024*1024,32768,1150,0,identity,16,0,key,32,0};
+    gfnet_config_v2 value={sizeof(value),GFNET_ABI_VERSION,role,conv,4*1024*1024,32768,1150,0,identity,16,0,key,32,0};
     return value;
 }
 static void transfer(void* from, void* to)
@@ -28,7 +34,7 @@ static void step_pair(void* client, void* server, uint32_t now)
 }
 static void connect_pair(void** client, void** server, uint32_t start)
 {
-    gfnet_config_v1 cc=config(GFNET_CLIENT,42), sc=config(GFNET_SERVER,42);
+    gfnet_config_v2 cc=config(GFNET_CLIENT,42), sc=config(GFNET_SERVER,42);
     REQUIRE(gfnet_create(&cc,client)==0); REQUIRE(gfnet_create(&sc,server)==0);
     REQUIRE(gfnet_tick(*server,start)==0);
     for (uint32_t elapsed=0; elapsed<10000; elapsed+=10)
@@ -38,6 +44,141 @@ static void connect_pair(void** client, void** server, uint32_t start)
         if (cs==GFNET_ESTABLISHED && ss==GFNET_ESTABLISHED) { return; }
     }
     REQUIRE(0 && "DTLS pair handshake timeout");
+}
+static void test_psa_rng_and_hash(void)
+{
+    REQUIRE(gfnet_initialize()==0);
+    REQUIRE(gfnet_memory_live()==0);
+    /* Public PSA entry points copy their buffers through the quota allocator. */
+    gfnet_quota* quota=gfnet_quota_create(65536,NULL); REQUIRE(quota!=NULL);
+    gfnet_current_quota=quota;
+    uint8_t output[600]; memset(output,0xA5,sizeof(output));
+    REQUIRE(psa_generate_random(output,sizeof(output))==PSA_SUCCESS);
+    REQUIRE(quota->bytes==sizeof(*quota));
+    gfnet_test_rng_failure=1;
+    REQUIRE(psa_generate_random(output,sizeof(output))==PSA_ERROR_INSUFFICIENT_ENTROPY);
+    for (size_t i=0; i<sizeof(output); i++) { REQUIRE(output[i]==0); }
+    gfnet_config_v2 sc=config(GFNET_SERVER,42); void* server=(void*)(uintptr_t)1;
+    REQUIRE(gfnet_create(&sc,&server)==GFNET_INTERNAL_ERROR);
+    REQUIRE(server==NULL); REQUIRE(quota->bytes==sizeof(*quota));
+    gfnet_test_rng_failure=0;
+    REQUIRE(psa_generate_random(output,sizeof(output))==PSA_SUCCESS);
+    static const uint8_t expected[32]={0xba,0x78,0x16,0xbf,0x8f,0x01,0xcf,0xea,
+        0x41,0x41,0x40,0xde,0x5d,0xae,0x22,0x23,0xb0,0x03,0x61,0xa3,0x96,0x17,0x7a,0x9c,
+        0xb4,0x10,0xff,0x61,0xf2,0x00,0x15,0xad};
+    size_t length=0;
+    REQUIRE(psa_hash_compute(PSA_ALG_SHA_256,(const uint8_t*)"abc",3,output,sizeof(output),&length)==PSA_SUCCESS);
+    REQUIRE(length==sizeof(expected) && memcmp(output,expected,sizeof(expected))==0);
+    mbedtls_platform_zeroize(output,sizeof(output));
+    gfnet_current_quota=NULL; gfnet_quota_destroy(quota);
+    REQUIRE(gfnet_memory_live()==0);
+}
+static void ticket_digest(const uint8_t* ticket, size_t size, uint8_t* digest)
+{
+    gfnet_quota* quota=gfnet_quota_create(65536,NULL); REQUIRE(quota!=NULL);
+    gfnet_quota* previous=gfnet_current_quota; gfnet_current_quota=quota;
+    size_t length=0;
+    REQUIRE(psa_hash_compute(PSA_ALG_SHA_256,ticket,size,digest,32,&length)==PSA_SUCCESS);
+    REQUIRE(length==32);
+    gfnet_current_quota=previous; gfnet_quota_destroy(quota);
+}
+static void test_psa_slot_exhaustion(void)
+{
+    gfnet_quota* quota=gfnet_quota_create(4*1024*1024,NULL); REQUIRE(quota!=NULL);
+    gfnet_current_quota=quota;
+    psa_key_id_t slots[MBEDTLS_PSA_KEY_SLOT_COUNT]={0};
+    psa_key_attributes_t attributes=PSA_KEY_ATTRIBUTES_INIT;
+    psa_set_key_type(&attributes,PSA_KEY_TYPE_HMAC);
+    psa_set_key_usage_flags(&attributes,PSA_KEY_USAGE_SIGN_MESSAGE);
+    psa_set_key_algorithm(&attributes,PSA_ALG_HMAC(PSA_ALG_SHA_256));
+    for (size_t i=0; i<MBEDTLS_PSA_KEY_SLOT_COUNT; i++)
+    { REQUIRE(psa_import_key(&attributes,key,sizeof(key),&slots[i])==PSA_SUCCESS); }
+    psa_key_id_t extra=0;
+    REQUIRE(psa_import_key(&attributes,key,sizeof(key),&extra)==PSA_ERROR_INSUFFICIENT_MEMORY);
+    REQUIRE(extra==0);
+    for (size_t i=0; i<MBEDTLS_PSA_KEY_SLOT_COUNT; i++) { REQUIRE(psa_destroy_key(slots[i])==PSA_SUCCESS); }
+    REQUIRE(psa_import_key(&attributes,key,sizeof(key),&extra)==PSA_SUCCESS);
+    REQUIRE(psa_destroy_key(extra)==PSA_SUCCESS);
+    psa_reset_key_attributes(&attributes);
+    REQUIRE(quota->bytes==sizeof(*quota));
+    gfnet_current_quota=NULL; gfnet_quota_destroy(quota);
+    REQUIRE(gfnet_memory_live()==0);
+}
+static mbedtls_threading_mutex_t parallel_gate;
+static mbedtls_threading_condition_variable_t parallel_ready;
+static int parallel_owners;
+#if defined(_WIN32)
+static DWORD WINAPI parallel_owner(void* context)
+#else
+static void* parallel_owner(void* context)
+#endif
+{
+    (void)context;
+    void* clients[16]={0}; void* servers[16]={0};
+    for (int i=0; i<16; i++) { connect_pair(&clients[i],&servers[i],1000); }
+    REQUIRE(mbedtls_mutex_lock(&parallel_gate)==0);
+    parallel_owners++;
+    REQUIRE(mbedtls_condition_variable_broadcast(&parallel_ready)==0);
+    while (parallel_owners<4) { REQUIRE(mbedtls_condition_variable_wait(&parallel_ready,&parallel_gate)==0); }
+    REQUIRE(mbedtls_mutex_unlock(&parallel_gate)==0);
+    for (int i=0; i<16; i++)
+    {
+        uint8_t frame[32]={0}, reply[32]; frame[0]=(uint8_t)i;
+        REQUIRE(gfnet_send_unreliable(clients[i],frame,sizeof(frame))==0);
+        step_pair(clients[i],servers[i],((gfnet_connection*)clients[i])->now+10);
+        int32_t channel,length; uint32_t born;
+        REQUIRE(gfnet_peek_frame(servers[i],&channel,&length,&born)==1);
+        REQUIRE(channel==2 && length==sizeof(frame));
+        REQUIRE(gfnet_recv_frame(servers[i],reply,sizeof(reply))==sizeof(reply));
+        REQUIRE(memcmp(frame,reply,sizeof(frame))==0);
+        REQUIRE(gfnet_destroy(clients[i])==0); REQUIRE(gfnet_destroy(servers[i])==0);
+    }
+    return 0;
+}
+static void test_parallel_psa_owners(void)
+{
+    mbedtls_mutex_init(&parallel_gate);
+    REQUIRE(mbedtls_condition_variable_init(&parallel_ready)==0);
+#if defined(_WIN32)
+    HANDLE threads[4];
+    for (int i=0; i<4; i++) { threads[i]=CreateThread(NULL,0,parallel_owner,NULL,0,NULL); REQUIRE(threads[i]!=NULL); }
+    REQUIRE(WaitForMultipleObjects(4,threads,TRUE,INFINITE)==WAIT_OBJECT_0);
+    for (int i=0; i<4; i++) { REQUIRE(CloseHandle(threads[i])); }
+#else
+    pthread_t threads[4];
+    for (int i=0; i<4; i++) { REQUIRE(pthread_create(&threads[i],NULL,parallel_owner,NULL)==0); }
+    for (int i=0; i<4; i++) { REQUIRE(pthread_join(threads[i],NULL)==0); }
+#endif
+    mbedtls_condition_variable_free(&parallel_ready); mbedtls_mutex_free(&parallel_gate);
+    REQUIRE(gfnet_memory_live()==0);
+}
+static void test_dtls_failure_categories(void)
+{
+    const int causes[] = {MBEDTLS_ERR_SSL_INVALID_RECORD, MBEDTLS_ERR_SSL_INTERNAL_ERROR,
+        MBEDTLS_ERR_SSL_ALLOC_FAILED, MBEDTLS_ERR_SSL_BAD_INPUT_DATA,
+        MBEDTLS_ERR_SSL_HANDSHAKE_FAILURE, PSA_ERROR_INSUFFICIENT_MEMORY,
+        PSA_ERROR_INVALID_SIGNATURE, PSA_ERROR_INSUFFICIENT_ENTROPY};
+    const int categories[] = {GFNET_PROTOCOL_ERROR, GFNET_INTERNAL_ERROR,
+        GFNET_ALLOCATION_FAILED, GFNET_INTERNAL_ERROR, GFNET_PROTOCOL_ERROR,
+        GFNET_ALLOCATION_FAILED, GFNET_PROTOCOL_ERROR, GFNET_INTERNAL_ERROR};
+    for (size_t i=0; i<sizeof(causes)/sizeof(causes[0]); i++)
+    {
+        void* handle=NULL; gfnet_config_v2 value=config(GFNET_CLIENT,42);
+        REQUIRE(gfnet_create(&value,&handle)==0);
+        gfnet_connection* connection=handle;
+        REQUIRE(gfnet_dtls_fault(connection,causes[i])==categories[i]);
+        REQUIRE(connection->native_error==causes[i]);
+        REQUIRE(gfnet_dtls_fault(connection,MBEDTLS_ERR_SSL_INTERNAL_ERROR)==categories[i]);
+        REQUIRE(connection->native_error==causes[i]);
+        REQUIRE(gfnet_destroy(handle)==0);
+    }
+    void* handle=NULL; gfnet_config_v2 value=config(GFNET_CLIENT,42);
+    REQUIRE(gfnet_create(&value,&handle)==0);
+    gfnet_connection* connection=handle;
+    connection->quota->allocation_failed=1;
+    REQUIRE(gfnet_dtls_fault(connection,MBEDTLS_ERR_SSL_INTERNAL_ERROR)==GFNET_ALLOCATION_FAILED);
+    REQUIRE(gfnet_destroy(handle)==0);
+    REQUIRE(gfnet_memory_live()==0);
 }
 static void test_pair(uint32_t start)
 {
@@ -53,8 +194,8 @@ static void test_pair(uint32_t start)
         /* Advance from the actual handshake clock, never leave queued output idle. */
         uint32_t now=((gfnet_connection*)client)->now+10;
         step_pair(client,server,now);
-        int32_t channel,length;
-        while (gfnet_peek_frame(server,&channel,&length)==1)
+        int32_t channel,length; uint32_t frame_born;
+        while (gfnet_peek_frame(server,&channel,&length,&frame_born)==1)
         {
             REQUIRE(gfnet_peek_frame_header(server,received,31)==GFNET_BUFFER_TOO_SMALL);
             REQUIRE(gfnet_peek_frame_header(server,received,32)==32);
@@ -67,7 +208,7 @@ static void test_pair(uint32_t start)
         }
     }
     REQUIRE(reliable==1 && unreliable==1);
-    gfnet_stats_v1 stats={0}; stats.struct_size=sizeof(stats); stats.abi_version=1;
+    gfnet_stats_v2 stats={0}; stats.struct_size=sizeof(stats); stats.abi_version=GFNET_ABI_VERSION;
     REQUIRE(gfnet_get_stats(client,&stats)==0);
     REQUIRE(stats.owned_bytes<=4*1024*1024 && stats.peak_bytes>=stats.owned_bytes);
     REQUIRE(stats.udp_sent_bytes>0 && stats.udp_received_bytes>0);
@@ -84,16 +225,16 @@ static void test_authenticated_bad_channel_and_replay(void)
     REQUIRE(gfnet_feed_udp(server,datagram,length)==0);
     datagram[length-1]^=1; REQUIRE(gfnet_feed_udp(server,datagram,length)==0);
     REQUIRE(gfnet_tick(server,((gfnet_connection*)client)->now)==0);
-    int32_t channel, size; REQUIRE(gfnet_peek_frame(server,&channel,&size)==1);
+    int32_t channel, size; REQUIRE(gfnet_peek_frame(server,&channel,&size,&born)==1);
     REQUIRE(channel==2 && size==32); REQUIRE(gfnet_recv_frame(server,received,sizeof(received))==32);
-    REQUIRE(gfnet_peek_frame(server,&channel,&size)==0);
+    REQUIRE(gfnet_peek_frame(server,&channel,&size,&born)==0);
     REQUIRE(gfnet_send_unreliable(client,frame,sizeof(frame))==0);
     REQUIRE(gfnet_tick(client,((gfnet_connection*)client)->now+10)==0);
     length=gfnet_poll_udp(client,datagram,sizeof(datagram),&born); REQUIRE(length>0);
     datagram[length-1]^=1;
     REQUIRE(gfnet_feed_udp(server,datagram,length)==0);
     REQUIRE(gfnet_tick(server,((gfnet_connection*)client)->now)==0);
-    REQUIRE(gfnet_peek_frame(server,&channel,&size)==0);
+    REQUIRE(gfnet_peek_frame(server,&channel,&size,&born)==0);
     datagram[length-1]^=1;
     REQUIRE(gfnet_feed_udp(server,datagram,length)==0);
     REQUIRE(gfnet_tick(server,((gfnet_connection*)client)->now+1)==0);
@@ -107,9 +248,9 @@ static void test_authenticated_bad_channel_and_replay(void)
 }
 static void test_create_allocation_faults(void)
 {
-    gfnet_config_v1 cc=config(GFNET_CLIENT,42); void* handle=NULL;
+    gfnet_config_v2 cc=config(GFNET_CLIENT,42); void* handle=NULL;
     REQUIRE(gfnet_create(&cc,&handle)==0);
-    gfnet_stats_v1 stats={0}; stats.struct_size=sizeof(stats); stats.abi_version=1;
+    gfnet_stats_v2 stats={0}; stats.struct_size=sizeof(stats); stats.abi_version=GFNET_ABI_VERSION;
     REQUIRE(gfnet_get_stats(handle,&stats)==0);
     uint64_t allocations=stats.allocations;
     REQUIRE(gfnet_destroy(handle)==0);
@@ -132,7 +273,7 @@ static void test_send_allocation_fault(void)
     REQUIRE(gfnet_tick(client,c->now+10)==GFNET_ALLOCATION_FAILED);
     REQUIRE(gfnet_destroy(client)==0); REQUIRE(gfnet_destroy(server)==0); REQUIRE(gfnet_memory_live()==0);
 }
-static void step_listener(void* listener, void** clients, gfnet_peer_v1* peers, int count, uint32_t now)
+static void step_listener(void* listener, void** clients, gfnet_peer_v2* peers, int count, uint32_t now)
 {
     uint8_t datagram[1200]; uint32_t born;
     for (int i=0; i<count; i++)
@@ -146,7 +287,7 @@ static void step_listener(void* listener, void** clients, gfnet_peer_v1* peers, 
         }
     }
     REQUIRE(gfnet_listener_tick(listener,now)==0);
-    gfnet_udp_metadata_v1 metadata={0}; metadata.struct_size=sizeof(metadata); metadata.abi_version=1;
+    gfnet_udp_metadata_v2 metadata={0}; metadata.struct_size=sizeof(metadata); metadata.abi_version=GFNET_ABI_VERSION;
     for (int j=0; j<512; j++)
     {
         int length=gfnet_listener_poll_udp(listener,datagram,sizeof(datagram),&metadata);
@@ -158,24 +299,25 @@ static void step_listener(void* listener, void** clients, gfnet_peer_v1* peers, 
 }
 static void test_listener(void)
 {
-    gfnet_listener_config_v1 lc={sizeof(lc),1,256*1024*1024,4*1024*1024,4,4,8,0};
+    gfnet_listener_config_v2 lc={sizeof(lc),GFNET_ABI_VERSION,256*1024*1024,4*1024*1024,4,4,8,0};
     void* listener=NULL; REQUIRE(gfnet_listener_create(&lc,&listener)==0);
-    gfnet_grant_v1 grant={0}; grant.struct_size=sizeof(grant); grant.abi_version=1; grant.conv=42;
+    gfnet_grant_v2 grant={0}; grant.struct_size=sizeof(grant); grant.abi_version=GFNET_ABI_VERSION; grant.conv=42;
     grant.grant_id=7; grant.remaining_ttl_ms=30000;
     memcpy(grant.identity,identity,16); memcpy(grant.psk,key,32);
-    uint8_t ticket[16]={4,3,2,1}; REQUIRE(mbedtls_sha256(ticket,sizeof(ticket),grant.ticket_digest,0)==0);
+    uint8_t ticket[16]={4,3,2,1};
+    ticket_digest(ticket,sizeof(ticket),grant.ticket_digest);
     REQUIRE(gfnet_listener_register_grant(listener,&grant,1000)==0);
-    void* clients[2]={0}; gfnet_peer_v1 peers[2]={0}; gfnet_event_v1 events[2]={0};
+    void* clients[2]={0}; gfnet_peer_v2 peers[2]={0}; gfnet_event_v2 events[2]={0};
     for (int i=0; i<2; i++)
     {
-        gfnet_config_v1 cc=config(GFNET_CLIENT,42); REQUIRE(gfnet_create(&cc,&clients[i])==0);
+        gfnet_config_v2 cc=config(GFNET_CLIENT,42); REQUIRE(gfnet_create(&cc,&clients[i])==0);
         peers[i].address_family=4; peers[i].address[0]=127; peers[i].address[3]=1; peers[i].port=(uint16_t)(5000+i);
     }
     int established=0; uint32_t now=1000;
     for (; now<10000 && established<2; now+=10)
     {
         step_listener(listener,clients,peers,2,now);
-        gfnet_event_v1 event={0}; event.struct_size=sizeof(event); event.abi_version=1;
+        gfnet_event_v2 event={0}; event.struct_size=sizeof(event); event.abi_version=GFNET_ABI_VERSION;
         while (gfnet_listener_poll_event(listener,&event)==1)
         {
             REQUIRE(event.kind==1 && event.grant_id==7); events[established++]=event;
@@ -188,7 +330,7 @@ static void test_listener(void)
     REQUIRE(gfnet_listener_confirm_binding(listener,events[1].connection_id,events[1].generation,ticket,sizeof(ticket),now)==GFNET_INVALID_STATE);
     REQUIRE(gfnet_listener_revoke_grant(listener,7)==0);
     int closed=0;
-    gfnet_event_v1 event={0}; event.struct_size=sizeof(event); event.abi_version=1;
+    gfnet_event_v2 event={0}; event.struct_size=sizeof(event); event.abi_version=GFNET_ABI_VERSION;
     while (gfnet_listener_poll_event(listener,&event)==1)
     {
         REQUIRE(event.kind==2); closed++;
@@ -199,11 +341,79 @@ static void test_listener(void)
     REQUIRE(gfnet_destroy(clients[0])==0); REQUIRE(gfnet_destroy(clients[1])==0);
     REQUIRE(gfnet_listener_destroy(listener)==0); REQUIRE(gfnet_memory_live()==0);
 }
+static void test_receive_fairness_and_birth(uint32_t start)
+{
+    void* client=NULL; void* server=NULL;
+    connect_pair(&client,&server,start);
+    uint8_t frame[32]={0}, received[32];
+    for (int i=0; i<32; i++) { REQUIRE(gfnet_send_reliable(client,frame,32)==0); }
+    for (int i=0; i<8; i++) { REQUIRE(gfnet_send_unreliable(client,frame,32)==0); }
+    gfnet_connection* s=server;
+    for (int i=0; i<30; i++) { step_pair(client,server,((gfnet_connection*)client)->now+10); }
+    REQUIRE(s->unreliable.count==8 && s->kcp->nrcv_que==32);
+    uint32_t original=s->unreliable.head->born;
+    for (int i=0; i<20; i++)
+    {
+        int32_t channel,length,again_channel,again_length; uint32_t born,again_born;
+        REQUIRE(gfnet_peek_frame(server,&channel,&length,&born)==1);
+        REQUIRE(channel==(i<16 ? 1 : 2) && length==32);
+        REQUIRE(gfnet_peek_frame_header(server,received,32)==32);
+        REQUIRE(gfnet_recv_frame(server,received,31)==GFNET_BUFFER_TOO_SMALL);
+        REQUIRE(gfnet_peek_frame(server,&again_channel,&again_length,&again_born)==1);
+        REQUIRE(channel==again_channel && length==again_length && born==again_born);
+        if (channel==2) { REQUIRE(born==original && (uint32_t)(s->now-born)>=250); }
+        REQUIRE(gfnet_recv_frame(server,received,32)==32);
+    }
+    int32_t channel,length; uint32_t born;
+    REQUIRE(gfnet_peek_frame(server,&channel,&length,&born)==1 && channel==1);
+    REQUIRE(gfnet_destroy(client)==0); REQUIRE(gfnet_destroy(server)==0); REQUIRE(gfnet_memory_live()==0);
+}
+
+static void test_listener_dtls_close_drain(void)
+{
+    gfnet_listener_config_v2 lc={sizeof(lc),GFNET_ABI_VERSION,256*1024*1024,4*1024*1024,4,4,8,0};
+    void* listener=NULL; REQUIRE(gfnet_listener_create(&lc,&listener)==0);
+    gfnet_grant_v2 grant={0}; grant.struct_size=sizeof(grant); grant.abi_version=GFNET_ABI_VERSION;
+    grant.conv=42; grant.grant_id=11; grant.remaining_ttl_ms=30000;
+    memcpy(grant.identity,identity,16); memcpy(grant.psk,key,32);
+    uint8_t ticket[16]={1},frame[32]={0},received[32];
+    ticket_digest(ticket,sizeof(ticket),grant.ticket_digest);
+    REQUIRE(gfnet_listener_register_grant(listener,&grant,1000)==0);
+    gfnet_config_v2 cc=config(GFNET_CLIENT,42); void* client=NULL;
+    REQUIRE(gfnet_create(&cc,&client)==0);
+    gfnet_peer_v2 peer={0}; peer.address_family=4; peer.address[0]=127; peer.address[3]=1; peer.port=5200;
+    gfnet_event_v2 event={0}; event.struct_size=sizeof(event); event.abi_version=GFNET_ABI_VERSION;
+    uint32_t now=1000;
+    for (; now<10000; now+=10)
+    {
+        step_listener(listener,&client,&peer,1,now);
+        if (gfnet_listener_poll_event(listener,&event)==1) { break; }
+    }
+    REQUIRE(event.kind==1);
+    REQUIRE(gfnet_listener_confirm_binding(listener,event.connection_id,event.generation,ticket,16,now)==0);
+    now+=10; step_listener(listener,&client,&peer,1,now);
+    for (int i=0; i<3; i++) { frame[0]=(uint8_t)i; REQUIRE(gfnet_send_reliable(client,frame,32)==0); }
+    for (int i=0; i<20; i++) { now+=10; step_listener(listener,&client,&peer,1,now); }
+    gfnet_connection* c=client; gfnet_quota* previous=gfnet_current_quota; gfnet_current_quota=c->quota;
+    REQUIRE(mbedtls_ssl_close_notify(&c->ssl)==0); gfnet_current_quota=previous;
+    now+=10; step_listener(listener,&client,&peer,1,now);
+    REQUIRE(gfnet_listener_poll_event(listener,&event)==1 && event.kind==2 && event.reason==0);
+    REQUIRE(gfnet_send_reliable(event.connection,frame,32)==GFNET_INVALID_STATE);
+    for (int i=0; i<3; i++)
+    {
+        int32_t channel,length; uint32_t born;
+        REQUIRE(gfnet_peek_frame(event.connection,&channel,&length,&born)==1 && channel==1 && length==32);
+        REQUIRE(gfnet_recv_frame(event.connection,received,32)==32 && received[0]==i);
+    }
+    REQUIRE(gfnet_listener_release_connection(listener,event.connection_id,event.generation)==0);
+    REQUIRE(gfnet_destroy(client)==0); REQUIRE(gfnet_listener_destroy(listener)==0); REQUIRE(gfnet_memory_live()==0);
+}
+
 static void test_wrong_psk(void)
 {
     void* client=NULL; void* server=NULL;
     uint8_t wrong[32]={0};
-    gfnet_config_v1 cc=config(GFNET_CLIENT,42), sc=config(GFNET_SERVER,42); cc.psk=wrong;
+    gfnet_config_v2 cc=config(GFNET_CLIENT,42), sc=config(GFNET_SERVER,42); cc.psk=wrong;
     REQUIRE(gfnet_create(&cc,&client)==0); REQUIRE(gfnet_create(&sc,&server)==0);
     REQUIRE(gfnet_tick(server,1000)==0);
     int failed=0;
@@ -241,16 +451,16 @@ static void test_output_age_and_early_tick(void)
 }
 static void test_stateless_sources(void)
 {
-    gfnet_listener_config_v1 lc={sizeof(lc),1,256*1024*1024,4*1024*1024,4,4,8,0};
+    gfnet_listener_config_v2 lc={sizeof(lc),GFNET_ABI_VERSION,256*1024*1024,4*1024*1024,4,4,8,0};
     void* listener=NULL; void* client=NULL;
     REQUIRE(gfnet_listener_create(&lc,&listener)==0);
-    gfnet_config_v1 cc=config(GFNET_CLIENT,42); REQUIRE(gfnet_create(&cc,&client)==0);
+    gfnet_config_v2 cc=config(GFNET_CLIENT,42); REQUIRE(gfnet_create(&cc,&client)==0);
     REQUIRE(gfnet_tick(client,1000)==0);
     uint8_t datagram[1200], output[1200]; uint32_t born;
     int length=gfnet_poll_udp(client,datagram,sizeof(datagram),&born); REQUIRE(length>0);
     uint64_t baseline=gfnet_memory_live();
-    gfnet_peer_v1 peer={0}; peer.address_family=4; peer.address[0]=127; peer.address[3]=1;
-    gfnet_udp_metadata_v1 metadata={0}; metadata.struct_size=sizeof(metadata); metadata.abi_version=1;
+    gfnet_peer_v2 peer={0}; peer.address_family=4; peer.address[0]=127; peer.address[3]=1;
+    gfnet_udp_metadata_v2 metadata={0}; metadata.struct_size=sizeof(metadata); metadata.abi_version=GFNET_ABI_VERSION;
     for (int i=0; i<64; i++)
     {
         peer.port=(uint16_t)(5000+i);
@@ -259,7 +469,7 @@ static void test_stateless_sources(void)
         REQUIRE(metadata.connection_id==0 && metadata.generation==0);
         REQUIRE(gfnet_memory_live()==baseline);
     }
-    gfnet_event_v1 event={0}; event.struct_size=sizeof(event); event.abi_version=1;
+    gfnet_event_v2 event={0}; event.struct_size=sizeof(event); event.abi_version=GFNET_ABI_VERSION;
     REQUIRE(gfnet_listener_poll_event(listener,&event)==0);
     REQUIRE(gfnet_destroy(client)==0); REQUIRE(gfnet_listener_destroy(listener)==0); REQUIRE(gfnet_memory_live()==0);
 }
@@ -274,7 +484,7 @@ static void* wrong_owner(void* handle)
 }
 static void test_owner_thread(void)
 {
-    gfnet_config_v1 cc=config(GFNET_CLIENT,42); void* handle=NULL;
+    gfnet_config_v2 cc=config(GFNET_CLIENT,42); void* handle=NULL;
     REQUIRE(gfnet_create(&cc,&handle)==0);
     pthread_t thread; REQUIRE(pthread_create(&thread,NULL,wrong_owner,handle)==0);
     REQUIRE(pthread_join(thread,NULL)==0); REQUIRE(gfnet_destroy(handle)==0); REQUIRE(gfnet_memory_live()==0);
@@ -302,22 +512,27 @@ static void test_max_ack_and_window(void)
     while ((length=gfnet_poll_udp(server,output,sizeof(output),&born))>0)
     { REQUIRE(length<=1200); count++; }
     REQUIRE(length==0 && count>=3);
-    gfnet_stats_v1 stats={0}; stats.struct_size=sizeof(stats); stats.abi_version=1;
+    gfnet_stats_v2 stats={0}; stats.struct_size=sizeof(stats); stats.abi_version=GFNET_ABI_VERSION;
     REQUIRE(gfnet_get_stats(client,&stats)==0); REQUIRE(stats.waitsnd==256);
     REQUIRE(stats.pending_reliable_bytes+stats.inflight_reliable_bytes==128*sizeof(frame));
     REQUIRE(gfnet_destroy(client)==0); REQUIRE(gfnet_destroy(server)==0); REQUIRE(gfnet_memory_live()==0);
 }
 int main(void)
 {
-    REQUIRE(gfnet_abi_version()==1);
+    REQUIRE(gfnet_abi_version()==GFNET_ABI_VERSION);
+    test_psa_rng_and_hash(); test_parallel_psa_owners();
     test_max_ack_and_window();
 #if !defined(_WIN32)
     test_owner_thread();
 #endif
     test_create_allocation_faults(); test_wrong_psk(); test_authenticated_trailing_kcp();
     test_output_age_and_early_tick(); test_stateless_sources();
+    test_dtls_failure_categories();
     test_pair(1000); test_pair(UINT32_MAX-50);
+    test_receive_fairness_and_birth(1000); test_receive_fairness_and_birth(UINT32_MAX-50);
+    test_listener_dtls_close_drain();
     test_authenticated_bad_channel_and_replay(); test_send_allocation_fault(); test_listener();
-    printf("gfnet regression: %d checks passed; live native bytes = %llu\n",checks,(unsigned long long)gfnet_memory_live());
+    test_psa_slot_exhaustion();
+    printf("gfnet regression: %d checks passed; live native bytes = %llu\n",(int)checks,(unsigned long long)gfnet_memory_live());
     return 0;
 }

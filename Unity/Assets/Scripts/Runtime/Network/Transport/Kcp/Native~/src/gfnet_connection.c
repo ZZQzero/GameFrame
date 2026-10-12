@@ -1,13 +1,93 @@
 #include "gfnet_internal.h"
-_Static_assert(sizeof(void*) == 8, "ABI v1 supports 64-bit targets only");
-_Static_assert(sizeof(gfnet_config_v1) == 64, "config layout");
-_Static_assert(offsetof(gfnet_config_v1, identity) == 32, "identity offset");
-_Static_assert(offsetof(gfnet_config_v1, psk) == 48, "psk offset");
-_Static_assert(sizeof(gfnet_stats_v1) == 168, "stats layout");
-_Static_assert(sizeof(gfnet_peer_v1) == 24, "peer layout");
-_Static_assert(sizeof(gfnet_grant_v1) == 104, "grant layout");
-_Static_assert(sizeof(gfnet_event_v1) == 72, "event layout");
-_Static_assert(sizeof(gfnet_udp_metadata_v1) == 64, "UDP layout");
+_Static_assert(sizeof(void*) == 8, "ABI v2 supports 64-bit targets only");
+_Static_assert(sizeof(gfnet_config_v2) == 64, "config layout");
+_Static_assert(offsetof(gfnet_config_v2, struct_size) == 0, "config.struct_size offset");
+_Static_assert(offsetof(gfnet_config_v2, abi_version) == 4, "config.abi_version offset");
+_Static_assert(offsetof(gfnet_config_v2, role) == 8, "config.role offset");
+_Static_assert(offsetof(gfnet_config_v2, conv) == 12, "config.conv offset");
+_Static_assert(offsetof(gfnet_config_v2, native_limit) == 16, "config.native_limit offset");
+_Static_assert(offsetof(gfnet_config_v2, reliable_limit) == 20, "config.reliable_limit offset");
+_Static_assert(offsetof(gfnet_config_v2, unreliable_limit) == 24, "config.unreliable_limit offset");
+_Static_assert(offsetof(gfnet_config_v2, reserved) == 28, "config.reserved offset");
+_Static_assert(offsetof(gfnet_config_v2, identity) == 32, "config.identity offset");
+_Static_assert(offsetof(gfnet_config_v2, identity_length) == 40, "config.identity_length offset");
+_Static_assert(offsetof(gfnet_config_v2, reserved_identity) == 44, "config.reserved_identity offset");
+_Static_assert(offsetof(gfnet_config_v2, psk) == 48, "config.psk offset");
+_Static_assert(offsetof(gfnet_config_v2, psk_length) == 56, "config.psk_length offset");
+_Static_assert(offsetof(gfnet_config_v2, reserved_psk) == 60, "config.reserved_psk offset");
+_Static_assert(sizeof(gfnet_stats_v2) == 168, "stats layout");
+_Static_assert(offsetof(gfnet_stats_v2, struct_size) == 0, "stats.struct_size offset");
+_Static_assert(offsetof(gfnet_stats_v2, abi_version) == 4, "stats.abi_version offset");
+_Static_assert(offsetof(gfnet_stats_v2, state) == 8, "stats.state offset");
+_Static_assert(offsetof(gfnet_stats_v2, capabilities) == 12, "stats.capabilities offset");
+_Static_assert(offsetof(gfnet_stats_v2, fatal_code) == 16, "stats.fatal_code offset");
+_Static_assert(offsetof(gfnet_stats_v2, native_error) == 20, "stats.native_error offset");
+_Static_assert(offsetof(gfnet_stats_v2, owned_bytes) == 24, "stats.owned_bytes offset");
+_Static_assert(offsetof(gfnet_stats_v2, peak_bytes) == 32, "stats.peak_bytes offset");
+_Static_assert(offsetof(gfnet_stats_v2, allocations) == 40, "stats.allocations offset");
+_Static_assert(offsetof(gfnet_stats_v2, udp_received_bytes) == 48, "stats.udp_received_bytes offset");
+_Static_assert(offsetof(gfnet_stats_v2, udp_sent_bytes) == 56, "stats.udp_sent_bytes offset");
+_Static_assert(offsetof(gfnet_stats_v2, udp_received_packets) == 64, "stats.udp_received_packets offset");
+_Static_assert(offsetof(gfnet_stats_v2, udp_sent_packets) == 72, "stats.udp_sent_packets offset");
+_Static_assert(offsetof(gfnet_stats_v2, raw_dropped) == 80, "stats.raw_dropped offset");
+_Static_assert(offsetof(gfnet_stats_v2, unreliable_dropped) == 88, "stats.unreliable_dropped offset");
+_Static_assert(offsetof(gfnet_stats_v2, input_count) == 96, "stats.input_count offset");
+_Static_assert(offsetof(gfnet_stats_v2, output_count) == 100, "stats.output_count offset");
+_Static_assert(offsetof(gfnet_stats_v2, output_bytes) == 104, "stats.output_bytes offset");
+_Static_assert(offsetof(gfnet_stats_v2, output_oldest_ms) == 108, "stats.output_oldest_ms offset");
+_Static_assert(offsetof(gfnet_stats_v2, waitsnd) == 112, "stats.waitsnd offset");
+_Static_assert(offsetof(gfnet_stats_v2, srtt_ms) == 116, "stats.srtt_ms offset");
+_Static_assert(offsetof(gfnet_stats_v2, rto_ms) == 120, "stats.rto_ms offset");
+_Static_assert(offsetof(gfnet_stats_v2, snd_wnd) == 124, "stats.snd_wnd offset");
+_Static_assert(offsetof(gfnet_stats_v2, rcv_wnd) == 128, "stats.rcv_wnd offset");
+_Static_assert(offsetof(gfnet_stats_v2, remote_wnd) == 132, "stats.remote_wnd offset");
+_Static_assert(offsetof(gfnet_stats_v2, plaintext_count) == 136, "stats.plaintext_count offset");
+_Static_assert(offsetof(gfnet_stats_v2, plaintext_bytes) == 140, "stats.plaintext_bytes offset");
+_Static_assert(offsetof(gfnet_stats_v2, pending_reliable_bytes) == 144, "stats.pending_reliable_bytes offset");
+_Static_assert(offsetof(gfnet_stats_v2, inflight_reliable_bytes) == 152, "stats.inflight_reliable_bytes offset");
+_Static_assert(offsetof(gfnet_stats_v2, timeout_retransmits) == 160, "stats.timeout_retransmits offset");
+_Static_assert(sizeof(gfnet_peer_v2) == 24, "peer layout");
+_Static_assert(offsetof(gfnet_peer_v2, address_family) == 0, "peer.address_family offset");
+_Static_assert(offsetof(gfnet_peer_v2, address) == 4, "peer.address offset");
+_Static_assert(offsetof(gfnet_peer_v2, port) == 20, "peer.port offset");
+_Static_assert(offsetof(gfnet_peer_v2, reserved) == 22, "peer.reserved offset");
+_Static_assert(sizeof(gfnet_listener_config_v2) == 32, "listener_config layout");
+_Static_assert(offsetof(gfnet_listener_config_v2, struct_size) == 0, "listener_config.struct_size offset");
+_Static_assert(offsetof(gfnet_listener_config_v2, abi_version) == 4, "listener_config.abi_version offset");
+_Static_assert(offsetof(gfnet_listener_config_v2, native_limit) == 8, "listener_config.native_limit offset");
+_Static_assert(offsetof(gfnet_listener_config_v2, connection_limit) == 12, "listener_config.connection_limit offset");
+_Static_assert(offsetof(gfnet_listener_config_v2, max_connections) == 16, "listener_config.max_connections offset");
+_Static_assert(offsetof(gfnet_listener_config_v2, max_handshakes) == 20, "listener_config.max_handshakes offset");
+_Static_assert(offsetof(gfnet_listener_config_v2, max_grants) == 24, "listener_config.max_grants offset");
+_Static_assert(offsetof(gfnet_listener_config_v2, reserved) == 28, "listener_config.reserved offset");
+_Static_assert(sizeof(gfnet_grant_v2) == 104, "grant layout");
+_Static_assert(offsetof(gfnet_grant_v2, struct_size) == 0, "grant.struct_size offset");
+_Static_assert(offsetof(gfnet_grant_v2, abi_version) == 4, "grant.abi_version offset");
+_Static_assert(offsetof(gfnet_grant_v2, conv) == 8, "grant.conv offset");
+_Static_assert(offsetof(gfnet_grant_v2, remaining_ttl_ms) == 12, "grant.remaining_ttl_ms offset");
+_Static_assert(offsetof(gfnet_grant_v2, grant_id) == 16, "grant.grant_id offset");
+_Static_assert(offsetof(gfnet_grant_v2, identity) == 24, "grant.identity offset");
+_Static_assert(offsetof(gfnet_grant_v2, psk) == 40, "grant.psk offset");
+_Static_assert(offsetof(gfnet_grant_v2, ticket_digest) == 72, "grant.ticket_digest offset");
+_Static_assert(sizeof(gfnet_event_v2) == 72, "event layout");
+_Static_assert(offsetof(gfnet_event_v2, struct_size) == 0, "event.struct_size offset");
+_Static_assert(offsetof(gfnet_event_v2, abi_version) == 4, "event.abi_version offset");
+_Static_assert(offsetof(gfnet_event_v2, kind) == 8, "event.kind offset");
+_Static_assert(offsetof(gfnet_event_v2, reason) == 12, "event.reason offset");
+_Static_assert(offsetof(gfnet_event_v2, connection_id) == 16, "event.connection_id offset");
+_Static_assert(offsetof(gfnet_event_v2, generation) == 24, "event.generation offset");
+_Static_assert(offsetof(gfnet_event_v2, grant_id) == 32, "event.grant_id offset");
+_Static_assert(offsetof(gfnet_event_v2, connection) == 40, "event.connection offset");
+_Static_assert(offsetof(gfnet_event_v2, peer) == 48, "event.peer offset");
+_Static_assert(sizeof(gfnet_udp_metadata_v2) == 64, "udp_metadata layout");
+_Static_assert(offsetof(gfnet_udp_metadata_v2, struct_size) == 0, "udp_metadata.struct_size offset");
+_Static_assert(offsetof(gfnet_udp_metadata_v2, abi_version) == 4, "udp_metadata.abi_version offset");
+_Static_assert(offsetof(gfnet_udp_metadata_v2, enqueued_ms) == 8, "udp_metadata.enqueued_ms offset");
+_Static_assert(offsetof(gfnet_udp_metadata_v2, reserved) == 12, "udp_metadata.reserved offset");
+_Static_assert(offsetof(gfnet_udp_metadata_v2, connection_id) == 16, "udp_metadata.connection_id offset");
+_Static_assert(offsetof(gfnet_udp_metadata_v2, generation) == 24, "udp_metadata.generation offset");
+_Static_assert(offsetof(gfnet_udp_metadata_v2, peer) == 32, "udp_metadata.peer offset");
+_Static_assert(offsetof(gfnet_udp_metadata_v2, reserved_tail) == 56, "udp_metadata.reserved_tail offset");
 static const int ciphers[] = { MBEDTLS_TLS_PSK_WITH_AES_128_GCM_SHA256, 0 };
 uint32_t gfnet_abi_version(void) { return GFNET_ABI_VERSION; }
 int gfnet_check_connection(gfnet_connection* c)
@@ -112,8 +192,6 @@ void gfnet_connection_free(gfnet_connection* c)
     mbedtls_ssl_free(&c->ssl);
     mbedtls_ssl_config_free(&c->config);
     mbedtls_ssl_cookie_free(&c->cookie);
-    mbedtls_ctr_drbg_free(&c->drbg);
-    mbedtls_entropy_free(&c->entropy);
     gfnet_queue_clear(&c->input);
     gfnet_queue_clear(&c->output);
     gfnet_queue_clear(&c->plaintext);
@@ -122,8 +200,8 @@ void gfnet_connection_free(gfnet_connection* c)
     gfnet_current_quota = previous;
     gfnet_quota_destroy(quota);
 }
-int gfnet_connection_create(const gfnet_config_v1* config, gfnet_quota* parent,
-    struct gfnet_listener* listener, const gfnet_peer_v1* peer, gfnet_connection** result)
+int gfnet_connection_create(const gfnet_config_v2* config, gfnet_quota* parent,
+    struct gfnet_listener* listener, const gfnet_peer_v2* peer, gfnet_connection** result)
 {
     *result = NULL;
     if (!config || config->struct_size != sizeof(*config) || config->abi_version != GFNET_ABI_VERSION ||
@@ -134,7 +212,8 @@ int gfnet_connection_create(const gfnet_config_v1* config, gfnet_quota* parent,
         !config->identity || config->identity_length != 16 || !config->psk || config->psk_length != 32 ||
         config->reserved || config->reserved_identity || config->reserved_psk)
     { return GFNET_INVALID_ARGUMENT; }
-    gfnet_initialize();
+    int initialization_error = gfnet_initialize();
+    if (initialization_error) { return initialization_error; }
     gfnet_quota* quota = gfnet_quota_create(config->native_limit, parent);
     if (!quota) { return GFNET_ALLOCATION_FAILED; }
     gfnet_quota* previous = gfnet_current_quota;
@@ -151,13 +230,10 @@ int gfnet_connection_create(const gfnet_config_v1* config, gfnet_quota* parent,
     if (peer) { c->peer = *peer; }
     memcpy(c->identity, config->identity, 16); memcpy(c->psk, config->psk, 32);
     mbedtls_ssl_init(&c->ssl); mbedtls_ssl_config_init(&c->config);
-    mbedtls_ssl_cookie_init(&c->cookie); mbedtls_entropy_init(&c->entropy); mbedtls_ctr_drbg_init(&c->drbg);
-    static const uint8_t personal[] = "gameframe-kcp-dtls-v1";
-    int error = mbedtls_ctr_drbg_seed(&c->drbg, mbedtls_entropy_func, &c->entropy, personal, sizeof(personal)-1);
-    if (!error) { error = mbedtls_ssl_config_defaults(&c->config, c->role == GFNET_CLIENT ? MBEDTLS_SSL_IS_CLIENT : MBEDTLS_SSL_IS_SERVER, MBEDTLS_SSL_TRANSPORT_DATAGRAM, MBEDTLS_SSL_PRESET_DEFAULT); }
+    mbedtls_ssl_cookie_init(&c->cookie);
+    int error = mbedtls_ssl_config_defaults(&c->config, c->role == GFNET_CLIENT ? MBEDTLS_SSL_IS_CLIENT : MBEDTLS_SSL_IS_SERVER, MBEDTLS_SSL_TRANSPORT_DATAGRAM, MBEDTLS_SSL_PRESET_DEFAULT);
     if (!error)
     {
-        mbedtls_ssl_conf_rng(&c->config, mbedtls_ctr_drbg_random, &c->drbg);
         mbedtls_ssl_conf_ciphersuites(&c->config, ciphers);
         mbedtls_ssl_conf_min_tls_version(&c->config, MBEDTLS_SSL_VERSION_TLS1_2);
         mbedtls_ssl_conf_max_tls_version(&c->config, MBEDTLS_SSL_VERSION_TLS1_2);
@@ -171,7 +247,7 @@ int gfnet_connection_create(const gfnet_config_v1* config, gfnet_quota* parent,
         if (listener) { mbedtls_ssl_conf_dtls_cookies(&c->config, gfnet_listener_cookie_write, gfnet_listener_cookie_check, c); }
         else
         {
-            error = mbedtls_ssl_cookie_setup(&c->cookie, mbedtls_ctr_drbg_random, &c->drbg);
+            error = mbedtls_ssl_cookie_setup(&c->cookie);
             if (!error) { mbedtls_ssl_conf_dtls_cookies(&c->config, mbedtls_ssl_cookie_write, mbedtls_ssl_cookie_check, &c->cookie); }
         }
     }
@@ -199,7 +275,7 @@ int gfnet_connection_create(const gfnet_config_v1* config, gfnet_quota* parent,
     }
     *result = c; return 0;
 }
-int32_t gfnet_create(const gfnet_config_v1* config, void** handle)
+int32_t gfnet_create(const gfnet_config_v2* config, void** handle)
 {
     if (!handle) { return GFNET_INVALID_ARGUMENT; }
     *handle = NULL;
@@ -237,6 +313,43 @@ static int validate_kcp(gfnet_connection* c, const uint8_t* data, int length)
     }
     return offset == length;
 }
+/* Preserve the SSL/PSA cause and distinguish peer input from local failures. */
+int gfnet_dtls_fault(gfnet_connection* c, int status)
+{
+    int category = GFNET_INTERNAL_ERROR;
+    /* 4.x returns one SSL or PSA code, never a high/low-level sum. */
+    if (c->quota->allocation_failed || status == MBEDTLS_ERR_SSL_ALLOC_FAILED ||
+        status == PSA_ERROR_INSUFFICIENT_MEMORY)
+    {
+        category = GFNET_ALLOCATION_FAILED;
+    }
+    else
+    {
+        switch (status)
+        {
+            case MBEDTLS_ERR_SSL_INVALID_MAC:
+            case MBEDTLS_ERR_SSL_INVALID_RECORD:
+            case MBEDTLS_ERR_SSL_CONN_EOF:
+            case MBEDTLS_ERR_SSL_DECODE_ERROR:
+            case MBEDTLS_ERR_SSL_UNSUPPORTED_EXTENSION:
+            case MBEDTLS_ERR_SSL_NO_APPLICATION_PROTOCOL:
+            case MBEDTLS_ERR_SSL_UNEXPECTED_MESSAGE:
+            case MBEDTLS_ERR_SSL_FATAL_ALERT_MESSAGE:
+            case MBEDTLS_ERR_SSL_BAD_PROTOCOL_VERSION:
+            case MBEDTLS_ERR_SSL_HANDSHAKE_FAILURE:
+            case MBEDTLS_ERR_SSL_UNKNOWN_IDENTITY:
+            case MBEDTLS_ERR_SSL_TIMEOUT:
+            case MBEDTLS_ERR_SSL_UNEXPECTED_RECORD:
+            case MBEDTLS_ERR_SSL_ILLEGAL_PARAMETER:
+            case PSA_ERROR_INVALID_SIGNATURE:
+                category = GFNET_PROTOCOL_ERROR;
+                break;
+            default:
+                break;
+        }
+    }
+    return gfnet_fault(c, category, status);
+}
 static int read_plaintext(gfnet_connection* c)
 {
     uint8_t buffer[GFNET_MAX_UDP];
@@ -247,7 +360,7 @@ static int read_plaintext(gfnet_connection* c)
         if (length == MBEDTLS_ERR_SSL_WANT_READ || length == MBEDTLS_ERR_SSL_WANT_WRITE) { break; }
         if (length == 0 || length == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY)
         { c->state = GFNET_PEER_CLOSED; c->closed_event = 1; break; }
-        if (length < 0) { error = gfnet_fault(c, GFNET_PROTOCOL_ERROR, length); break; }
+        if (length < 0) { error = gfnet_dtls_fault(c, length); break; }
         if (length <= 1) { error = gfnet_fault(c, GFNET_PROTOCOL_ERROR, 0); break; }
         if (buffer[0] == 1)
         {
@@ -296,7 +409,7 @@ int gfnet_connection_tick(gfnet_connection* c, uint32_t now)
             }
         }
         else if (status != MBEDTLS_ERR_SSL_WANT_READ && status != MBEDTLS_ERR_SSL_WANT_WRITE)
-        { error = gfnet_fault(c, GFNET_PROTOCOL_ERROR, status); }
+        { error = gfnet_dtls_fault(c, status); }
     }
     if (!error && c->state == GFNET_ESTABLISHED)
     {
@@ -316,7 +429,7 @@ int gfnet_connection_tick(gfnet_connection* c, uint32_t now)
             if (now-packet->born > 250) { error = gfnet_fault(c, GFNET_INTERNAL_ERROR, GFNET_BACKPRESSURE); break; }
             int status = mbedtls_ssl_write(&c->ssl, packet->data, packet->length);
             if (status == MBEDTLS_ERR_SSL_WANT_READ || status == MBEDTLS_ERR_SSL_WANT_WRITE) { break; }
-            if (status != (int)packet->length) { error = gfnet_fault(c, GFNET_INTERNAL_ERROR, status); break; }
+            if (status != (int)packet->length) { error = status < 0 ? gfnet_dtls_fault(c, status) : gfnet_fault(c, GFNET_INTERNAL_ERROR, status); break; }
             gfnet_queue_pop(&c->plaintext);
         }
     }
@@ -373,23 +486,28 @@ static int reliable_size(gfnet_connection* c)
     }
     return 0;
 }
-int32_t gfnet_peek_frame(void* handle, int32_t* channel, int32_t* length)
+int32_t gfnet_peek_frame(void* handle, int32_t* channel, int32_t* length, uint32_t* born)
 {
     gfnet_connection* c = handle; int error = gfnet_check_connection(c);
     if (error) { return error; }
-    if (!channel || !length) { return GFNET_INVALID_ARGUMENT; }
+    if (!channel || !length || !born) { return GFNET_INVALID_ARGUMENT; }
     if (c->state == GFNET_FATAL) { return c->fatal_code; }
-    *channel=0; *length=0;
+    *channel=0; *length=0; *born=0;
     int size = reliable_size(c);
     if (size<0) { return size; }
-    if (size) { *channel=1; *length=size; return 1; }
-    if (c->unreliable.head) { *channel=2; *length=(int32_t)c->unreliable.head->length; return 1; }
+    /* Only consumption advances the 16 reliable / 4 unreliable turn. All peeks
+       and BufferTooSmall retries must refer to the same head. */
+    if (c->unreliable.head && (!size || c->receive_turn >= 16))
+    {
+        *channel=2; *length=(int32_t)c->unreliable.head->length; *born=c->unreliable.head->born; return 1;
+    }
+    if (size) { *channel=1; *length=size; *born=c->now; return 1; }
     return 0;
 }
 int32_t gfnet_peek_frame_header(void* handle, uint8_t* buffer, int32_t capacity)
 {
-    int32_t channel, length;
-    int result = gfnet_peek_frame(handle, &channel, &length);
+    int32_t channel, length; uint32_t born;
+    int result = gfnet_peek_frame(handle, &channel, &length, &born);
     if (result <= 0) { return result; }
     if (!buffer || capacity < 0) { return GFNET_INVALID_ARGUMENT; }
     if (length < 32) { return gfnet_fault(handle, GFNET_PROTOCOL_ERROR, 0); }
@@ -407,8 +525,8 @@ int32_t gfnet_peek_frame_header(void* handle, uint8_t* buffer, int32_t capacity)
 }
 int32_t gfnet_recv_frame(void* handle, uint8_t* buffer, int32_t capacity)
 {
-    int32_t channel, length;
-    int error = gfnet_peek_frame(handle,&channel,&length);
+    int32_t channel, length; uint32_t born;
+    int error = gfnet_peek_frame(handle,&channel,&length,&born);
     if (error <= 0) { return error; }
     if (!buffer || capacity<0) { return GFNET_INVALID_ARGUMENT; }
     if (capacity<length) { return GFNET_BUFFER_TOO_SMALL; }
@@ -416,10 +534,14 @@ int32_t gfnet_recv_frame(void* handle, uint8_t* buffer, int32_t capacity)
     if (channel==1)
     {
         int result=ikcp_recv(c->kcp,(char*)buffer,capacity);
+        if (result == length && c->receive_turn < 16) { c->receive_turn++; }
         return result == length ? result : gfnet_fault(c,GFNET_INTERNAL_ERROR,result);
     }
     memcpy(buffer,c->unreliable.head->data,(size_t)length);
-    gfnet_queue_pop(&c->unreliable); return length;
+    gfnet_queue_pop(&c->unreliable);
+    c->receive_turn = c->receive_turn < 16 ? 17 : c->receive_turn + 1;
+    if (c->receive_turn == 20) { c->receive_turn=0; }
+    return length;
 }
 int32_t gfnet_poll_udp(void* handle, uint8_t* buffer, int32_t capacity, uint32_t* enqueued_ms)
 {
@@ -442,7 +564,7 @@ int32_t gfnet_get_state(void* handle, int32_t* state)
     if (!state) { return GFNET_INVALID_ARGUMENT; }
     *state=c->state; return 0;
 }
-int32_t gfnet_get_stats(void* handle, gfnet_stats_v1* stats)
+int32_t gfnet_get_stats(void* handle, gfnet_stats_v2* stats)
 {
     gfnet_connection* c=handle; int error=gfnet_check_connection(c);
     if (error) { return error; }

@@ -10,6 +10,20 @@ using GameFrame.Network.Transport.Kcp;
 
 namespace GameFrame.Server.Network
 {
+    internal readonly struct KcpConnectionInfo
+    {
+        internal ulong Id { get; }
+        internal ulong Generation { get; }
+        internal ulong GrantId { get; }
+
+        internal KcpConnectionInfo(ulong id, ulong generation, ulong grantId)
+        {
+            Id = id;
+            Generation = generation;
+            GrantId = grantId;
+        }
+    }
+
     // The listener owns the socket and every child native handle. Application handlers never call native.
     internal sealed class KcpListenerHost : IAsyncDisposable
     {
@@ -53,15 +67,17 @@ namespace GameFrame.Server.Network
             internal bool InputCompleted;
             internal required FrameMemoryBudget UnreliableMemory;
             internal readonly Channel<OwnedFrame> Outgoing = Channel.CreateBounded<OwnedFrame>(128);
+            internal readonly Channel<OwnedFrame> OutgoingUnreliable = Channel.CreateBounded<OwnedFrame>(64);
             internal readonly Queue<OwnedFrame> Controls = new Queue<OwnedFrame>();
             internal required FrameMemoryBudget Memory;
             internal required FrameMemoryBudget SendMemory;
             internal required FrameMemoryBudget ReceiveMemory;
             internal required FrameMemoryBudget ControlMemory;
-            internal OwnedFrame? Sending;
             internal Task? Dispatch;
             internal volatile Exception? Failure;
             internal bool Bound, RemoteClosed;
+            internal volatile bool TransportEnded;
+            internal bool InputDrained;
             internal long CloseDeadline;
             internal int ReliableLimit, UnreliableLimit;
             internal long LastReceived, RateWindow, PingAt, PongDeadline;
@@ -71,11 +87,12 @@ namespace GameFrame.Server.Network
 
         private readonly IPEndPoint endpoint;
         private readonly NetProtocolCatalog catalog;
-        private readonly Func<OwnedFrame, FrameMemoryBudget, CancellationToken, Task<OwnedFrame?>> handler;
+        private readonly Func<KcpConnectionInfo, OwnedFrame, FrameMemoryBudget, CancellationToken, Task<OwnedFrame?>> handler;
         private readonly FrameMemoryBudget memory = new FrameMemoryBudget(64 * 1024 * 1024);
         private readonly ConcurrentQueue<Action<IntPtr>> commands = new ConcurrentQueue<Action<IntPtr>>();
         private readonly Dictionary<ulong, Child> children = new Dictionary<ulong, Child>();
         private readonly List<Child> retired = new List<Child>();
+        private readonly Queue<Child> releaseReady = new Queue<Child>();
         private readonly SourceBudget sourceBudget = new SourceBudget();
         private readonly AutoResetEvent wake = new AutoResetEvent(false);
         private readonly TaskCompletionSource<bool> started = Source<bool>();
@@ -93,7 +110,7 @@ namespace GameFrame.Server.Network
         internal Task Stopped => stopped.Task;
 
         internal KcpListenerHost(IPEndPoint endpoint, NetProtocolCatalog catalog,
-            Func<OwnedFrame, FrameMemoryBudget, CancellationToken, Task<OwnedFrame?>> handler, ILogger? logger = null)
+            Func<KcpConnectionInfo, OwnedFrame, FrameMemoryBudget, CancellationToken, Task<OwnedFrame?>> handler, ILogger? logger = null)
         {
             this.endpoint = endpoint;
             this.catalog = catalog;
@@ -107,22 +124,31 @@ namespace GameFrame.Server.Network
 
         internal async Task<ulong> RegisterGrantAsync(uint conv, byte[] identity, byte[] psk, byte[] ticket, int ttlMs = 30000)
         {
-            if (conv == 0 || identity.Length != 16 || psk.Length != 32 || ticket.Length < 1 || ticket.Length > 1024 || ttlMs < 1 || ttlMs > 30000)
+            if (conv == 0 || identity == null || psk == null || ticket == null || identity.Length != 16 || psk.Length != 32 || ticket.Length < 1 || ticket.Length > 1024 || ttlMs < 1 || ttlMs > 30000)
             {
                 throw new ArgumentException("Invalid KCP grant.");
             }
 
+            long deadline = checked(NetworkClock.GetMilliseconds() + ttlMs);
             await started.Task.ConfigureAwait(false);
             ulong id = checked((ulong)Interlocked.Increment(ref grantSequence));
             var grant = new KcpNative.Grant
             {
-                Size = 104, Version = 1, Id = id, Conv = conv, RemainingTtlMs = (uint)ttlMs,
+                Size = 104, Version = KcpNative.Version, Id = id, Conv = conv, RemainingTtlMs = (uint)ttlMs,
                 Identity = (byte[])identity.Clone(), Psk = (byte[])psk.Clone(), TicketDigest = SHA256.HashData(ticket)
             };
             try
             {
-                await CommandAsync(listener => KcpNative.Check(KcpNative.RegisterGrant(listener, ref grant,
-                    (uint)NetworkClock.GetMilliseconds()), "register grant")).ConfigureAwait(false);
+                await CommandAsync(listener =>
+                {
+                    long now = NetworkClock.GetMilliseconds();
+                    if (now >= deadline)
+                    {
+                        throw new NetworkException("Grant expired before registration.");
+                    }
+                    grant.RemainingTtlMs = checked((uint)(deadline - now));
+                    KcpNative.Check(KcpNative.RegisterGrant(listener, ref grant, (uint)now), "register grant");
+                }).ConfigureAwait(false);
                 return id;
             }
             finally
@@ -185,14 +211,14 @@ namespace GameFrame.Server.Network
             Socket? socket = null;
             OwnedFrame? input = null, output = null, header = null;
             int outputLength = 0;
-            var metadata = new KcpNative.UdpMetadata { Size = 64, Version = 1 };
+            var metadata = new KcpNative.UdpMetadata { Size = 64, Version = KcpNative.Version };
             long previous = 0;
             try
             {
                 KcpNative.ValidateAbi();
                 var config = new KcpNative.ListenerConfig
                 {
-                    Size = 32, Version = 1, NativeLimit = 256 * 1024 * 1024, ConnectionLimit = 4 * 1024 * 1024,
+                    Size = 32, Version = KcpNative.Version, NativeLimit = 256 * 1024 * 1024, ConnectionLimit = 4 * 1024 * 1024,
                     MaxConnections = 64, MaxHandshakes = 16, MaxGrants = 256
                 };
                 KcpNative.Check(KcpNative.ListenerCreate(ref config, out listener), "listener create");
@@ -223,7 +249,8 @@ namespace GameFrame.Server.Network
 
                     // Grant commands may advance the listener clock; never feed/tick with an older round timestamp.
                     now = NetworkClock.GetMilliseconds();
-                    FlushUdp(socket, listener, output, ref outputLength, ref metadata, now);
+                    int outputBudget = 256;
+                    FlushUdp(socket, listener, output, ref outputLength, ref metadata, now, ref outputBudget);
                     long readStart = NetworkClock.GetMilliseconds();
                     // Explicit host-wide admission budget bounds work before peer lookup/cookie processing.
                     for (int i = 0; i < 256 && NetworkClock.GetMilliseconds() - readStart < 2; i++)
@@ -254,12 +281,9 @@ namespace GameFrame.Server.Network
                         }
 
                         KcpNative.Peer peer = ToPeer(remote);
-                        int result = KcpNative.ListenerFeed(listener, ref peer, input.Bytes, length, (uint)now);
-                        // Invalid remote input and child failure do not fault the shared socket owner.
-                        if (result == -7)
-                        {
-                            KcpNative.Check(result, "listener feed internal failure");
-                        }
+                        // Feed may report an internal failure of a transient handshake. Child faults
+                        // belong to native events; shared listener failures are checked by tick/poll.
+                        KcpNative.ListenerFeed(listener, ref peer, input.Bytes, length, (uint)now);
                     }
 
                     KcpNative.Check(KcpNative.ListenerTick(listener, (uint)now), "listener tick");
@@ -268,18 +292,35 @@ namespace GameFrame.Server.Network
                     {
                         try
                         {
-                            DriveChild(listener, child, header, input, now);
+                            DriveChild(listener, child, header, input, now, outputLength == 0);
+                            if (child.InputDrained)
+                            {
+                                releaseReady.Enqueue(child);
+                            }
                         }
                         catch (Exception error)
                         {
                             child.Failure = error;
                             logger.LogWarning(error, "KCP connection {ConnectionId}/{Generation} failed.", child.Event.Id, child.Event.Generation);
-                            KcpNative.Check(KcpNative.CloseConnection(listener, child.Event.Id, child.Event.Generation), "close child");
+                            if (child.TransportEnded)
+                            {
+                                releaseReady.Enqueue(child);
+                            }
+                            else
+                            {
+                                KcpNative.Check(KcpNative.CloseConnection(listener, child.Event.Id, child.Event.Generation), "close child");
+                            }
                         }
                     }
 
+                    while (releaseReady.TryDequeue(out Child? completed))
+                    {
+                        children.Remove(completed.Event.Id);
+                        Retire(completed, completed.Failure == null);
+                        KcpNative.Check(KcpNative.ReleaseConnection(listener, completed.Event.Id, completed.Event.Generation), "release drained child");
+                    }
                     PollEvents(listener);
-                    FlushUdp(socket, listener, output, ref outputLength, ref metadata, now);
+                    FlushUdp(socket, listener, output, ref outputLength, ref metadata, now, ref outputBudget);
                     ReapRetired();
                     wake.WaitOne(10);
                 }
@@ -315,6 +356,10 @@ namespace GameFrame.Server.Network
                     command(IntPtr.Zero);
                 }
 
+                foreach (Child child in retired)
+                {
+                    Cleanup(() => child.Lifetime.Cancel());
+                }
                 // Async application handlers are canceled and remain owners until they finish.
                 Cleanup(() => Task.WhenAll(retired.Select(child => child.Dispatch ?? Task.CompletedTask)).GetAwaiter().GetResult());
                 Cleanup(ReapRetired);
@@ -358,7 +403,7 @@ namespace GameFrame.Server.Network
 
         private void PollEvents(IntPtr listener)
         {
-            var connectionEvent = new KcpNative.ConnectionEvent { Size = 72, Version = 1 };
+            var connectionEvent = new KcpNative.ConnectionEvent { Size = 72, Version = KcpNative.Version };
             int result;
             while ((result = KcpNative.ListenerPollEvent(listener, ref connectionEvent)) == 1)
             {
@@ -382,6 +427,12 @@ namespace GameFrame.Server.Network
                 }
                 else
                 {
+                    if (connectionEvent.Reason == 0 && children.TryGetValue(connectionEvent.Id, out Child? ended) &&
+                        ended.Bound && ended.Failure == null)
+                    {
+                        ended.TransportEnded = true;
+                        continue;
+                    }
                     if (children.Remove(connectionEvent.Id, out Child? child))
                     {
                         Retire(child);
@@ -394,7 +445,7 @@ namespace GameFrame.Server.Network
             KcpNative.Check(result, "listener events");
         }
 
-        private void DriveChild(IntPtr listener, Child child, OwnedFrame header, OwnedFrame scratch, long now)
+        private void DriveChild(IntPtr listener, Child child, OwnedFrame header, OwnedFrame scratch, long now, bool writable)
         {
             if (child.Failure != null)
             {
@@ -403,14 +454,28 @@ namespace GameFrame.Server.Network
 
             for (int i = 0; i < 16 && !child.RemoteClosed; i++)
             {
-                int result = KcpNative.Peek(child.Event.Connection, out int channel, out int length);
+                int result = KcpNative.Peek(child.Event.Connection, out int channel, out int length, out uint born);
                 KcpNative.Check(result, "child peek");
                 if (result == 0)
                 {
+                    if (child.TransportEnded)
+                    {
+                        child.InputDrained = true;
+                        CompleteInput(child);
+                    }
                     break;
                 }
 
                 NetDelivery delivery = channel == 1 ? NetDelivery.Reliable : NetDelivery.Unreliable;
+                long receivedAt = now - unchecked((uint)now - born);
+                if (delivery == NetDelivery.Unreliable && (child.TransportEnded || now - receivedAt >= 250))
+                {
+                    if (KcpNative.Receive(child.Event.Connection, scratch.Bytes, scratch.Capacity) != length)
+                    {
+                        throw new NetworkProtocolException("Child unreliable discard returned inconsistent length.");
+                    }
+                    continue;
+                }
                 KcpNative.Check(KcpNative.PeekHeader(child.Event.Connection, header.Bytes, header.Capacity), "child header");
                 FrameHeader decoded = FrameCodec.ReadHeader(header.Bytes, child.Bound ?
                     (channel == 1 ? child.ReliableLimit : child.UnreliableLimit) : 32768, delivery,
@@ -473,7 +538,7 @@ namespace GameFrame.Server.Network
                     frame.Header = decoded;
                     frame.Length = length;
                     frame.Delivery = delivery;
-                    frame.AdmittedAt = now;
+                    frame.AdmittedAt = receivedAt;
                     child.LastReceived = now;
                     if (decoded.Kind == FrameKind.Control)
                     {
@@ -504,6 +569,16 @@ namespace GameFrame.Server.Network
                 }
             }
 
+            if (child.TransportEnded)
+            {
+                if (child.RemoteClosed)
+                {
+                    child.InputDrained = true;
+                    CompleteInput(child);
+                }
+                return;
+            }
+
             if (child.Bound && !child.RemoteClosed && now - child.PingAt >= 5000 && child.Nonce == 0)
             {
                 child.PingAt = now;
@@ -518,56 +593,71 @@ namespace GameFrame.Server.Network
                 throw new NetworkException("Child heartbeat deadline elapsed.");
             }
 
-            for (int i = 0; i < 64; i++)
+            for (int i = 0; writable && i < 64; i++)
             {
-                child.Sending ??= child.Controls.Count != 0 ? child.Controls.Dequeue() :
-                    child.Outgoing.Reader.TryRead(out OwnedFrame? next) ? next : null;
-                if (child.Sending == null)
+                if (child.Controls.TryPeek(out OwnedFrame? control))
                 {
-                    break;
-                }
-
-                OwnedFrame frame = child.Sending;
-                if (now - frame.AdmittedAt > (frame.Header.Kind == FrameKind.Control ? 15000 : 250))
-                {
-                    if (frame.Delivery == NetDelivery.Unreliable)
+                    if (!TrySendQueued(child, control, now))
                     {
-                        frame.Dispose();
-                        child.Sending = null;
-                        continue;
+                        break;
                     }
-
-                    throw new NetworkBackpressureException("Child output application queue age exceeded.");
+                    child.Controls.Dequeue();
                 }
-
-                int result = frame.Delivery == NetDelivery.Reliable ? KcpNative.SendReliable(child.Event.Connection, frame.Bytes, frame.Length) :
-                    KcpNative.SendUnreliable(child.Event.Connection, frame.Bytes, frame.Length);
-                if (result == KcpNative.Backpressure)
+                else if (child.Outgoing.Reader.TryPeek(out OwnedFrame? reliable) && TrySendQueued(child, reliable, now))
+                {
+                    child.Outgoing.Reader.TryRead(out _);
+                }
+                else if (child.OutgoingUnreliable.Reader.TryPeek(out OwnedFrame? unreliable) && TrySendQueued(child, unreliable, now))
+                {
+                    child.OutgoingUnreliable.Reader.TryRead(out _);
+                }
+                else
                 {
                     break;
                 }
-
-                KcpNative.Check(result, "child send");
-                if (frame.Header.Kind == FrameKind.Control && frame.Header.Opcode == (uint)ControlOpcode.Ping)
-                {
-                    child.PingAt = NetworkClock.GetMilliseconds();
-                    child.PongDeadline = child.PingAt + 15000;
-                }
-
-                frame.Dispose();
-                child.Sending = null;
             }
             if (child.RemoteClosed)
             {
-                var stats = new KcpNative.Stats { Size = 168, Version = 1 };
+                var stats = new KcpNative.Stats { Size = 168, Version = KcpNative.Version };
                 KcpNative.Check(KcpNative.GetStats(child.Event.Connection, ref stats), "closing child stats");
                 if (now >= child.CloseDeadline || ((child.Dispatch == null || child.Dispatch.IsCompleted) &&
-                    child.Sending == null && child.Controls.Count == 0 && !child.Outgoing.Reader.TryPeek(out _) &&
+                    child.Controls.Count == 0 && !child.Outgoing.Reader.TryPeek(out _) &&
+                    !child.OutgoingUnreliable.Reader.TryPeek(out _) &&
                     stats.Waitsnd == 0 && stats.PlaintextCount == 0 && stats.OutputCount == 0))
                 {
                     KcpNative.Check(KcpNative.CloseConnection(listener, child.Event.Id, child.Event.Generation), "orderly child close");
                 }
             }
+        }
+
+        private static bool TrySendQueued(Child child, OwnedFrame frame, long now)
+        {
+            if (now - frame.AdmittedAt >= (frame.Header.Kind == FrameKind.Control ? 15000 : 250))
+            {
+                if (frame.Delivery == NetDelivery.Unreliable)
+                {
+                    frame.Dispose();
+                    return true;
+                }
+                throw new NetworkBackpressureException("Child output application queue age exceeded.");
+            }
+
+            int result = frame.Delivery == NetDelivery.Reliable ? KcpNative.SendReliable(child.Event.Connection, frame.Bytes, frame.Length) :
+                KcpNative.SendUnreliable(child.Event.Connection, frame.Bytes, frame.Length);
+            if (result == KcpNative.Backpressure)
+            {
+                return false;
+            }
+
+            KcpNative.Check(result, "child send");
+            if (frame.Header.Kind == FrameKind.Control && frame.Header.Opcode == (uint)ControlOpcode.Ping)
+            {
+                child.PingAt = NetworkClock.GetMilliseconds();
+                child.PongDeadline = child.PingAt + 15000;
+            }
+
+            frame.Dispose();
+            return true;
         }
 
         private void ValidateHeader(FrameHeader header, NetDelivery delivery, bool bound)
@@ -634,7 +724,11 @@ namespace GameFrame.Server.Network
             }
             else if (opcode == ControlOpcode.Ping)
             {
-                QueueNonce(child, ControlOpcode.Pong, ControlCodec.ReadNonce(frame.Body));
+                ulong nonce = ControlCodec.ReadNonce(frame.Body);
+                if (!child.TransportEnded)
+                {
+                    QueueNonce(child, ControlOpcode.Pong, nonce);
+                }
             }
             else if (opcode == ControlOpcode.Pong)
             {
@@ -651,7 +745,15 @@ namespace GameFrame.Server.Network
                 ControlCodec.ReadClose(frame.Body);
                 child.RemoteClosed = true;
                 child.CloseDeadline = now + 2000;
-                lock (child.InputGate)
+                CompleteInput(child);
+            }
+        }
+
+        private static void CompleteInput(Child child)
+        {
+            lock (child.InputGate)
+            {
+                if (!child.InputCompleted)
                 {
                     child.InputCompleted = true;
                     child.InputSignal.Release();
@@ -709,7 +811,8 @@ namespace GameFrame.Server.Network
 
                         if (frame != null)
                         {
-                            reliableCount = frame.Delivery == NetDelivery.Reliable ? reliableCount + 1 : 0;
+                            reliableCount = frame.Delivery == NetDelivery.Reliable ? Math.Min(16, reliableCount + 1) :
+                                reliableCount < 16 ? 17 : reliableCount == 19 ? 0 : reliableCount + 1;
                         }
                     }
 
@@ -725,7 +828,8 @@ namespace GameFrame.Server.Network
                             continue;
                         }
 
-                        OwnedFrame? reply = await handler(frame, child.SendMemory, child.Lifetime.Token).ConfigureAwait(false);
+                        OwnedFrame? reply = await handler(new KcpConnectionInfo(child.Event.Id, child.Event.Generation, child.Event.GrantId),
+                            frame, child.SendMemory, child.Lifetime.Token).ConfigureAwait(false);
                         if (reply == null)
                         {
                             continue;
@@ -734,6 +838,10 @@ namespace GameFrame.Server.Network
                         bool transferred = false;
                         try
                         {
+                            if (child.TransportEnded)
+                            {
+                                continue;
+                            }
                             child.Lifetime.Token.ThrowIfCancellationRequested();
                             FrameCodec.ReadFrame(reply.Bytes.AsSpan(0, reply.Length), reply.Delivery == NetDelivery.Reliable ?
                                 child.ReliableLimit : child.UnreliableLimit, reply.Delivery, FrameDirection.ServerToClient, false);
@@ -746,7 +854,7 @@ namespace GameFrame.Server.Network
                             }
 
                             reply.AdmittedAt = NetworkClock.GetMilliseconds();
-                            if (!child.Outgoing.Writer.TryWrite(reply))
+                            if (!(reply.Delivery == NetDelivery.Reliable ? child.Outgoing : child.OutgoingUnreliable).Writer.TryWrite(reply))
                             {
                                 throw new NetworkBackpressureException("Child business send queue full.");
                             }
@@ -772,20 +880,22 @@ namespace GameFrame.Server.Network
             }
         }
 
-        private void Retire(Child child)
+        private void Retire(Child child, bool graceful = false)
         {
             // Retain ownership before cancellation invokes application registrations.
             retired.Add(child);
             try
             {
-                child.Lifetime.Cancel();
+                if (!graceful)
+                {
+                    child.Lifetime.Cancel();
+                }
             }
             finally
             {
                 child.InputCompleted = true;
                 child.Outgoing.Writer.TryComplete();
-                child.Sending?.Dispose();
-                child.Sending = null;
+                child.OutgoingUnreliable.Writer.TryComplete();
                 while (child.Controls.TryDequeue(out OwnedFrame? frame))
                 {
                     frame.Dispose();
@@ -813,6 +923,11 @@ namespace GameFrame.Server.Network
                     frame.Dispose();
                 }
 
+                while (child.OutgoingUnreliable.Reader.TryRead(out OwnedFrame? frame))
+                {
+                    frame.Dispose();
+                }
+
                 while (child.IncomingUnreliable.TryDequeue(out OwnedFrame? frame))
                 {
                     frame.Dispose();
@@ -824,9 +939,9 @@ namespace GameFrame.Server.Network
             }
         }
 
-        private void FlushUdp(Socket socket, IntPtr listener, OwnedFrame output, ref int length, ref KcpNative.UdpMetadata metadata, long now)
+        private void FlushUdp(Socket socket, IntPtr listener, OwnedFrame output, ref int length, ref KcpNative.UdpMetadata metadata, long now, ref int remaining)
         {
-            for (int i = 0; i < 256; i++)
+            while (remaining > 0)
             {
                 if (length == 0)
                 {
@@ -845,10 +960,15 @@ namespace GameFrame.Server.Network
                 {
                     if (!stale && metadata.Id != 0)
                     {
+                        if (children.TryGetValue(metadata.Id, out Child? expired))
+                        {
+                            expired.Failure = new NetworkBackpressureException("Listener UDP output age exceeded.");
+                        }
                         KcpNative.Check(KcpNative.CloseConnection(listener, metadata.Id, metadata.Generation), "expire UDP output");
                     }
 
                     length = 0;
+                    remaining--;
                     continue;
                 }
 
@@ -861,6 +981,7 @@ namespace GameFrame.Server.Network
                     }
 
                     length = 0;
+                    remaining--;
                 }
                 catch (SocketException error) when (error.SocketErrorCode == SocketError.WouldBlock)
                 {

@@ -93,6 +93,7 @@ namespace GameFrame.Network.Connection
         private int reliablePumpCount;
         private long unreliableDropped;
         private readonly Queue<SendEntry> sends = new Queue<SendEntry>();
+        private readonly Queue<SendEntry> unreliableSends = new Queue<SendEntry>();
         private readonly Queue<SendEntry> controls = new Queue<SendEntry>();
         private readonly Queue<ReceiveEntry> receives = new Queue<ReceiveEntry>();
         private readonly Queue<PendingRequest> completions = new Queue<PendingRequest>();
@@ -102,6 +103,9 @@ namespace GameFrame.Network.Connection
         private SendEntry inFlightControl;
         private readonly TaskCompletionSource<bool> connected = new TaskCompletionSource<bool>();
         private readonly TaskCompletionSource<bool> closed = new TaskCompletionSource<bool>();
+        private readonly TaskCompletionSource<bool> peerClosed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        private Task outputCloseTask;
+        private bool remoteCloseReceived;
         private CancellationTokenRegistration connectRegistration;
         private int sendBytes;
         private int sendCount;
@@ -128,6 +132,7 @@ namespace GameFrame.Network.Connection
         private ulong nextNonce;
         private long sentFrames;
         private long receivedFrames;
+        private long sentApplicationBytes, receivedApplicationBytes, sentBusinessBodyBytes, receivedBusinessBodyBytes, pingRoundTripMilliseconds;
         private long lateResponses;
         private long timeouts;
         private long cancellations;
@@ -284,6 +289,7 @@ namespace GameFrame.Network.Connection
                 lock (gate)
                 {
                     DrainSends(sends);
+                    DrainSends(unreliableSends);
                     DrainSends(controls);
                     ioStopped = true;
                 }
@@ -340,6 +346,7 @@ namespace GameFrame.Network.Connection
                     RequireConnected();
                     cancellationToken.ThrowIfCancellationRequested();
                     CheckSendCapacity(frame, false);
+                    CheckKcpAdmission(frame, timeout.TotalMilliseconds);
                     if (pending.Count >= options.PendingCount || PendingReservation > options.PendingMetadataBytes - metadataBytes)
                     {
                         throw new NetworkBackpressureException("Pending capacity exceeded.");
@@ -384,6 +391,7 @@ namespace GameFrame.Network.Connection
                     RequireConnected();
                     cancellationToken.ThrowIfCancellationRequested();
                     CheckSendCapacity(frame, false);
+                    CheckKcpAdmission(frame, double.PositiveInfinity);
                     frame.Header = new FrameHeader(FrameKind.Notify, route.Opcode, 0, frame.Length - 32);
                     FrameCodec.WriteHeader(frame.Bytes, frame.Header);
                     EnqueueSend(frame, null, false);
@@ -502,10 +510,31 @@ namespace GameFrame.Network.Connection
             }
         }
 
+        private void CheckKcpAdmission(OwnedFrame frame, double remainingMilliseconds)
+        {
+            if (transport is KcpTransport kcp)
+            {
+                long queuedBytes = 0;
+                foreach (SendEntry entry in sends)
+                {
+                    if (!entry.Frame.AcceptedByTransport && (entry.Pending == null || entry.Pending.State == 0))
+                    {
+                        queuedBytes += entry.Frame.Length;
+                    }
+                }
+                double wait = kcp.EstimateReliableWaitMilliseconds(queuedBytes, frame.Length, getMilliseconds());
+                if (wait >= Math.Min(options.MaxSendQueueAge.TotalMilliseconds, remainingMilliseconds))
+                {
+                    throw new NetworkBackpressureException("Estimated KCP send wait exceeds the admission deadline.");
+                }
+            }
+        }
+
         private void EnqueueSend(OwnedFrame frame, PendingRequest request, bool control)
         {
             frame.AdmittedAt = getMilliseconds();
-            (control ? controls : sends).Enqueue(new SendEntry { Frame = frame, Pending = request, Control = control });
+            (control ? controls : frame.Delivery == NetDelivery.Unreliable ? unreliableSends : sends)
+                .Enqueue(new SendEntry { Frame = frame, Pending = request, Control = control });
             if (control)
             {
                 controlCount++;
@@ -525,26 +554,48 @@ namespace GameFrame.Network.Connection
 
         private async Task SendLoopAsync()
         {
+            var kcp = transport as KcpTransport;
+            bool retry = false;
+            bool tryUnreliable = false;
             while (!lifetime.IsCancellationRequested)
             {
-                await sendSignal.WaitAsync(lifetime.Token).ConfigureAwait(false);
+                if (kcp == null)
+                {
+                    await sendSignal.WaitAsync(lifetime.Token).ConfigureAwait(false);
+                }
+                else
+                {
+                    bool empty;
+                    lock (gate)
+                    {
+                        empty = controls.Count == 0 && sends.Count == 0 && unreliableSends.Count == 0;
+                    }
+                    if (retry || empty)
+                    {
+                        await sendSignal.WaitAsync(retry ? 10 : Timeout.Infinite, lifetime.Token).ConfigureAwait(false);
+                    }
+                }
                 SendEntry item;
+                Queue<SendEntry> queue;
+                bool retained = false;
                 bool discard;
                 Exception sendFailure = null;
                 lock (gate)
                 {
-                    Queue<SendEntry> queue = controls.Count != 0 ? controls : sends;
+                    queue = controls.Count != 0 ? controls :
+                        unreliableSends.Count != 0 && (sends.Count == 0 || tryUnreliable) ? unreliableSends : sends;
                     if (queue.Count == 0)
                     {
                         continue;
                     }
 
-                    item = queue.Dequeue();
+                    item = kcp == null ? queue.Dequeue() : queue.Peek();
                     if (item.Control)
                     {
                         inFlightControl = item;
                     }
-                    discard = item.Pending != null && item.Pending.State != 0;
+                    discard = (item.Pending != null && item.Pending.State != 0) ||
+                        (!item.Control && stopped) || (!item.CloseOutput && peerClosed.Task.IsCompleted);
                     long now = getMilliseconds();
                     if (!discard && item.Pending != null)
                     {
@@ -562,7 +613,7 @@ namespace GameFrame.Network.Connection
                         }
                     }
 
-                    if (item.Control && now - item.Frame.AdmittedAt >= 15000)
+                    if (item.Control && !peerClosed.Task.IsCompleted && now - item.Frame.AdmittedAt >= 15000)
                     {
                         sendFailure = new NetworkException("Control frame send deadline elapsed.");
                     }
@@ -606,13 +657,28 @@ namespace GameFrame.Network.Connection
                         }
                         else
                         {
-                            await transport.SendAsync(item.Frame, lifetime.Token, () => CanSend(item)).ConfigureAwait(false);
+                            if (kcp != null && !await kcp.TrySendAsync(item.Frame, lifetime.Token, () => CanSend(item)).ConfigureAwait(false))
+                            {
+                                retained = true;
+                                retry = true;
+                                tryUnreliable = !item.Control && item.Frame.Delivery == NetDelivery.Reliable;
+                                continue;
+                            }
+                            if (kcp == null)
+                            {
+                                await transport.SendAsync(item.Frame, lifetime.Token, () => CanSend(item)).ConfigureAwait(false);
+                            }
                         }
                         lock (gate)
                         {
                             if (item.Frame.AcceptedByTransport)
                             {
                                 sentFrames++;
+                                sentApplicationBytes += item.Frame.Length;
+                                if (!item.Control)
+                                {
+                                    sentBusinessBodyBytes += item.Frame.Header.BodyLength;
+                                }
                             }
 
                             if (item.Frame.AcceptedByTransport && item.Frame.Header.Opcode == (uint)ControlOpcode.Ping && pendingNonce != 0 &&
@@ -625,17 +691,40 @@ namespace GameFrame.Network.Connection
                     }
 
                     item.Source?.TrySetResult(true);
+                    retry = false;
+                    tryUnreliable = false;
                 }
-                catch
+                catch (Exception error)
                 {
-                    item.Source?.TrySetCanceled();
+                    if (peerClosed.Task.IsCompleted && error is WebSocketException)
+                    {
+                        item.Source?.TrySetResult(true);
+                        retry = false;
+                        tryUnreliable = false;
+                        continue;
+                    }
+                    if (error is OperationCanceledException canceled)
+                    {
+                        item.Source?.TrySetCanceled(canceled.CancellationToken);
+                    }
+                    else
+                    {
+                        item.Source?.TrySetException(error);
+                    }
                     throw;
                 }
                 finally
                 {
                     lock (gate)
                     {
-                        ReleaseSend(item);
+                        if (!retained)
+                        {
+                            if (kcp != null)
+                            {
+                                queue.Dequeue();
+                            }
+                            ReleaseSend(item);
+                        }
                         if (item.Control)
                         {
                             inFlightControl = null;
@@ -684,11 +773,36 @@ namespace GameFrame.Network.Connection
                     FrameDirection.ServerToClient, false, lifetime.Token, ValidateHeader, unreliableReceiveMemory).ConfigureAwait(false);
                 if (frame == null)
                 {
+                    peerClosed.TrySetResult(true);
                     lock (gate)
                     {
                         orderly = true;
                         stopped = true;
-                        receives.Enqueue(new ReceiveEntry { End = true });
+                    }
+                    if (connect.Transport == NetworkTransportKind.WebSocket)
+                    {
+                        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                        Task output = QueueClose(true);
+                        Task completed = await Task.WhenAny(output, Task.Delay(2000, timeout.Token)).ConfigureAwait(false);
+                        if (ReferenceEquals(completed, output))
+                        {
+                            try
+                            {
+                                await output.ConfigureAwait(false);
+                            }
+                            catch (WebSocketException)
+                            {
+                                // The peer already ended the transport. Keep earlier responses
+                                // ordered even when its close acknowledgement cannot be sent.
+                            }
+                        }
+                    }
+                    lock (gate)
+                    {
+                        if (!remoteCloseReceived)
+                        {
+                            receives.Enqueue(new ReceiveEntry { End = true });
+                        }
                     }
 
                     return;
@@ -697,6 +811,18 @@ namespace GameFrame.Network.Connection
                 bool transferred = false;
                 try
                 {
+                    if (remoteCloseReceived)
+                    {
+                        throw new NetworkProtocolException("Application input after remote Close.");
+                    }
+                    lock (gate)
+                    {
+                        receivedApplicationBytes += frame.Length;
+                        if (frame.Header.Kind != FrameKind.Control)
+                        {
+                            receivedBusinessBodyBytes += frame.Header.BodyLength;
+                        }
+                    }
                     if (frame.Header.Kind == FrameKind.Control)
                     {
                         HandleControl(frame);
@@ -743,7 +869,6 @@ namespace GameFrame.Network.Connection
                                 unreliableDropped++;
                             }
 
-                            frame.AdmittedAt = getMilliseconds();
                             unreliableReceives.Enqueue(new ReceiveEntry { Frame = frame });
                             unreliableReceiveBytes += frame.Capacity;
                             transferred = true;
@@ -843,6 +968,7 @@ namespace GameFrame.Network.Connection
                         throw new NetworkException("Application heartbeat timed out.");
                     }
 
+                    pingRoundTripMilliseconds = Math.Max(0, getMilliseconds() - lastPing);
                     pendingNonce = 0;
                     pongDeadline = 0;
                 }
@@ -859,11 +985,19 @@ namespace GameFrame.Network.Connection
 
                     orderly = true;
                     stopped = true;
+                    remoteCloseReceived = true;
                     receives.Enqueue(new ReceiveEntry { End = true });
                 }
 
                 // Reliable packets validated before Close are delivered before the end marker.
-                StopIo();
+                if (connect.Transport == NetworkTransportKind.WebSocket)
+                {
+                    CloseIoTask = CloseIoTask ?? Task.Run(() => CloseIoAsync(true));
+                }
+                else
+                {
+                    StopIo();
+                }
             }
         }
 
@@ -916,6 +1050,10 @@ namespace GameFrame.Network.Connection
         {
             lock (gate)
             {
+                if ((!item.Control && stopped) || peerClosed.Task.IsCompleted)
+                {
+                    return false;
+                }
                 if (item.Pending == null)
                 {
                     return !stopped || item.Control;
@@ -972,19 +1110,19 @@ namespace GameFrame.Network.Connection
                 }
 
                 SendEntry oldestControl = inFlightControl ?? (controls.Count == 0 ? null : controls.Peek());
-                if (oldestControl != null && now - oldestControl.Frame.AdmittedAt >= 15000)
+                if (!stopped && oldestControl != null && now - oldestControl.Frame.AdmittedAt >= 15000)
                 {
                     throw new NetworkException("Control frame send deadline elapsed.");
                 }
 
-                if (pendingNonce != 0 && pongDeadline != 0 && now >= pongDeadline)
+                if (!stopped && pendingNonce != 0 && pongDeadline != 0 && now >= pongDeadline)
                 {
                     throw new NetworkException("Application heartbeat timed out.");
                 }
 
                 if (!stopped && pendingNonce == 0 && now - lastPing >= 5000)
                 {
-                    pendingNonce = nonce = ++nextNonce;
+                    pendingNonce = nonce = nextNonce = checked(nextNonce + 1);
                     lastPing = now;
                 }
             }
@@ -1118,17 +1256,17 @@ namespace GameFrame.Network.Connection
             }
 
             StateChanged?.Invoke(NetworkClientState.Closing, failure);
-            CloseIoTask = Task.Run(CloseIoAsync);
+            CloseIoTask = Task.Run(() => CloseIoAsync());
         }
 
         internal Task CloseIoTask { get; private set; }
 
-        private async Task CloseIoAsync()
+        private async Task CloseIoAsync(bool remote = false)
         {
             try
             {
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                Task send = QueueClose(false);
+                Task send = remote ? Task.CompletedTask : QueueClose(false);
                 Task completed = await Task.WhenAny(send, Task.Delay(2000, timeout.Token)).ConfigureAwait(false);
                 if (ReferenceEquals(completed, send))
                 {
@@ -1138,6 +1276,10 @@ namespace GameFrame.Network.Connection
                     if (output.IsCompleted)
                     {
                         await output.ConfigureAwait(false);
+                        if (connect.Transport == NetworkTransportKind.WebSocket)
+                        {
+                            await Task.WhenAny(peerClosed.Task, Task.Delay(2000, timeout.Token)).ConfigureAwait(false);
+                        }
                     }
                 }
             }
@@ -1160,6 +1302,10 @@ namespace GameFrame.Network.Connection
                 {
                     return Task.CompletedTask;
                 }
+                if (output && outputCloseTask != null)
+                {
+                    return outputCloseTask;
+                }
 
                 OwnedFrame frame = controlMemory.Allocate(output ? 32 : 36);
                 try
@@ -1179,6 +1325,10 @@ namespace GameFrame.Network.Connection
                     controlCount++;
                     controlBytes += frame.Capacity;
                     sendSignal.Release();
+                    if (output)
+                    {
+                        outputCloseTask = source.Task;
+                    }
                     return source.Task;
                 }
                 catch
@@ -1232,12 +1382,12 @@ namespace GameFrame.Network.Connection
                 {
                     receive = unreliableReceives.Dequeue();
                     unreliableReceiveBytes -= receive.Frame.Capacity;
-                    reliablePumpCount = 0;
+                    reliablePumpCount = reliablePumpCount < 16 ? 17 : reliablePumpCount == 19 ? 0 : reliablePumpCount + 1;
                 }
                 else if (receives.Count != 0)
                 {
                     receive = receives.Dequeue();
-                    reliablePumpCount++;
+                    reliablePumpCount = Math.Min(16, reliablePumpCount + 1);
                     if (!receive.End)
                     {
                         receiveCount--;
@@ -1516,7 +1666,9 @@ namespace GameFrame.Network.Connection
             {
                 return new NetworkMetricsSnapshot(Generation, memory.OwnedBytes, sendCount, receiveCount, pending.Count,
                     deadlines.Count, sentFrames, receivedFrames, lateResponses, timeouts, cancellations, queueAgeWarnings,
-                    transport is KcpTransport kcp ? kcp.GetMetrics() : default, unreliableDropped);
+                    transport is KcpTransport kcp ? kcp.GetMetrics() : default, unreliableDropped,
+                    memory.PeakReservedBytes, sentApplicationBytes, receivedApplicationBytes,
+                    sentBusinessBodyBytes, receivedBusinessBodyBytes, pingRoundTripMilliseconds);
             }
         }
     }

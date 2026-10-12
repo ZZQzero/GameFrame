@@ -1,8 +1,8 @@
 {
-  "abi": 1,
+  "abi": 2,
   "binary": "libgameframe_kcp.dylib",
-  "sha256": "c9562fe935029500a0a9f0073eba46a5a1a0d7cc1bc6322cf7b7534111677cd2",
-  "build_id": "6d59e6ba2baf0bd4df746efe90a126fdec78b457690c127641e9bb1db5045540",
+  "sha256": "0cffd5874206055c777a52e1b5ab5875074e7bc17ed108a8e3d26b038249befb",
+  "build_id": "57b268ee6863067467c778123dc61a36fbc0a0ca9928e5f810fc562fc62412d4",
   "platform": "macos",
   "arch": "universal"
 }

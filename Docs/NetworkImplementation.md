@@ -2,7 +2,9 @@
 
 设计契约见 [NetworkDesign.md](NetworkDesign.md)。本记录区分已实现代码、已执行验证和待实现项，不将协议单元测试视为完整网络验收。
 
-## 当前底层实现（2026-10-12）
+最新状态见文末“mbedTLS 4.2.0 升级”：ABI2 五平台产物已更新到 4.2.0 + TF-PSA-Crypto 1.2.0，原生 ASan/UBSan、网络59/59及重启后 Unity 生命周期/真实UDP通过。此前的3.6.7、ABI1和验证数量属于历史；逐文件审查范围及限制见 [NetworkReview.md](NetworkReview.md)。
+
+## 初次底层实现记录（2026-10-12）
 
 按 C KCP/DTLS 方案完成现有工具链支持的底层实现，Windows 按用户确认交给 CI。游戏世界会话业务、WebGL WSS 延后；本记录不将构建成功视为全部平台验收。
 
@@ -179,7 +181,7 @@ Unity Test Runner 选择 `GameFrame.Tests.NetworkProtocolTests` 与 `GameFrame.T
 
 ## C 原生传输落地与代码审查（2026-10-12）
 
-本节为当前状态；前面的 P0/P1 与阶段表保留当时记录，不表示 KCP 现在尚未实现。
+本节记录本次全量复核修改前的状态；P0/P1与阶段表同样保留当时记录，当前修正与验证以文末为准。
 
 ### 当前框架范围
 
@@ -228,3 +230,104 @@ Unity Test Runner 选择 `GameFrame.Tests.NetworkProtocolTests` 与 `GameFrame.T
 - Unity NetworkLifecycleTests：11/11 通过，新增 Disposed 回调重入 Runtime Shutdown，包含空闲 KCP worker 收尾。Unity NativeUdpHelloEchoAndRelease：1/1 通过，实际连接 .NET local-kcp-dtls 并验证关闭后托管/native 预留归零。
 - 生成协议 check --artifacts 通过。Unity Editor 编译通过，Console 错误0；StandaloneOSX Player 脚本编译通过，43 个程序集。未执行原生 IL2CPP 打包、Windows/移动设备、远程 CI 或长时间 soak。
 - 恢复测试前的 EditorSettings 文件与内存设置；Launch.unity 未播放、无未保存修改。临时凭据文件、编译目录与本轮验证日志已清理；原生构建产物/工具链保留在忽略的 Tools/Artifacts 下。
+
+
+## 底层实施方案逐项复核（2026-10-12）
+
+对照 NetworkNativeDesign 第 1～9 节及其引用的 NetworkDesign 第 6、10、12、17、19 节，结论：核心传输可联调，方案并未全部实现/验收。本次是源码与交付审查，没有修改运行时代码或重新构建安装插件。此前“产物已落地”不能作为全部契约完成的证明。
+
+### 核对范围与状态
+
+| 方案 | 核对实现 | 结论 |
+| --- | --- | --- |
+| 1～2：分层、落点、同源核心 | IFrameTransport、WebSocketTransport、ConnectionContext、NetworkClient/Runtime、GameFrame.Protocol.projitems | 已实现：C 不解析 DTO，C# socket，单客户端宿主 worker，服务端独立 listener owner，共用生成协议/帧核心 |
+| 3：ABI/状态/错误/借用 handle | gfnet.h、ABI.md、KcpNative.cs、gfnet_connection/listener.c | 主要实现；完整字段 offset 验证和 DTLS 负错误分类仍不充分；服务端正常 DTLS Close 的派发顺序有缺口 |
+| 4：IO/线程/期限/额度 | KcpWorker/Transport、KcpListenerHost、ConnectionContext/NetworkOptions | 主要实现；client KCP admission 等待估算、业务发送优先级与 server WouldBlock 后暂停业务发送未实现；精细 deadline 等待调度明确延后 |
+| 5：DTLS/KCP/两个通道 | mbedtls_config.h、gfnet_connection.c、KCP 唯一 c/h | 加密、MTU、message mode、WANT 待写地址保留、Fatal、KCP wire 校验已实现；native 接收通道公平性未实现 |
+| 6：分配/关闭/诊断 | gfnet_memory.c、OwnedFrame、ConnectionContext、NetworkDiagnostics、各 owner 收尾 | native 配额和清零、跨层预留、帧/pending 保守 reservation 已实现；完整托管计账、诊断和正常远端关闭顺序未全部完成 |
+| 7：授权与应用边界 | gfnet_listener.c、KcpListenerHost、LocalKcpService、AccountSessions/ServerConnection/Program | register/revoke、cookie、ticket 一次绑定/竞争/终态槽已实现；应用 handler 尚无授权连接上下文/终态回调；账号到世界授权接入按范围延后 |
+| 8：构建安装 | CMakeLists、prepare_kcp/mbedtls、build/install、verify_windows、windows-llvm-mingw、平台 metadata、network.yml | 当前五种已安装目标的源码/清单/产物 hash 均匹配；Windows 26 导出验证通过；Linux 构建入口/CI 有代码但未本地执行；发布/真机证据未完成 |
+| 9：退出条件 | gfnet_regression、allocation_safety/fastack 及验证脚本、KcpLoopback/SourceBudget、客户端/服务端时序、Unity lifecycle/loopback 测试 | 有回归证据，但不足以完成全部退出条件：详见下方矩阵 |
+
+原生维护源码同时核对 gfnet_internal.h、mbedTLS lock；客户端辅助同时核对 NetworkConnectOptions、NetworkException、Frame/ControlCodec、PendingDeadlineHeap、协议 catalog/contract 与预算 writer。测试及构建脚本按入口和实际断言核对，第三方 mbedTLS 重点核对配置、分配钩子及 DTLS 错误处理路径，不宣称逐行审计整个上游库。
+
+### 实际行为缺口，按优先级排列
+
+1. **P1：服务端正常 DTLS 关闭丢弃已接收可靠帧。** `KcpListenerHost.Run` 在 DriveChild 前调用 PollEvents，Closed 分支直接 Retire/release；Retire 取消业务 owner，native 剩余帧和已入队但未执行的可靠帧没有按关闭标记顺序交付。临时 C 双端探针复现 `Closed kind=2 reason=0` 时仍可 peek 到可靠 32-byte 帧，release 随后将其释放。GFNP Control Close 有另一条排队/等待路径，不能据此认为 DTLS close_notify 同样满足正常断线 FIFO。对应 KcpListenerHost.cs:266、383，gfnet_connection.c:248。
+2. **P2：native 入口可能使不可靠接收饥饿。** gfnet_peek_frame 永远优先完整可靠帧，只有可靠为空才返回不可靠；client Pump/服务端 Dispatch 的“16 条可靠后处理一次不可靠”发生在转入托管队列之后，无法保证 native 中的不可靠帧被转移。临时真实 DTLS 双端探针同时保留32条可靠帧和1条不可靠帧，复现必须先消费全部32条可靠帧才选中 channel2。持续可靠输入下，无最长等待保证；在预算内淘汰/积压不等于公平派发。应在不复制第二套可靠队列的前提下，让 peek/header/recv 保持一致的通道选择。对应 gfnet_connection.c:376。
+3. **P2：KCP 发送 admission 只检查条数/容量。** CheckSendCapacity 没有按应用待发字节、native pending/inflight、可用速率及 RPC 剩余期限估算等待；当前只能接受后在移交前以队龄/timeout 结束。与总设计第10节的“预计超250ms/剩余deadline则入口拒绝”有差异。对应 ConnectionContext.cs:496。
+4. **P2：可靠发送优先级未实现。** 可靠和不可靠业务共用 sends FIFO，只有 controls 单独优先；已排队不可靠帧在等待自身额度/总额度时可阻塞后面的可靠 RPC。client admission 与传输各自有不可靠 token bucket，前者是额外入口限流，文档尚未明确该两级策略；不能把它当成已实现可靠业务优先。对应 ConnectionContext.cs:505、532，KcpTransport.cs:354。
+5. **P2：服务端 socket WouldBlock 后仍追加业务发送。** Run 保留 outputLength，但继续遍历 DriveChild；后者每child最多移交64条业务/控制帧，没有 pending socket output 的业务准入条件。client ProcessSend 有 outputLength 判断，服务端未对应实现。虽然 native 队列/队龄仍有限，阻塞期间继续堆积会增加压力，未满足底层方案第4节的暂停追加业务规则。对应 KcpListenerHost.cs:226、267、521，KcpTransport.cs:359。
+6. **P2：诊断只实现部分。** 尚无 Ping RTT、业务有效字节、Connect/Hello 和 RPC 分阶段耗时、worker 轮转耗时/迟延、host Pump 用时及托管峰值完整快照。native 有 input_count、output_oldest_ms、allocations、capabilities 等字段，但公开 KcpMetricsSnapshot 未完整暴露；DTLS bad-MAC/replay/cookie 细分计数在 ABI 文档中声明不可用，公开快照没有逐指标能力标记。TimeoutRetransmits 只涵盖超时重传，不能当全部重传。对应 NetworkDiagnostics.cs:33、100。
+7. **P2：完整托管计账尚未完成。** 帧/pending 每项512bytes是保守 reservation，常驻 Dictionary/Queue/Channel、任务/取消注册、来源表/命令委托、订阅和驱动对象未逐项核验；DTO 本身属于业务/序列化分配，也需与网络可控预算明确划界。native allowance 和源码统计正确不意味着8MiB/64MiB总成本契约已验收。对应 OwnedFrame.cs:14、ConnectionContext.cs:99 与各 owner 的常驻容器。
+8. **接业务前需要补的框架接口。** 服务端 handler 当前参数只有 OwnedFrame、预算和token，应用不能通过该入口得到grantId/connectionId/generation，也没有应用级绑定/关闭回调。底层 native event 齐全，但仅在 host 内部消费；正式业务接入应以明确的连接上下文和生命周期通知连接授权所有者，不把账号/世界逻辑写进 C 或 Runtime。对应 KcpListenerHost.cs:74、728。
+
+完整字段 offset 守卫目前仅明确检查 config 的两个指针偏移，其余以size为主；DTLS read/handshake 除等待/正常关闭等路径之外的负值统一转 ProtocolError，内部错误仍保存native_error但分类未逐项审核。这两项属于ABI/错误契约补强，不能用已有错误PSK/篡改测试推定全部覆盖。
+
+### 验收与当前证据的差距
+
+- 单连接：现有测试覆盖32KiB可靠、1150bytes不可靠、错误PSK、篡改/重放、未知channel、KCP尾随、配额/create与send失败、早tick/output队龄、owner和低32位回绕。没有完整逐点 DTLS握手/read/write/output/listener 分配故障、WANT状态转换组合矩阵。
+- listener：cookie陌生来源清理、grant双握手竞争/单次绑定、撤销/release、共享socket与来源表边界已有测试；grant/握手/连接表全满、终态覆盖、过期/重复注册/错误ticket/旧generation、慢socket等完整矩阵仍缺。
+- `test_max_ack_and_window` 实际验证128个ACK、排队256segments和至少3个ACK包，并未逼近方案推导的3008 ACK＋128满MSS整窗重传的组合flush。不能仅凭测试名宣布最大flush峰值已验收。无flush时输入额度不恢复、持续丢包/乱序/拥塞/限速和双通道公平性仍需专项测试。
+- 客户端与服务端实联具备Hello/Echo、两通道、主线程停顿、撤销与收尾；没有真实socket WouldBlock/短写注入和完整KCP取消/满额/在途Close矩阵。Unity现有实联仅macOS Editor Hello/Echo，未覆盖全平台/双通道真机。
+- Windows DLL仅交叉构建/PE检查，未执行Windows原生或UDP；MSVC/Windows、Linux远程CI未运行。Android/iOS/simulator只有产物和清单。IL2CPP最终链接、裁剪/formatter、IPv6/后台/弱网、容量及24小时soak仍未完成；这些属于验收缺口，不是要求补世界业务。
+- 精细deadline等待已经在底层方案明确延后，但总设计第6.1节仍写“最近deadline/取消信号可提前唤醒”；现有KcpWorker最多等10ms，取消主要由下一轮观察token/CheckClock。两份文档尚需统一为同一实际承诺。
+
+本轮新增证据：五组安装清单全部匹配当前维护源码/build_id/二进制hash；Windows导出26项通过；复跑macOS arm64 ASan/UBSan native harness1303个检查，live native bytes=0。两个临时探针只用于验证上述行为，编译产物与源码均在系统临时目录结束后删除。1303是断言检查次数，不能理解为1303个独立场景。本轮不修改Unity状态，不将前一轮Unity/Player验证当作本轮新执行结果。
+
+其他时序差异：client/server 每轮首尾各调用一次最多256包的 FlushOutput，没有共享该轮剩余额度，理论合计512包，与总设计“每轮每连接最多256个输出”不完全一致。主线程目前是每client每轮最多16个工作单元、Context在16个可靠工作后取1个不可靠，尚非总设计第9.2节的16可靠＋最多4不可靠配额。native 不可靠packet的born也没有通过应用帧ABI透传；客户端转入托管队列重新设置AdmittedAt，native滞留时间不包含在托管UnreliableMaxAge中，需明确并落实整体时效边界。
+
+本轮 .NET KcpLoopbackTests＋KcpSourceBudgetTests 实际执行8/8通过，无跳过。这证明现有覆盖场景可用；上述探针与源码对照揭示的未覆盖缺口仍然存在。
+
+## 本次全量复核后修改（2026-10-12）
+
+本节为最新状态，前述缺口与 ABI1 记录保留为历史。逐文件清单、调用链、方案比较及上游审计边界见 [NetworkReview.md](NetworkReview.md)。
+
+采用现有 owner 和生命周期调整：正常 DTLS/WSS EOF 不立即取消已接受可靠消息；按 FIFO 消费，再释放 native/托管所有权。物理 EOF 后不发送回复。WSS 的唯一发送 owner 执行 CloseOutput，客户端接收 owner 等待标准 close ACK，最多2秒后 Abort；显式关闭/故障仍取消并等待实际 IO。
+
+客户端与 listener 分离控制/可靠/不可靠 FIFO；native 未接受时保留队首，不重复扣 token，不可靠背压不占住可靠 RPC。可靠 admission 在分配 correlation/pending 前估计 token/window 等待。native/托管派发按16可靠/4不可靠轮转；peek/header/BufferTooSmall不推进。ABI升级到2透传不可靠原始 born，有效期包含 native 等待和托管迁移，支持 uint32 回绕。
+
+client/server 首尾 flush 共享每轮256包预算，socket保留WouldBlock包时停止追加业务；grant注册deadline从调用准入起算，owner只使用剩余TTL；临时密钥在转换/登记失败时也清零。handler增加不可变connectionId/generation/grantId。C静态断言与C#验证完整公开结构offset/size。DTLS错误区分已知远端协议、本地内部及分配失败，保留首因和完整native子码。
+
+listener feed 返回的 InternalError 可来自临时握手 create/tick，不能升级为共享 socket 故障。临时握手失败立即释放，已有 child 终态由原生事件处理；listener tick/poll 仍检查自身失败。新增错误凭据握手后已有连接 Echo 与新 grant/连接仍可使用的实际 UDP 回归；该回归验证握手隔离，不代表已注入全部 DTLS 内部失败分支。
+
+指标新增GFNP帧字节/业务正文、Ping RTT、计账预留峰值、native分配/input/plaintext/output队龄与能力字段；完整元数据、RPC分阶段/分位、worker/Pump用时和DTLS内部细分丢弃仍未完成。不将reservation当成RSS或实际对象布局。固定10ms轮询承诺同步到总设计。
+
+### 本轮实际验证
+
+- .NET网络最终全套59/59通过、0跳过：含真实UDP正常EOF排空、授权身份、可靠准入不分配pending/ID及不可靠桶阻塞时可靠RPC继续完成。新增WS物理EOF立刻停止准入/排队发送，在途Send因EOF失败不覆盖此前保留响应；错误凭据握手不影响已有连接/后续准入；既有WSS认证/心跳回归通过。
+- 协议/生成测试178/178通过，check --artifacts通过；没有修改proto或生成文件。
+- macOS arm64 ASan/UBSan native harness2294次REQUIRE检查通过，native live bytes=0；macOS universal Release ctest通过。新增实际DTLS公平消费、born/uint32回绕、真实close_notify后可靠帧可读取及DTLS首因/错误分类验证。断言次数不是独立场景数。
+- 独立KCP分配安全75/75、准备后ACK/调度和独立ACK16/16＋tick4/4通过；临时构建自动清理。
+- ABI2 macOS universal、Windows x64、Android arm64、iOS device arm64、simulator arm64重新构建安装；源码/hash/build_id、五组产物hash及原meta逐字节一致性核验通过。Windows26导出/系统DLL依赖匹配，回归exe只构建，尚未Windows执行。移动库只有构建与清单证据。
+- Unity6000.3.19f1已重启为新进程加载ABI2；最终Editor编译与Console错误0，网络EditMode143/143、生命周期PlayMode11/11、实际UDP Hello/Echo/释放1/1通过，关闭后托管/native预留归零。StandaloneOSX Player脚本编译43个程序集通过；不代表原生IL2CPP链接/运行。
+- 测试结束保持Launch.unity、未播放且无未保存修改，恢复EditorSettings原文件与内存选项；临时MCP重连脚本、凭据、验证日志、Player脚本输出均清理。Tools/Artifacts中的工具链与原生构建目录保留。
+- 尚未执行远程CI、IL2CPP最终链接/裁剪/设备、IPv6/代理/后台/弱网、生产容量及24h soak。世界业务与WebGL WSS按确认延后。
+
+## mbedTLS 4.2.0 升级（2026-10-12）
+
+按用户要求将实际构建依赖从 3.6.7 更新到 4.2.0，包含 TF-PSA-Crypto 1.2.0。上游将 4.1 标为 LTS，4.2.0 是 stable；锁文件与当前设计不将 4.2 标为 LTS。官方发布 tar.bz2 的 SHA-256 为 `2bed9d713b4668f76553b097e72b8aa30bc8f112a940d7ae228d524bbde6ffea`，依赖 commit、TF-PSA commit 和安全公告检查日期均保存于锁。普通构建继续离线核验依赖，不浮动下载。
+
+升级覆盖依赖锁/准备工具、CMake、TLS/PSA 配置、Windows 线程适配、native memory/connection/listener、回归、构建许可证合并和五个平台安装产物。C ABI2 与 GFNP 应用协议保持现有契约；不加入业务重试、回滚或传输降级。
+
+- 4.x 强制 PSA：移除每连接 entropy/CTR-DRBG 和 SSL RNG 配置；cookie setup 使用新签名，ticket SHA-256 使用 psa_hash_compute。TLS／Crypto 配置分别维护，仍仅 DTLS1.2 + PSK AES128-GCM、cookie、防重放，不启用证书、RSA/ECC、TLS1.3或会话恢复。
+- PSA 一次初始化，1024 个固定共享密钥槽元数据采用静态存储并受库锁保护，不计入动态 owned_bytes。密钥材料、操作与默认复制缓冲沿当前调用 quota 分配；释放按分配头归还。默认复制缓冲保留，避免改变 TLS 原地 AEAD 的约定。槽耗尽显式报 AllocationFailed，释放后可重新使用。
+- external RNG 使用 Windows BCryptGenRandom、Apple CommonCrypto CCRandomGenerateBytes、Android API23 /dev/urandom、Linux getrandom；无共享堆上随机数状态。失败清零输出、返回 insufficient entropy 并终止创建/握手。不存在自动切换随机源。
+- 新版错误码直接按单一 SSL／PSA 原值分类，删除3.x高低层掩码；配额/PSA内存失败归 AllocationFailed，已知远端协议失败归 ProtocolError，熵源/配置/内部失败归 InternalError，首因保留。
+- Windows 使用新版9个 mutex/condition callbacks；修正 LLVM-MinGW 会忽略 __declspec(thread) 的问题：MSVC 用该声明，MinGW 用 C11 _Thread_local。已核验 DLL 的 gfnet_current_quota 地址位于 PE TLS 区域，不共享为普通全局变量。
+- 官方归档147个相对链接统一展开为普通文件，Windows准备无需管理员/Developer Mode。5070个文件逐个与已校验的官方提取树内容比较一致；新临时目录再次准备得到相同 source_tree_sha256。构建/安装沿现有源码和二进制锁校验，增加独立 TF-PSA-Crypto 许可证；iOS合并新的 libtfpsacrypto.a。
+
+本次实际验证（均使用4.2.0，不能以此前3.6.7结果替代）：
+
+| 验证 | 结果与边界 |
+| --- | --- |
+| macOS arm64 Debug ASan/UBSan native | 8328次 REQUIRE 检查通过，sanitizer无错误，释放后动态live bytes=0；新增600字节随机输出/失败清零、SHA-256已知向量、4线程64对同时存活的DTLS双端、1024槽耗尽/释放/重新分配，保留全部已有回归。线程等待次数可能随调度变化，检查数量以本次输出为准。 |
+| macOS universal Release native | ctest通过，8328次检查、live bytes=0；arm64宿主实跑，x86_64切片已编译。 |
+| Windows x64 | LLVM-MinGW UCRT生成DLL和回归exe；完整26个ABI导出、PE TLS及系统DLL依赖通过；未在Windows执行exe，MSVC CI工作流未远程执行。 |
+| Android arm64 / iOS device arm64 / simulator arm64 | NDK/Xcode编译、静态合并和安装器校验通过；未在设备/模拟器运行，simulator archive仍按契约默认禁用。 |
+| 五平台安装产物 | 当前维护源码hash、二进制hash、build_id、4.2.0/TF1.2.0锁、许可证一致；保留全部既有插件.meta及GUID，未安装sanitizer产物。 |
+| .NET网络全套 | 显式加载本次macOS Release库，59/59通过、0跳过，包含真实UDP/DTLS。 |
+| 重启后Unity | Editor进程31934已退出，新验证进程43805；Unity编译完成/Console错误0，NetworkLifecycleTests 11/11、NativeUdpHelloEchoAndRelease 1/1通过；使用当前安装的macOS库和同版本.NET本地服务。 |
+| 清理与恢复 | 本地服务Ctrl+C退出码0；恢复原环境变量、EditorSettings文件字节及Launch.unity/未播放/无场景改动；临时Editor桥接脚本、目录/meta和凭据清理。 |
+
+协议生成代码未修改，未重复178个协议测试；此前Player脚本43程序集结果为历史。本次未执行IL2CPP原生链接与Player运行、Windows/Linux宿主执行、远程CI、移动真机/模拟器、IPv6/后台/换网和长期容量验收。这些不以源码、编译或Editor联调结果代替。世界业务与WebGL WSS继续按已确认范围延后。

@@ -16,6 +16,18 @@ namespace GameFrame.Network.Transport
         private readonly long limit;
         private readonly FrameMemoryBudget parent;
         private long owned;
+        private long peak;
+
+        internal long PeakReservedBytes
+        {
+            get
+            {
+                lock (gate)
+                {
+                    return peak;
+                }
+            }
+        }
 
         public long OwnedBytes
         {
@@ -55,6 +67,7 @@ namespace GameFrame.Network.Transport
 
                 parent?.Reserve(count);
                 owned += count;
+                peak = Math.Max(peak, owned);
             }
         }
 

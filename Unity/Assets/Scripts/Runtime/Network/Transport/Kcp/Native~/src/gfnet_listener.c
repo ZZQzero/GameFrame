@@ -1,7 +1,6 @@
 #include "gfnet_internal.h"
-#include "mbedtls/sha256.h"
 typedef struct gfnet_grant_slot {
-    gfnet_grant_v1 value;
+    gfnet_grant_v2 value;
     uint32_t expiry;
     int state;
 } gfnet_grant_slot;
@@ -15,8 +14,6 @@ typedef struct gfnet_listener {
     gfnet_connection** connections;
     gfnet_grant_slot* grants;
     gfnet_queue cookies;
-    mbedtls_entropy_context entropy;
-    mbedtls_ctr_drbg_context drbg;
     mbedtls_ssl_cookie_ctx cookie;
 } gfnet_listener;
 static int check_listener(gfnet_listener* l)
@@ -29,7 +26,7 @@ static int advance(gfnet_listener* l, uint32_t now)
     if (l->clock_set && (int32_t)(now-l->now)<0) { return GFNET_INVALID_ARGUMENT; }
     l->now=now; l->clock_set=1; return 0;
 }
-static int valid_peer(const gfnet_peer_v1* peer)
+static int valid_peer(const gfnet_peer_v2* peer)
 {
     if (!peer || peer->reserved || !peer->port || (peer->address_family!=4 && peer->address_family!=6)) { return 0; }
     if (peer->address_family==4)
@@ -82,7 +79,7 @@ int gfnet_listener_cookie_check(void* context, const unsigned char* cookie, size
     if (!result) { c->cookie_verified=1; }
     return result;
 }
-int32_t gfnet_listener_create(const gfnet_listener_config_v1* config, void** handle)
+int32_t gfnet_listener_create(const gfnet_listener_config_v2* config, void** handle)
 {
     if (!handle) { return GFNET_INVALID_ARGUMENT; }
     *handle=NULL;
@@ -91,7 +88,8 @@ int32_t gfnet_listener_create(const gfnet_listener_config_v1* config, void** han
         config->connection_limit<65536 || config->connection_limit>4u*1024*1024 ||
         !config->max_connections || config->max_connections>64 || !config->max_handshakes || config->max_handshakes>16 ||
         !config->max_grants || config->max_grants>256) { return GFNET_INVALID_ARGUMENT; }
-    gfnet_initialize();
+    int initialization_error = gfnet_initialize();
+    if (initialization_error) { return initialization_error; }
     gfnet_quota* quota=gfnet_quota_create(config->native_limit,NULL);
     if (!quota) { return GFNET_ALLOCATION_FAILED; }
     gfnet_quota* previous=gfnet_current_quota; gfnet_current_quota=quota;
@@ -103,11 +101,8 @@ int32_t gfnet_listener_create(const gfnet_listener_config_v1* config, void** han
     l->slot_count=l->max_connections+l->max_handshakes;
     l->connections=gfnet_calloc(l->slot_count,sizeof(*l->connections));
     l->grants=gfnet_calloc(l->max_grants,sizeof(*l->grants));
-    mbedtls_entropy_init(&l->entropy); mbedtls_ctr_drbg_init(&l->drbg); mbedtls_ssl_cookie_init(&l->cookie);
-    static const unsigned char personal[]="gameframe-dtls-listener-v1";
-    int status=quota->allocation_failed ? MBEDTLS_ERR_SSL_ALLOC_FAILED :
-        mbedtls_ctr_drbg_seed(&l->drbg,mbedtls_entropy_func,&l->entropy,personal,sizeof(personal)-1);
-    if (!status) { status=mbedtls_ssl_cookie_setup(&l->cookie,mbedtls_ctr_drbg_random,&l->drbg); }
+    mbedtls_ssl_cookie_init(&l->cookie);
+    int status=quota->allocation_failed ? MBEDTLS_ERR_SSL_ALLOC_FAILED : mbedtls_ssl_cookie_setup(&l->cookie);
     gfnet_current_quota=previous;
     if (status)
     {
@@ -116,7 +111,7 @@ int32_t gfnet_listener_create(const gfnet_listener_config_v1* config, void** han
     }
     *handle=l; return 0;
 }
-int32_t gfnet_listener_register_grant(void* handle, const gfnet_grant_v1* grant, uint32_t now)
+int32_t gfnet_listener_register_grant(void* handle, const gfnet_grant_v2* grant, uint32_t now)
 {
     gfnet_listener* l=handle; int error=check_listener(l);
     if (error) { return error; }
@@ -161,7 +156,7 @@ int32_t gfnet_listener_revoke_grant(void* handle, uint64_t id)
 }
 static int enqueue_cookie(gfnet_listener* l, gfnet_connection* c)
 {
-    uint8_t envelope[sizeof(gfnet_peer_v1)+GFNET_MAX_UDP];
+    uint8_t envelope[sizeof(gfnet_peer_v2)+GFNET_MAX_UDP];
     gfnet_quota* previous=gfnet_current_quota; gfnet_current_quota=l->quota;
     int error=0;
     while (c->output.head)
@@ -174,7 +169,7 @@ static int enqueue_cookie(gfnet_listener* l, gfnet_connection* c)
     }
     gfnet_current_quota=previous; mbedtls_platform_zeroize(envelope,sizeof(envelope)); return error;
 }
-int32_t gfnet_listener_feed_udp(void* handle, const gfnet_peer_v1* peer, const uint8_t* data, int32_t length, uint32_t now)
+int32_t gfnet_listener_feed_udp(void* handle, const gfnet_peer_v2* peer, const uint8_t* data, int32_t length, uint32_t now)
 {
     gfnet_listener* l=handle; int error=check_listener(l);
     if (error) { return error; }
@@ -195,7 +190,7 @@ int32_t gfnet_listener_feed_udp(void* handle, const gfnet_peer_v1* peer, const u
     {
         if (free_slot==l->slot_count || l->next_id==UINT64_MAX) { return GFNET_BACKPRESSURE; }
         uint8_t identity[16]={0}, psk[32]={0};
-        gfnet_config_v1 config={sizeof(config),GFNET_ABI_VERSION,GFNET_SERVER,1,l->connection_limit,32768,1150,0,identity,16,0,psk,32,0};
+        gfnet_config_v2 config={sizeof(config),GFNET_ABI_VERSION,GFNET_SERVER,1,l->connection_limit,32768,1150,0,identity,16,0,psk,32,0};
         error=gfnet_connection_create(&config,l->quota,l,peer,&c);
         if (error) { return error; }
         c->now=now; c->clock_set=1; c->hello_deadline=now+10000;
@@ -266,7 +261,7 @@ int32_t gfnet_listener_tick(void* handle, uint32_t now)
     }
     return l->quota->allocation_failed ? GFNET_ALLOCATION_FAILED : 0;
 }
-int32_t gfnet_listener_poll_udp(void* handle, uint8_t* dst, int32_t capacity, gfnet_udp_metadata_v1* metadata)
+int32_t gfnet_listener_poll_udp(void* handle, uint8_t* dst, int32_t capacity, gfnet_udp_metadata_v2* metadata)
 {
     gfnet_listener* l=handle; int error=check_listener(l);
     if (error) { return error; }
@@ -286,7 +281,7 @@ int32_t gfnet_listener_poll_udp(void* handle, uint8_t* dst, int32_t capacity, gf
     }
     if (!packet) { packet=l->cookies.head; }
     if (!packet) { return 0; }
-    uint32_t offset=c ? 0 : sizeof(gfnet_peer_v1);
+    uint32_t offset=c ? 0 : sizeof(gfnet_peer_v2);
     int length=(int)(packet->length-offset);
     if (capacity<length) { return GFNET_BUFFER_TOO_SMALL; }
     l->prefer_cookie=c!=NULL;
@@ -301,7 +296,7 @@ int32_t gfnet_listener_poll_udp(void* handle, uint8_t* dst, int32_t capacity, gf
     memcpy(dst,packet->data+offset,(size_t)length);
     gfnet_queue_pop(c ? &c->output : &l->cookies); return length;
 }
-int32_t gfnet_listener_poll_event(void* handle, gfnet_event_v1* event)
+int32_t gfnet_listener_poll_event(void* handle, gfnet_event_v2* event)
 {
     gfnet_listener* l=handle; int error=check_listener(l);
     if (error) { return error; }
@@ -333,11 +328,16 @@ int32_t gfnet_listener_confirm_binding(void* handle, uint64_t id, uint64_t gener
     if (!c || c->state!=GFNET_ESTABLISHED || c->bound) { return GFNET_INVALID_STATE; }
     gfnet_grant_slot* g=find_grant(l,c->grant_id);
     uint8_t digest[32];
-    int status=mbedtls_sha256(ticket,(size_t)length,digest,0);
+    size_t digest_length=0;
+    gfnet_quota* previous=gfnet_current_quota; gfnet_current_quota=c->quota;
+    int status=(int)psa_hash_compute(PSA_ALG_SHA_256,ticket,(size_t)length,digest,sizeof(digest),&digest_length);
+    gfnet_current_quota=previous;
     unsigned difference=0;
-    if (g) { for (int i=0; i<32; i++) { difference|=digest[i]^g->value.ticket_digest[i]; } }
+    if (!status && digest_length==sizeof(digest) && g) { for (int i=0; i<32; i++) { difference|=digest[i]^g->value.ticket_digest[i]; } }
     mbedtls_platform_zeroize(digest,sizeof(digest));
-    if (status || !g || g->state!=1 || gfnet_due(now,g->expiry) || gfnet_due(now,c->hello_deadline) ||
+    if (status || digest_length!=sizeof(digest))
+    { return gfnet_fault(c,status==PSA_ERROR_INSUFFICIENT_MEMORY ? GFNET_ALLOCATION_FAILED : GFNET_INTERNAL_ERROR,status); }
+    if (!g || g->state!=1 || gfnet_due(now,g->expiry) || gfnet_due(now,c->hello_deadline) ||
         difference || g->value.conv!=c->conv)
     { return gfnet_fault(c,GFNET_PROTOCOL_ERROR,status); }
     g->state=2; c->bound=1;
@@ -402,7 +402,7 @@ int32_t gfnet_listener_destroy(void* handle)
         for (uint32_t i=0; i<l->slot_count; i++) { if (l->connections[i]) { gfnet_connection_free(l->connections[i]); } }
     }
     gfnet_queue_clear(&l->cookies);
-    mbedtls_ssl_cookie_free(&l->cookie); mbedtls_ctr_drbg_free(&l->drbg); mbedtls_entropy_free(&l->entropy);
+    mbedtls_ssl_cookie_free(&l->cookie);
     gfnet_free(l->connections); gfnet_free(l->grants); gfnet_free(l); gfnet_quota_destroy(quota);
     return 0;
 }

@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Net.WebSockets;
+using System.Reflection;
 using System.Threading.Channels;
 using Game.Hotfix.Network.Generated;
 using Game.Hotfix.Network.Protocol;
@@ -28,6 +29,9 @@ namespace GameFrame.Tests
             public bool HoldPing;
             public Exception? DisposeFailure;
             public int Disposals;
+            public int CloseOutputs;
+            public bool AcknowledgeCloseOutput;
+            public bool FailClosedSends;
             public override WebSocketCloseStatus? CloseStatus => null;
             public override string? CloseStatusDescription => null;
             public override WebSocketState State => state;
@@ -39,6 +43,7 @@ namespace GameFrame.Tests
             }
 
             public void Enqueue(byte[] frame) => Assert.That(inbound.Writer.TryWrite(frame), Is.True);
+            public void EnqueueTransportClose() => Enqueue(Array.Empty<byte>());
             public Task<byte[]> NextSend(CancellationToken token) => started.Reader.ReadAsync(token).AsTask();
             public bool TryNextSend(out byte[]? frame) => started.Reader.TryRead(out frame);
             public Task<byte[]> NextCompletedSend(CancellationToken token) => completed.Reader.ReadAsync(token).AsTask();
@@ -57,12 +62,22 @@ namespace GameFrame.Tests
                     await released.Task.WaitAsync(cancellationToken);
                 }
 
+                if (FailClosedSends && state != WebSocketState.Open)
+                {
+                    throw new WebSocketException("Transport ended during the in-flight send.");
+                }
                 Assert.That(completed.Writer.TryWrite(frame), Is.True);
             }
 
             public override async Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken)
             {
                 receiving ??= await inbound.Reader.ReadAsync(cancellationToken);
+                if (receiving.Length == 0)
+                {
+                    receiving = null;
+                    state = WebSocketState.CloseReceived;
+                    return new WebSocketReceiveResult(0, WebSocketMessageType.Close, true);
+                }
                 int count = Math.Min(buffer.Count, receiving.Length - position);
                 receiving.AsSpan(position, count).CopyTo(buffer.AsSpan());
                 position += count;
@@ -78,7 +93,12 @@ namespace GameFrame.Tests
 
             public override Task CloseOutputAsync(WebSocketCloseStatus status, string? description, CancellationToken token)
             {
-                state = WebSocketState.CloseSent;
+                CloseOutputs++;
+                state = state == WebSocketState.CloseReceived ? WebSocketState.Closed : WebSocketState.CloseSent;
+                if (AcknowledgeCloseOutput)
+                {
+                    EnqueueTransportClose();
+                }
                 return Task.CompletedTask;
             }
 
@@ -209,6 +229,53 @@ namespace GameFrame.Tests
             FrameCodec.WriteHeader(frame, new FrameHeader(FrameKind.Control, (uint)ControlOpcode.Close, 0, 4));
             ControlCodec.WriteClose(frame.AsSpan(32), 0);
             socket.Enqueue(frame);
+        }
+
+        [Test]
+        public async Task RemoteTransportCloseAcknowledgesOnceAndPreservesEarlierResponse()
+        {
+            Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
+            FrameHeader sent = Header(await socket.NextSend(guard.Token));
+            Respond(sent.CorrelationId);
+            EnqueueClose();
+            socket.EnqueueTransportClose();
+            await WaitFor(() => client.IoTask.IsCompleted);
+            await PumpUntil(request);
+            Assert.That(request.Result.Text, Is.EqualTo("result"));
+            Assert.That(socket.CloseOutputs, Is.EqualTo(1));
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task TransportEofStopsAdmissionAndQueuedSendsBeforeAcknowledgement(bool failInFlight)
+        {
+            socket.HoldBusiness = true;
+            socket.FailClosedSends = failInFlight;
+            Task<EchoResponse> first = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
+            FrameHeader sent = Header(await socket.NextSend(guard.Token));
+            Task<EchoResponse> queued = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
+            Respond(sent.CorrelationId);
+            socket.EnqueueTransportClose();
+            await WaitFor(() => socket.State == WebSocketState.CloseReceived);
+            await WaitFor(() => (bool)typeof(ConnectionContext).GetField("stopped", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(client)!);
+            Assert.Throws<InvalidOperationException>(() => client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default));
+            socket.ReleaseSend();
+            await WaitFor(() => client.IoTask.IsCompleted);
+            await PumpUntil(first);
+            Assert.That(first.Result.Text, Is.EqualTo("result"));
+            Assert.ThrowsAsync<NetworkException>(async () => await PumpUntil(queued));
+            Assert.That(socket.TryNextSend(out _), Is.False);
+            Assert.That(socket.CloseOutputs, Is.EqualTo(1));
+        }
+
+        [Test]
+        public async Task ExplicitCloseWaitsForTransportAcknowledgementWithoutASecondCloseOutput()
+        {
+            socket.AcknowledgeCloseOutput = true;
+            client.BeginClose();
+            await PumpUntil(client.CloseTask);
+            Assert.That(socket.CloseOutputs, Is.EqualTo(1));
+            Assert.That(client.IoTask.IsCompleted, Is.True);
         }
 
         [Test]

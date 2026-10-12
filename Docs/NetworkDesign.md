@@ -207,7 +207,7 @@ Faulted 立即拒绝新请求并发起内部清理；显式 `CloseAsync` 等待�
 ### 6.1 IO 与主线程
 
 - WSS：每连接最多一个接收任务和一个发送任务；不能并发调用两次 WebSocket Send 或 Receive。主机平台首选 `System.Net.WebSockets.ClientWebSocket`，其当前 Unity/IL2CPP 平台行为必须逐平台验收。
-- KCP：宿主单工作线程串行执行 UDP 非阻塞收发、DTLS 状态机、KCP input/update/send/recv 和 deadline。第一版由 native 按每连接单调时间固定 10ms 推进 update；托管发送/取消信号与最近 deadline 可提前唤醒，UDP/DTLS timer 最晚在下一驱动点检查，不重置既定 KCP tick。晚到 tick 只用当前时间推进一次，不补跑遗漏 tick。
+- KCP：宿主单工作线程串行执行 UDP 非阻塞收发、DTLS 状态机、KCP input/update/send/recv 和 deadline。第一版由 native 按每连接单调时间固定 10ms 推进 update；托管发送/关闭命令可提前唤醒；当前取消、deadline 与 UDP/DTLS timer 最晚在下一 owner 轮检查（活跃时最多等待 10ms），最近 deadline 的精细等待调度留待实测，不重置既定 KCP tick。晚到 tick 只用当前时间推进一次，不补跑遗漏 tick。
 - 主线程：执行 DTO 序列化、生成的业务验证器、接收反序列化、订阅回调和所有业务任务完成。后台不得访问 Unity 对象或调用 Hotfix 业务委托。
 - 控制 Ping/Pong、固定头校验、RPC 响应到达仲裁由 IO 层完成；合法响应依然按可靠通道顺序交给主线程完成。
 - WebGL：第一版不实现 WSS，建连明确报平台不支持，不进入桌面 socket 路径。后续若支持，使用 `.jslib` 浏览器 WebSocket 桥接，浏览器回调进入同一有界状态机，由 PlayerLoop 派发；不承诺标签页挂起期间持续计时或维持连接。
@@ -225,6 +225,8 @@ Faulted 立即拒绝新请求并发起内部清理；显式 `CloseAsync` 等待�
 重复 `CloseAsync` 等待同一份清理任务，重复 Dispose 幂等。Close 后不能再调用业务处理器；已确定的响应成功不被之后断线改写。连接故障携带原始异常；关闭尽力释放所有资源，次级清理异常另报，不覆盖原故障。工作线程自身故障导致该宿主所有连接失败并停止接收新客户端，`ShutdownAsync` 仍可执行。
 
 主动关闭不默认排空业务发送队列，未确认命令交由业务恢复。进程退出遵循 [Launch.md](Launch.md)：不拦截退出、不等待网络收尾；运行中注销账号/切换服务器必须 await Close。禁止复用参考实现中的 `.Wait(1000)` 后丢弃任务引用。
+
+WSS 主动/远端关闭由唯一发送 owner 执行 CloseOutput，接收 owner 等待标准 close ACK，最多 2 秒后 Abort。正常服务端 EOF 由原业务 owner 消费已准入可靠输入；物理传输结束后回复直接释放。故障/显式停机取消 handler 并等待实际结束，不强杀不响应取消的业务任务。
 
 ## 7. 统一应用帧协议 V1
 
@@ -437,7 +439,7 @@ MiB/KiB 均按 1024 换算。以下是客户端起始配置，服务端必须独
 
 完成通道在每个 pending admission 时预留一个槽位，终态通知最多一次；连接终止用独立单槽 mailbox，不因接收队列已满而无法结束等待。取消回调仅标记 pending 并唤醒，不为重复取消追加无界命令。诊断事件只使用有界环形缓冲，指标聚合不产生每包日志。
 
-容量上限是内存边界，不是允许排队到上限的承诺。KCP 发送 admission 根据应用队列字节数、KCP 待发字节数和可用业务速率额度保守估算等待，超过 250ms 或 RPC 剩余 deadline 就拒绝；估算不保证链路吞吐，也不将已移交 KCP 的消息视为可撤回。WSS 使用相同的容量与队龄限制，不根据历史吞吐预测带宽。真正移交 WS Send/KCP send 前再次检查队龄、取消与 RPC deadline：RPC 到 deadline 以超时结束，未超时但排队超限以背压失败；已成功 admission 的 SendAsync 后续发送失败通过连接故障报告。不可靠过期直接丢弃，不能把超时/取消的未移交请求继续交给传输。250ms 是本地应用排队上限，不是 KCP 重传或远端响应时限。
+容量上限是内存边界，不是允许排队到上限的承诺。KCP 发送 admission 在 correlation ID/pending 分配前估计等待：取未移交应用帧与新帧的 token 缺口、`max(0, waitsnd + ceil(newLength/1126) - 512) × 1126` 的窗口缺口两者最大值，除以配置业务速率。达到 250ms（或配置队龄）/RPC 剩余 deadline 即拒绝；已交给 native 的字节不重复消耗 token。估算不保证链路吞吐，也不将已移交 KCP 的消息视为可撤回。WSS 使用相同的容量与队龄限制，不根据历史吞吐预测带宽。真正移交 WS Send/KCP send 前再次检查队龄、取消与 RPC deadline：RPC 到 deadline 以超时结束，未超时但排队超限以背压失败；已成功 admission 的 SendAsync 后续发送失败通过连接故障报告。不可靠过期直接丢弃，不能把超时/取消的未移交请求继续交给传输。250ms 是本地应用排队上限，不是 KCP 重传或远端响应时限。
 
 ### 10.2 所有权
 
@@ -461,7 +463,7 @@ KCP send 成功后原始应用缓冲即可释放，KCP 内部 segment 仍计 nat
 
 ### 10.3 速率与公平性
 
-默认客户端 KCP 会话的业务发送速率为 128 KiB/s、burst 32 KiB，按应用帧字节数计数；不可靠业务另限 32 KiB/s、burst 8 KiB，并同时消耗总业务额度。额度在可靠帧移交 KCP、不可靠帧交给 DTLS 前扣除，可靠业务优先；不足时只在有界应用队列内等待。服务端可以设置更低策略；该值是客户端上行起点，不是服务端 AOI 下行预算。
+默认客户端 KCP 会话的业务发送速率为 128 KiB/s、burst 32 KiB，按应用帧字节数计数；不可靠业务另限 32 KiB/s、burst 8 KiB，并同时消耗总业务额度。发送额度在可靠帧移交 KCP、不可靠帧交给 DTLS 前扣除。客户端 TrySendUnreliable 另有同参数入口桶，控制本地 admission 突发；它与传输桶分别限入口和真实移交，并不从同一个余额扣两次。控制、可靠和不可靠分别 FIFO 排队，控制/可靠优先；原生单次移交遇到背压不消费队首，也不扣发送 token，可靠暂不可移交时可尝试不可靠。服务端可以设置更低策略；该值是客户端上行起点，不是服务端 AOI 下行预算。
 
 业务速率必须大于 0，burst 必须容纳该通道协商的最大应用帧，否则配置失败，不能让一条合法大帧永远等不到额度。
 
@@ -470,6 +472,8 @@ KCP ACK、重传、窗口探测及 DTLS 握手不经过业务令牌桶；KCP 保
 工作线程每轮每连接最多处理 64 个输入 datagram；每次实际 KCP flush 之间最多输入 64 个 KCP datagram，其余留在有界原始输入队列；到计划 flush 时推进 input/update，并及时排出输出。每轮每连接最多发送 256 个输出 datagram，再轮转其他连接；不能沿用每轮仅发送 32 个却持续产生整窗输出的配置。原生调用前先排出已有 output，socket 暂不可写时停止追加业务发送，后续更新/ACK 输出仍受原生额度与 250ms 滞留上限约束，持续过载明确断开。
 
 WSS 同样有应用 admission 与有界队列；不可靠 API 在 WSS 上直接报能力不支持，不转换为可靠消息。第一版不启用压缩/FEC/额外冗余包，不开放应用帧批量拼接；后续优化必须以带宽、CPU 和延迟测量为依据。
+
+接收端 native、托管 Pump 与服务端 Dispatch 使用 16 条可靠/最多 4 条不可靠消费轮转；peek、header 和 BufferTooSmall 不推进 native 轮转。不可靠帧的 born 经 ABI2 保留，托管迁移不重置有效期；跨 uint32 回绕由当前 64-bit 单调时间恢复。
 
 ## 11. WebSocket 实现要求
 
@@ -523,20 +527,20 @@ DTLS 1.2 AES-GCM、关闭 CID、一个应用记录时，记录开销为 13 字�
 
 ### 12.3 固定 C ABI
 
-新库名为 `gameframe_kcp`；不修改 Sqlite/Backup 名称。包装层导出 Cdecl、固定宽度类型和 opaque handle，不在 C# Marshal `IKCPCB` 或 mbedTLS 结构体，也不把 C `long` 直接放进 P/Invoke。
+当前 ABI 为 2（增加接收队龄输出）；C#/原生必须一同更新，不兼容旧 ABI。新库名为 `gameframe_kcp`；不修改 Sqlite/Backup 名称。包装层导出 Cdecl、固定宽度类型和 opaque handle，不在 C# Marshal `IKCPCB` 或 mbedTLS 结构体，也不把 C `long` 直接放进 P/Invoke。
 
 ```c
 uint32_t gfnet_abi_version(void);
-int32_t gfnet_create(const gfnet_config_v1* config, void** handle);
+int32_t gfnet_create(const gfnet_config_v2* config, void** handle);
 int32_t gfnet_feed_udp(void* handle, const uint8_t* data, int32_t length);
 int32_t gfnet_tick(void* handle, uint32_t now_ms);
 int32_t gfnet_send_reliable(void* handle, const uint8_t* data, int32_t length);
 int32_t gfnet_send_unreliable(void* handle, const uint8_t* data, int32_t length);
 int32_t gfnet_poll_udp(void* handle, uint8_t* dst, int32_t capacity, uint32_t* enqueued_ms);
-int32_t gfnet_peek_frame(void* handle, int32_t* channel, int32_t* length);
+int32_t gfnet_peek_frame(void* handle, int32_t* channel, int32_t* length, uint32_t* enqueued_ms);
 int32_t gfnet_peek_frame_header(void* handle, uint8_t* dst, int32_t capacity);
 int32_t gfnet_recv_frame(void* handle, uint8_t* dst, int32_t capacity);
-int32_t gfnet_get_stats(void* handle, gfnet_stats_v1* stats);
+int32_t gfnet_get_stats(void* handle, gfnet_stats_v2* stats);
 int32_t gfnet_get_state(void* handle, int32_t* state);
 int32_t gfnet_destroy(void* handle);
 ```
@@ -545,7 +549,7 @@ config/stats 首字段为 struct_size 与 abi_version；显式规定字段偏移
 
 包装 send 成功统一返回 0，错误返回固定负码。**不能因此假设原版 `ikcp_send` 成功返回 0**：当前源码返回实际接收字节数；包装层只有返回值等于输入长度才成功，负数/短写一律标记句柄 fatal。分配失败可能已经入队部分 segment，不能对同一请求再调用一次 send。
 
-poll_udp 返回 >0 的完整 datagram 长度，0 表示无数据；容量不足返回负码且不弹出。peek_frame 无帧时返回 0，有帧返回 1 并写长度/通道；recv_frame 返回 >0 的完整应用帧长度，0 无帧，失败负码。native state 至少区分 DTLSHandshaking、Established、PeerClosed、Fatal。所有函数的错误码按 ABI 分类为无数据、参数错误、容量错误、协议错误、分配错误与内部错误，不能将 Fatal 当成“本轮没数据”。
+poll_udp 返回 >0 的完整 datagram 长度，0 表示无数据；容量不足返回负码且不弹出。peek_frame 无帧时返回 0，有帧返回 1 并写长度/通道/原始入队时间（可靠帧返回当前 native 时间）；recv_frame 返回 >0 的完整应用帧长度，0 无帧，失败负码。native state 至少区分 DTLSHandshaking、Established、PeerClosed、Fatal。所有函数的错误码按 ABI 分类为无数据、参数错误、容量错误、协议错误、分配错误与内部错误，不能将 Fatal 当成“本轮没数据”。
 
 feed_udp 只进入有界原始输入缓存；tick 完成 DTLS 握手/定时器、KCP input、到期的 update 与收发缓存推进，并执行第 10.3 节按实际 flush 计数的输入预算。提前调用 tick 不产生额外 KCP flush；握手超时由托管连接 deadline 控制。包装层在所有 native 入口后检查 fatal latch；KCP state=0xFFFFFFFF、output 队列溢出、异常 input 均可终止实例。操作只能由 owner 线程调用，destroy 必须在最后一次 native 调用返回之后执行。
 
@@ -567,7 +571,7 @@ KCP output 副本先进入有界明文队列，再由 owner 的 DTLS 阶段加�
 
 ### 12.5 DTLS 依赖与授权
 
-KCP 自身不加密。第一版安全适配锁定 **mbedTLS 3.6.7 LTS**，版本/commit/archive SHA-256 在 `Native~/third_party/mbedtls.lock.json`，最小配置在 `Native~/config/mbedtls_config.h`。该版本发布说明及关联安全修复已核对，依赖独立静态编入插件；普通构建不下载、不浮动升级。升级时重新审查安全公告、配置、ABI 与跨平台验证。
+KCP 自身不加密。第一版安全适配锁定 **mbedTLS 4.2.0 stable + TF-PSA-Crypto 1.2.0**（上游 LTS 为 4.1，4.2 不标为 LTS），版本/commit/archive SHA-256 在 `Native~/third_party/mbedtls.lock.json`，最小 TLS／PSA 配置分别在 `Native~/config/mbedtls_config.h` 与 `crypto_config.h`。该版本发布说明及关联安全修复已核对，依赖独立静态编入插件；普通构建不下载、不浮动升级。升级时重新审查安全公告、配置、ABI 与跨平台验证。
 
 
 固定 DTLS 1.2、`TLS_PSK_WITH_AES_128_GCM_SHA256`、系统 CSPRNG、anti-replay 和服务端 cookie 校验，禁用明文/CBC/匿名套件、会话恢复与 CID。PSK 模式不额外提供前向保密；本版使用短时、单连接随机 PSK，通过已登录 WSS 的 RequestWorldGrant RPC 下发，不能在客户端安装包中写全服共享密钥。若项目要求前向保密，必须单独变更安全配置并重新联调，不能口头把 PSK 说成具备该能力。
@@ -588,7 +592,7 @@ listener 先执行 DTLS cookie 地址校验，再保留握手状态；完成 PSK
 
 Established 仅表示 DTLS 完成。Hello 绑定前只允许当前协议握手所需的可靠控制帧；Hello/Connect/grant 期限均不重置。绑定确认成功后才能发送 ServerHello 并开放已授权路由；并发握手使用同一 grant 时最多一个确认成功。
 
-listener 拥有所有 server handle；.NET 仅借用。Closed 事件后停止使用，最后由 release connection 归还 native 所有权；destroy listener 尝试清理全部未释放连接。事件与 UDP output 同样有界，Closed 使用每连接终态槽，不能因普通事件满额丢失释放信号。未验证地址的 transient 握手在 HelloVerifyRequest 后释放，不永久按攻击者五元组建表。
+listener 拥有所有 server handle；.NET 仅借用。Closed 事件后禁止发送和推进传输；正常关闭可以读取已有完整可靠帧，应用 owner 排空这些帧和托管队列，最后由 release connection 归还 native 所有权，release 后借用 handle 立即失效；destroy listener 尝试清理全部未释放连接。事件与 UDP output 同样有界，Closed 使用每连接终态槽，不能因普通事件满额丢失释放信号。未验证地址的 transient 握手在 HelloVerifyRequest 后释放，不永久按攻击者五元组建表。
 
 服务端共享 UDP socket 属于 listener host；关闭/释放一个子连接不关闭共享 socket。listener 整体关闭时先停止新调用、关闭共享 socket，再清理全部子连接，所有借用 handle 随之失效。单连接错误与 listener/socket 错误分别故障对应连接和整个 listener。
 
@@ -1006,7 +1010,7 @@ Unity 测试按现有 `GameFrame.Tests.EditMode`/PlayMode 边界组织；若直�
 | 服务端技术栈与工程 | 已确认 C#/.NET 10，已有 `DotNet/DotNet.sln` 与入口项目 | 复用现有工程；服务端、工具与跨端测试目标固定为 `net10.0`；共享源码保持 Unity 可编译 |
 | 登录与授权入口 | 已确认 WSS 登录/恢复与 KCP grant RPC | WSS Hello 不带 ticket；KCP 必须经已登录大厅取票；认证逻辑不依赖 HTTPS 接口 |
 | 第一批发布平台 | Windows/macOS/Android/iOS；用户确认第一版不实现 WebGL WSS | WebGL WSS 延后，不作为第一版完成条件 |
-| UDP 安全库 | mbedTLS 3.6 LTS，开工锁补丁与 SHA | 影响安全 ABI/构建，不改变应用帧 |
+| UDP 安全库 | mbedTLS 4.2.0 stable + TF-PSA-Crypto 1.2.0，锁 commit 与 SHA | 影响安全 ABI/构建，不改变应用帧 |
 | 业务峰值与最低设备 | 待产品给定；以第 14 节示例作起算 | 决定 AOI、频率、分配和服务端容量门槛 |
 | 登录凭据与域名 | 已确认第一版本地联调使用账号＋密码，只在显式 local profile 启用；生产未配置认证时拒绝启动。生产账号校验、WSS/UDP 域名/端口和证书仍待服务端确定 | 决定 Login DTO、环境配置与生产联调；HTTPS 资源域名单独配置 |
 
@@ -1014,7 +1018,7 @@ Unity 测试按现有 `GameFrame.Tests.EditMode`/PlayMode 边界组织；若直�
 
 - [MemoryPack 官方源码与 Unity 说明](https://github.com/Cysharp/MemoryPack#unity)，本项目固定版本 [1.21.4](https://github.com/Cysharp/MemoryPack/tree/1.21.4)。
 - [KCP 上游](https://github.com/skywind3000/kcp)，本地对应 [锁定提交](https://github.com/skywind3000/kcp/tree/b1a7a2101dcbb96017681a500d6b82bbe5a88766)。
-- [mbedTLS](https://github.com/Mbed-TLS/mbedtls)、[3.6.4 套件定义参考](https://github.com/Mbed-TLS/mbedtls/blob/v3.6.4/include/mbedtls/ssl_ciphersuites.h)。
+- [mbedTLS](https://github.com/Mbed-TLS/mbedtls)、[4.2.0 套件定义参考](https://github.com/Mbed-TLS/mbedtls/blob/mbedtls-4.2.0/include/mbedtls/ssl_ciphersuites.h)。
 - 本地参考：`/Users/zzq/unitygame/Assets/Scripts/AOT/Network`、`AOT/NetCore`、`Hotfix/Network` 及该项目网络/协议文档。
 
 设计冻结时已有 KCP #467 修复与原生回归测试，DotNet 工程当时仍为控制台入口。后续按 P0～P6 实施，实际代码与测试结果统一记录在 [实施记录](NetworkImplementation.md)；不将此前 MemoryPack 安装验证或 ACK 原生回归算作完整网络验收。

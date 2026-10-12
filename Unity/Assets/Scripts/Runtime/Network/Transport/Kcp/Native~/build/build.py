@@ -126,7 +126,8 @@ def main():
     elif args.platform in ("ios", "ios-simulator"):
         name = "libgameframe_kcp-combined.a"
         merged = output / name
-        libraries = [output / "libgameframe_kcp.a"] + [output / "mbedtls/library" / ("lib" + lib + ".a") for lib in ("mbedtls", "mbedx509", "mbedcrypto")]
+        libraries = [output / "libgameframe_kcp.a"] + [output / "mbedtls/library" / ("lib" + lib + ".a") for lib in ("mbedtls", "mbedx509")]
+        libraries.append(output / "mbedtls/tf-psa-crypto/core/libtfpsacrypto.a")
         subprocess.run(["xcrun", "libtool", "-static", "-o", str(merged), *map(str, libraries)], check=True)
     else:
         name = "libgameframe_kcp.so"
@@ -139,8 +140,11 @@ def main():
     test_result = {"built": args.tests, "executed": False}
     if args.tests and not cross_windows:
         ctest = str(Path(cmake).with_name("ctest.exe" if host == "Windows" else "ctest"))
-        result = subprocess.run([ctest, "--test-dir", str(output), "-C", args.configuration, "--output-on-failure"], check=True, capture_output=True, text=True)
+        result = subprocess.run([ctest, "--test-dir", str(output), "-C", args.configuration, "--output-on-failure"], capture_output=True, text=True)
         print(result.stdout)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+        result.check_returncode()
         test_result = {"built": True, "executed": True, "passed": True, "runner": "ctest"}
     if source_hashes != sources():
         raise ValueError("Sources changed during build; no installable manifest emitted.")
@@ -159,7 +163,7 @@ def main():
         toolchain["sdk_version"] = subprocess.check_output(["xcrun", "--sdk", sdk, "--show-sdk-version"], text=True).strip()
     if args.platform == "android":
         toolchain["ndk_source_properties"] = (args.ndk.resolve() / "source.properties").read_text()
-    manifest = {"abi": 1, "platform": args.platform, "arch": args.arch, "configuration": args.configuration,
+    manifest = {"abi": 2, "platform": args.platform, "arch": args.arch, "configuration": args.configuration,
                 "sanitized": args.sanitizers, "sources": source_hashes, "mbedtls": prepared_lock,
                 "kcp": json.loads((prepared / "kcp-source-manifest.json").read_text()), "commands": commands,
                 "cmake_version": subprocess.check_output([cmake, "--version"], text=True).splitlines()[0],
@@ -172,13 +176,14 @@ def main():
     license_output = output / "licenses"
     license_output.mkdir(exist_ok=True)
     shutil.copyfile(prepared / "LICENSE", license_output / "KCP-MIT.txt")
-    license_source = dependency / "LICENSE"
-    if license_source.is_file():
-        shutil.copyfile(license_source, license_output / "mbedTLS-LICENSE.txt")
-    else:
-        for path in license_source.iterdir():
-            if path.is_file():
-                shutil.copyfile(path, license_output / ("mbedTLS-" + path.name))
+    for prefix, license_source in (("mbedTLS", dependency / "LICENSE"),
+                                   ("TF-PSA-Crypto", dependency / "tf-psa-crypto/LICENSE")):
+        if license_source.is_file():
+            shutil.copyfile(license_source, license_output / (prefix + "-LICENSE.txt"))
+        else:
+            for path in license_source.iterdir():
+                if path.is_file():
+                    shutil.copyfile(path, license_output / (prefix + "-" + path.name))
     print(str(binary))
 
 

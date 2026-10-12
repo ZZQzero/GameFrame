@@ -1,10 +1,10 @@
-# gameframe_kcp ABI 1
+# gameframe_kcp ABI 2
 
 唯一函数声明是 [include/gfnet.h](include/gfnet.h)，C# 声明位于相邻 `KcpNative.cs`。仅支持 64-bit，Cdecl，默认自然对齐 8；固定宽度整数，禁止 C long/bool/隐式字符串。库名 `gameframe_kcp`，iOS 为 `__Internal`；公开导出仅 `gfnet_*`。不把内部 KCP/mbedTLS 结构暴露给托管。
 
 ## 结构布局
 
-下表偏移均为 bytes，数组内元素连续；所有保留位为 0，所有带 size/version 的输入或输出结构先填实际 size 和 version=1。错误布局返回 InvalidArgument，不按旧长度静默兼容。
+下表偏移均为 bytes，数组内元素连续；所有保留位为 0，所有带 size/version 的输入或输出结构先填实际 size 和 version=2。错误布局返回 InvalidArgument，不按旧长度静默兼容。
 
 | 结构 / size | 字段偏移 |
 | --- | --- |
@@ -23,7 +23,7 @@ Config create 同步复制 16-byte identity、32-byte PSK。role=1 client / 2 st
 ## 成功与错误返回
 
 - create/feed/tick/send/stats/state/destroy 及 listener 注册、绑定、关闭、release、destroy：成功 0。
-- peek_frame：有帧 1，并输出 channel=1 reliable / 2 unreliable 和完整 GFNP 长度；无帧 0。
+- peek_frame：有帧 1，并输出 channel=1 reliable / 2 unreliable 和完整 GFNP 长度、enqueued_ms；不可靠为原始入队时刻，可靠为当前 native 时间；无帧 0。
 - peek_frame_header：有帧返回 32，仅复制固定帧头，不消费；无帧 0。
 - recv_frame/poll_udp/listener_poll_udp：成功返回完整 bytes 数，无数据 0；BufferTooSmall 不消费队首。
 - listener_poll_event：有事件 1，无事件 0。kind=1 DTLS Established；kind=2 Closed，reason 为首个 gfnet 错误的正值，普通关闭为 0。Closed 覆盖尚未投递的 Established。
@@ -33,9 +33,13 @@ Backpressure 表示未接受该输入/发送；feed 队列满丢新 UDP，业务
 
 输出必须使用 1200-byte datagram 缓冲。应用可靠帧 32～reliable_limit，不可靠帧 32～unreliable_limit。peek_header 在帧小于 32 时锁定 ProtocolError；C# 校验固定头和通道/路由/声明长度后才分配正文，recv 长度必须与固定头一致。
 
+可靠/不可靠采用 16/4 消费轮转，各通道内部 FIFO。只有 recv 成功推进轮转，重复 peek/header 和 BufferTooSmall 保持同一队首。不可靠 enqueued_ms 在托管迁移后仍保留，不能重置有效期。ABI2 改变 peek_frame 签名，原生和托管必须一起更新；不静默兼容 ABI1。
+
+mbedTLS 4.2 的单一 SSL／PSA 错误原值保留在 native_error，不再拆分或组合高低层错误。配额分配失败、SSL_ALLOC_FAILED、PSA_ERROR_INSUFFICIENT_MEMORY 优先归 AllocationFailed；已知远端记录/握手协议失败归 ProtocolError；配置、内部和未识别失败归 InternalError，保留首因。细分坏 MAC/replay/cookie 丢弃计数仍不可观测。
+
 ## 状态、时钟与所有权
 
-状态 Handshaking1 → Established2 → PeerClosed3/Fatal4。Established 仅代表 DTLS；GFNP Hello/hash/ticket 绑定完成后才对应用发布 Connected。Fatal 保留首因和 mbedTLS 子因，禁止继续 feed/tick/send/peek/recv/poll UDP；stats/state 和销毁可用。PeerClosed 允许读已排队完整帧，禁止发送。非法参数/错 owner 不自动改状态。
+状态 Handshaking1 → Established2 → PeerClosed3/Fatal4。Established 仅代表 DTLS；GFNP Hello/hash/ticket 绑定完成后才对应用发布 Connected。Fatal 保留首因和 mbedTLS 子因，禁止继续 feed/tick/send/peek/recv/poll UDP；stats/state 和销毁可用。PeerClosed 允许读已排队完整帧，feed/send 返回 InvalidState；tick 不再推进（返回0），poll 可读取旧输出但托管 owner 停止投递它们。普通 Closed 不立即 release，先排空已收到的完整可靠帧；故障关闭不继续业务派发。非法参数/错 owner 不自动改状态。
 
 全部 handle 操作必须由 create 线程调用。有效 exclusive handle 只 destroy 一次；已释放指针不可再次调用任何 API。listener 是所有子 handle 的唯一销毁者；event.connection 仅在 release/listener destroy 前有效，子 handle 只允许应用 send/peek/header/recv/stats/state，不允许独立 feed/tick/poll UDP/destroy。
 
@@ -44,6 +48,8 @@ Backpressure 表示未接受该输入/发送；feed 队列满丢新 UDP，业务
 ## listener 约定
 
 listener register/revoke/feed/tick/event/poll/bind/close/release 均由 listener owner 串行执行。feed 以完整 peer 和 datagram 为单位；cookie 检验前只有临时握手，输出 cookie 包受共享有界队列约束。验证 cookie 后才占 handshake 槽。PSK 校验查询 Issued grant，不消费；confirm_binding 校验当前 id/generation、未过期 Issued、conv 及 ticket SHA-256，原子 Bound 并终止竞争握手。
+
+feed 返回值可能来自临时握手的 create/tick（包括 InternalError），不能仅凭错误类别认定 listener 整体故障。临时握手失败在该次调用中释放；已有子连接故障通过 Closed event 交付。托管 owner 不将单次 feed 拒绝升级为共享 socket 故障；listener tick/poll 等 owner 操作仍检查并传播自身失败，包括共享 cookie 队列分配失败。
 
 Issued TTL 最多 30000ms，重复注册相同 grant 不延长期限。Bound 由应用撤销/连接关闭管理；绑定/撤销清零原始 PSK。DTLS 握手及 Hello 总期限不超过 10s，Established 后 Hello 最多 5s且不延长原始期限。
 

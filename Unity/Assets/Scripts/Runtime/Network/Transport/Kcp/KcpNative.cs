@@ -12,6 +12,7 @@ namespace GameFrame.Network.Transport.Kcp
 #else
         private const string Library = "gameframe_kcp";
 #endif
+        internal const uint Version = 2;
         internal const int Backpressure = -3;
         internal const int Established = 2;
         internal const int PeerClosed = 3;
@@ -83,13 +84,45 @@ namespace GameFrame.Network.Transport.Kcp
 
         internal static void ValidateAbi()
         {
-            if (IntPtr.Size != 8 || Marshal.SizeOf<Config>() != 64 || Marshal.SizeOf<Stats>() != 168 ||
-                Marshal.SizeOf<Peer>() != 24 || Marshal.SizeOf<ListenerConfig>() != 32 ||
-                Marshal.SizeOf<Grant>() != 104 || Marshal.SizeOf<ConnectionEvent>() != 72 ||
-                Marshal.SizeOf<UdpMetadata>() != 64 || Marshal.OffsetOf<Config>(nameof(Config.Identity)).ToInt32() != 32 ||
-                Marshal.OffsetOf<Config>(nameof(Config.Psk)).ToInt32() != 48 || AbiVersion() != 1)
+            if (IntPtr.Size != 8 || AbiVersion() != Version)
             {
-                throw new NetworkException("gameframe_kcp ABI/architecture mismatch (64-bit ABI 1 required).");
+                throw new NetworkException("gameframe_kcp ABI/architecture mismatch (64-bit ABI 2 required).");
+            }
+            ValidateLayout<Config>(64,
+                new[] { nameof(Config.Size), nameof(Config.Version), nameof(Config.Role), nameof(Config.Conv), nameof(Config.NativeLimit), nameof(Config.ReliableLimit), nameof(Config.UnreliableLimit), nameof(Config.Reserved), nameof(Config.Identity), nameof(Config.IdentityLength), nameof(Config.ReservedIdentity), nameof(Config.Psk), nameof(Config.PskLength), nameof(Config.ReservedPsk) },
+                new[] { 0, 4, 8, 12, 16, 20, 24, 28, 32, 40, 44, 48, 56, 60 });
+            ValidateLayout<Stats>(168,
+                new[] { nameof(Stats.Size), nameof(Stats.Version), nameof(Stats.State), nameof(Stats.Capabilities), nameof(Stats.FatalCode), nameof(Stats.NativeError), nameof(Stats.OwnedBytes), nameof(Stats.PeakBytes), nameof(Stats.Allocations), nameof(Stats.ReceivedBytes), nameof(Stats.PolledBytes), nameof(Stats.ReceivedPackets), nameof(Stats.PolledPackets), nameof(Stats.RawDropped), nameof(Stats.UnreliableDropped), nameof(Stats.InputCount), nameof(Stats.OutputCount), nameof(Stats.OutputBytes), nameof(Stats.OutputOldestMs), nameof(Stats.Waitsnd), nameof(Stats.SrttMs), nameof(Stats.RtoMs), nameof(Stats.SendWindow), nameof(Stats.ReceiveWindow), nameof(Stats.RemoteWindow), nameof(Stats.PlaintextCount), nameof(Stats.PlaintextBytes), nameof(Stats.PendingReliableBytes), nameof(Stats.InflightReliableBytes), nameof(Stats.TimeoutRetransmits) },
+                new[] { 0, 4, 8, 12, 16, 20, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144, 152, 160 });
+            ValidateLayout<Peer>(24,
+                new[] { nameof(Peer.AddressFamily), nameof(Peer.Address), nameof(Peer.Port), nameof(Peer.Reserved) },
+                new[] { 0, 4, 20, 22 });
+            ValidateLayout<ListenerConfig>(32,
+                new[] { nameof(ListenerConfig.Size), nameof(ListenerConfig.Version), nameof(ListenerConfig.NativeLimit), nameof(ListenerConfig.ConnectionLimit), nameof(ListenerConfig.MaxConnections), nameof(ListenerConfig.MaxHandshakes), nameof(ListenerConfig.MaxGrants), nameof(ListenerConfig.Reserved) },
+                new[] { 0, 4, 8, 12, 16, 20, 24, 28 });
+            ValidateLayout<Grant>(104,
+                new[] { nameof(Grant.Size), nameof(Grant.Version), nameof(Grant.Conv), nameof(Grant.RemainingTtlMs), nameof(Grant.Id), nameof(Grant.Identity), nameof(Grant.Psk), nameof(Grant.TicketDigest) },
+                new[] { 0, 4, 8, 12, 16, 24, 40, 72 });
+            ValidateLayout<ConnectionEvent>(72,
+                new[] { nameof(ConnectionEvent.Size), nameof(ConnectionEvent.Version), nameof(ConnectionEvent.Kind), nameof(ConnectionEvent.Reason), nameof(ConnectionEvent.Id), nameof(ConnectionEvent.Generation), nameof(ConnectionEvent.GrantId), nameof(ConnectionEvent.Connection), nameof(ConnectionEvent.Peer) },
+                new[] { 0, 4, 8, 12, 16, 24, 32, 40, 48 });
+            ValidateLayout<UdpMetadata>(64,
+                new[] { nameof(UdpMetadata.Size), nameof(UdpMetadata.Version), nameof(UdpMetadata.EnqueuedMs), nameof(UdpMetadata.Reserved), nameof(UdpMetadata.Id), nameof(UdpMetadata.Generation), nameof(UdpMetadata.Peer), nameof(UdpMetadata.ReservedTail1), nameof(UdpMetadata.ReservedTail2) },
+                new[] { 0, 4, 8, 12, 16, 24, 32, 56, 60 });
+        }
+
+        private static void ValidateLayout<T>(int size, string[] fields, int[] offsets) where T : struct
+        {
+            if (Marshal.SizeOf<T>() != size)
+            {
+                throw new NetworkException($"Native ABI size mismatch for {typeof(T).Name}.");
+            }
+            for (int i = 0; i < fields.Length; i++)
+            {
+                if (Marshal.OffsetOf<T>(fields[i]).ToInt32() != offsets[i])
+                {
+                    throw new NetworkException($"Native ABI offset mismatch for {typeof(T).Name}.{fields[i]}.");
+                }
             }
         }
 
@@ -111,7 +144,7 @@ namespace GameFrame.Network.Transport.Kcp
                 psk = GCHandle.Alloc(options.Psk, GCHandleType.Pinned);
                 var config = new Config
                 {
-                    Size = 64, Version = 1, Role = 1, Conv = options.Conv,
+                    Size = 64, Version = KcpNative.Version, Role = 1, Conv = options.Conv,
                     NativeLimit = checked((uint)nativeBytes), ReliableLimit = (uint)options.ReliableLimit,
                     UnreliableLimit = (uint)options.UnreliableLimit, Identity = identity.AddrOfPinnedObject(),
                     IdentityLength = 16, Psk = psk.AddrOfPinnedObject(), PskLength = 32
@@ -148,7 +181,7 @@ namespace GameFrame.Network.Transport.Kcp
         [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "gfnet_poll_udp")]
         internal static extern int PollUdp(IntPtr connection, [Out] byte[] bytes, int capacity, out uint born);
         [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "gfnet_peek_frame")]
-        internal static extern int Peek(IntPtr connection, out int channel, out int length);
+        internal static extern int Peek(IntPtr connection, out int channel, out int length, out uint born);
         [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "gfnet_peek_frame_header")]
         internal static extern int PeekHeader(IntPtr connection, [Out] byte[] bytes, int capacity);
         [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "gfnet_recv_frame")]

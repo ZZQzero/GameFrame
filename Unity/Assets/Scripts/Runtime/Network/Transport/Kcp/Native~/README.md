@@ -4,11 +4,11 @@
 
 ## 构建与安装
 
-依赖锁定 mbedTLS 3.6.7；下载是显式准备步骤，普通构建不下载或升级。所有中间目录在 Unity 外；下面以仓库根目录、PATH 中有 CMake 的 macOS 为例：
+依赖锁定 mbedTLS 4.2.0（stable，TF-PSA-Crypto 1.2.0；上游 LTS 为 4.1）；下载是显式准备步骤，普通构建不下载或升级。准备器校验官方 archive SHA，将归档中的相对链接统一展开为普通文件，Windows 无需管理员或 Developer Mode；树 hash 在各宿主使用相同文件布局。TLS 与 PSA 最小配置分离，保留 PSA 默认缓冲复制。随机数通过 PSA external RNG 使用平台系统密码级接口，失败清零输出并明确终止创建/握手。所有中间目录在 Unity 外；下面以仓库根目录、PATH 中有 CMake 的 macOS 为例：
 
 ```sh
-python3 Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/prepare_mbedtls.py --output Tools/Artifacts/NetworkNative/mbedtls-3.6.7
-python3 Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/build.py --platform macos --arch universal --configuration Release --output Tools/Artifacts/NetworkNative/macos-release --mbedtls Tools/Artifacts/NetworkNative/mbedtls-3.6.7 --tests
+python3 Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/prepare_mbedtls.py --output Tools/Artifacts/NetworkNative/mbedtls-4.2.0
+python3 Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/build.py --platform macos --arch universal --configuration Release --output Tools/Artifacts/NetworkNative/macos-release --mbedtls Tools/Artifacts/NetworkNative/mbedtls-4.2.0 --tests
 python3 Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/install.py Tools/Artifacts/NetworkNative/macos-release
 ```
 
@@ -95,3 +95,7 @@ python3 Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/tests/verify_
 KCP 和该上游修复按 KCP 的 MIT 许可保留来源，许可证见 [原版 LICENSE](../../../../../../Plugins/GameFrame/Kcp/LICENSE)。
 
 2026-10-12：gfnet DTLS/KCP/listener host harness 1303 个 REQUIRE 检查通过，ASan/UBSan 无错误、释放后 native bytes=0；Unity Mono 实际 UDP Hello/Echo/释放用例通过。平台构建与完整验证的不同证据仍以实施记录为准。
+
+当前ABI2增加peek_frame的原始enqueued_ms输出，全部结构offset/size在C/C#两侧验证；必须同时更新托管和插件，旧ABI拒绝。可靠/不可靠接收按16/4消费轮转，peek/header/BufferTooSmall不推进；普通Closed后仍可读已收到完整帧，release之后句柄失效。2026-10-12本轮ASan/UBSan harness2294次检查通过，包含实际DTLS公平性/回绕/close_notify；最新平台和Unity证据见实施记录。
+
+4.2.0 升级使用 mandatory PSA API：cookie setup 不再传 DRBG，ticket 摘要通过 psa_hash_compute，错误保留单一 SSL/PSA 原值；ABI2 不变。PSA 全局一次初始化，静态1024槽共享且受锁保护，动态密钥/操作缓冲按每次调用的 quota 计账。Windows 分别使用 MSVC 的 __declspec(thread) 和 MinGW 的 C11 _Thread_local，禁止编译器忽略 TLS 声明。最新验证与平台限制见实施记录中的升级条目，旧2294/1303检查数量为3.6.7历史结果。

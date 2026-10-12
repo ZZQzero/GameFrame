@@ -8,7 +8,7 @@ C 原生实现的职责、ABI、工作线程和平台构建安装方案见 [Netw
 
 当前开发范围为框架底层；游戏世界会话与角色/AOI/移动业务延后。生成的世界 DTO/路由保留为后续接入契约，不表示已实现世界服务，也不要求框架宿主持有游戏业务状态。
 
-在 GameRuntimeConfig 设置 `NetworkOptions = new NetworkRuntimeOptions()`，随后 `await GameRuntime.InitAsync(config)`。null 表示关闭网络，不创建网络驱动或自动连服。网络使用既有持久根节点上的驱动，每帧按默认 2ms/128 条全局预算派发，各客户端每轮最多 16 条可靠工作。序列化、DTO 解码、订阅回调和业务 await 完成都在主线程。
+在 GameRuntimeConfig 设置 `NetworkOptions = new NetworkRuntimeOptions()`，随后 `await GameRuntime.InitAsync(config)`。null 表示关闭网络，不创建网络驱动或自动连服。网络使用既有持久根节点上的驱动，每帧按默认 2ms/128 条全局预算派发，各客户端每轮最多 16 个工作单元，Context 在持续消费中按16可靠/最多4不可靠轮转。序列化、DTO 解码、订阅回调和业务 await 完成都在主线程。
 
 以下代码在已有异步业务方法内调用；Hotfix 使用生成的 GameNetRoutes/GameNetProtocol，不自行拼 opcode：
 
@@ -64,3 +64,10 @@ bool admitted = client.TrySendUnreliable(GameNetRoutes.MoveInput, input);
 这里的世界路由只展示 API；当前没有世界业务 owner。账号授权由未来大厅/网关服务提供；local-kcp-dtls 仅以显式短时凭据验证 Echo，不实现账号登录或世界入场。授权注册、单次 Hello 绑定、竞争拒绝与撤销底层接口已实现。
 
 KCP 后台 worker 与主线程 Pump 分工：worker 负责 UDP/native/期限，主线程完成 DTO、订阅与 await；关闭等待 owner destroy 后归还 native allowance。每客户端在 8MiB 总额内预留 NativeBytes（默认4MiB）；GetMetrics().Kcp 分开展示预留、实际/峰值、KCP窗口/RTT/RTO、待发/在途、明文/密文队列及实际 socket 发送字节。TimeoutRetransmits 仅超时重传，DTLS 细分坏记录计数不可用。OS socket buffer 请求各256KiB，并报告系统返回值。
+
+
+KCP 使用 ABI2，原生库与 C# 必须同时更新。可靠 admission 在分配 RPC ID/pending 前按 token/window 缺口估算等待；不足时入口抛背压，真实发送仍重查期限。控制/可靠/不可靠各自 FIFO；一次 native 背压不会让不可靠帧占住可靠发送。TrySendUnreliable 的入口桶限制 admission，传输桶限制实际移交，均按应用帧字节数计费。
+
+正常 EOF 会保留此前接收可靠帧的派发顺序，服务端继续完成已接受输入；回复已无法发送时释放。显式关闭/故障会取消处理并等待真实 owner 退出。业务 handler 必须响应取消，框架不强杀仍持有缓冲的任务。
+
+GetMetrics 新增 Sent/ReceivedApplicationBytes（Hello 完成后的 GFNP 帧）、Sent/ReceivedBusinessBodyBytes（业务正文）、PingRoundTripMilliseconds（最近匹配 Pong，未测时0）和 PeakReservedBytes（含 reservation/native allowance 的峰值）。这些值不代表网络 wire bytes 或进程 RSS；完整对象布局、RPC阶段/分位耗时仍需验收。Kcp.DtlsDiscardDetailsAvailable=false 明确表示库未开放细分坏记录指标。完整本轮审查记录见 [NetworkReview.md](NetworkReview.md)。

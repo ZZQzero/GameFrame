@@ -87,7 +87,7 @@ Unity/.NET 共用 `KcpNative` 及不依赖 Unity 的驱动代码，显式加入�
 | `gfnet_tick` | 推进 DTLS/输入和到期的 KCP update；提前调用不额外 flush |
 | `gfnet_send_reliable/unreliable` | 只在传输 Established 时接受完整帧，接受成功返回 0 |
 | `gfnet_poll_udp` | 返回并移除一个完整密文包；无包返回 0 |
-| `gfnet_peek_frame/recv_frame` | 查看下一完整帧的通道/长度，再复制并移除 |
+| `gfnet_peek_frame/recv_frame` | 查看下一完整帧的通道/长度/原始 born，再复制并移除；ABI2 按16可靠/4不可靠消费轮转 |
 | `gfnet_get_state/get_stats` | 读取状态与固定大小指标快照 |
 | `gfnet_destroy` | 最后一次调用退出后，由 owner 销毁 |
 
@@ -106,13 +106,15 @@ listener poll UDP 的元数据包含 peer、connectionId/generation 和原始入
 - feed 原始 UDP 输入满额时返回 Backpressure，owner 丢弃新 datagram 并计数；可靠恢复交给 KCP，自身不重试 feed。该丢包边界与已被 KCP 视为发出的 output 丢失区别处理。
 - Fatal 保留首个原因与 native 子原因用于诊断；随后禁止业务/input/update，仍允许读取状态/统计及 destroy/release。非法参数不允许造成越界。
 
-ABI 还须逐项锁定 clock 的初始化/更新时间、每次 tick 的输入/输出预算、状态可调用函数矩阵和错误的影响范围。destroy 仅接受有效独占 handle 一次；托管关闭幂等由 owner 清空 handle/唯一收尾任务实现，不承诺已释放裸指针再次 destroy 安全。listener 内部错误影响整个 listener，子连接协议/配额错误仅关闭该子连接。
+ABI 还须逐项锁定 clock 的初始化/更新时间、每次 tick 的输入/输出预算、状态可调用函数矩阵和错误的影响范围。destroy 仅接受有效独占 handle 一次；托管关闭幂等由 owner 清空 handle/唯一收尾任务实现，不承诺已释放裸指针再次 destroy 安全。listener 自身错误影响整个 listener，子连接协议/配额/内部错误仅关闭该子连接。feed 的 InternalError 也可能来自临时握手 create/tick，不能按错误类别扩大到共享 socket；listener tick/poll 检查自身失败，已有 child 的终态通过事件处理。
 
 单连接 native 状态为 `DtlsHandshaking → Established → PeerClosed/Fatal`。此处 Established 只代表 DTLS 完成；C# `ConnectAsync` 还须完成 GFNP Hello/hash/授权绑定，才发布 Connected。没有解密成功的业务数据不能进入应用队列。
 
 Hello 之前可收发建立协议所需的可靠控制帧；服务端只有 confirm binding 成功后才能发送 ServerHello 并开放已授权的应用路由。AwaitingHello 仍计连接槽/内存，执行总 Connect、Hello 和 grant 剩余期限，不能在 DTLS 完成时重置。绑定前的业务/不可靠数据由网关在正文解码前拒绝。native 不解析 GFNP 或 MemoryPack，服务端 owner 的帧状态机负责阶段校验。
 
 `ikcp_send` 成功返回接受的字节数；包装层必须核对等于输入长度才返回 0。所有输入/输出长度先验证符号、上限及加法溢出。过小接收缓冲不消费帧，原生返回值不被托管误当作有效长度。
+
+当前 ABI 为2，C/C# 校验全部公开结构字段 offset/size；peek_frame 增加 enqueued_ms 输出，旧库明确拒绝。正常 Closed 停止推进/发送，排空已有完整可靠帧后 release；托管 handler/队列另由其 owner 排空。
 
 ## 4. 工作线程、时钟与 IO
 
@@ -126,7 +128,7 @@ listener 在按 peer 分发前先限制共享 socket 每轮读取数量/CPU 时�
 
 网络时钟继续用 `NetworkClock` 的单调毫秒，托管保留 64 位；native KCP tick 使用低 32 位，定时比较使用环绕安全差值，短周期期限均小于半个 uint32 周期。授权的长有效期在托管服务按 64 位期限管理，进入 native 的剩余期限需校验范围。不得用 UTC 或 Unity timeScale 推进传输。
 
-native 是每连接 KCP 固定 10ms update 的唯一调度者，C# 负责按时唤醒并调用 tick。命令、取消与托管 deadline 可以提前唤醒，但 native 只处理当前可推进的状态，不重置计划 KCP tick，也不提前调用额外 flush。晚到只按当前时间推进一次，不补跑遗漏 tick。每次实际 flush 之间最多处理 64 个 KCP datagram；无 flush 的 update 不恢复该额度。服务端采用一个 listener owner 起步，之后按实测连接容量分片。
+native 是每连接 KCP 固定 10ms update 的唯一调度者，C# 负责按时唤醒并调用 tick。发送/关闭命令可以提前唤醒；当前取消与托管 deadline 在下一 owner 轮检查，但 native 只处理当前可推进的状态，不重置计划 KCP tick，也不提前调用额外 flush。晚到只按当前时间推进一次，不补跑遗漏 tick。每次实际 flush 之间最多处理 64 个 KCP datagram；无 flush 的 update 不恢复该额度。服务端采用一个 listener owner 起步，之后按实测连接容量分片。
 
 唤醒使用明确的线程信号和有界等待；空闲连接不持续忙轮询。DTLS 的定时器回调读取 owner 当前 tick；握手重传由 mbedTLS 的状态机实现，握手总期限仍受 Connect deadline/grant deadline 约束。
 
@@ -161,11 +163,11 @@ KCP 不使用 output 返回值可靠地撤销已产生的数据，因此任何�
 | Unity 网络宿主 | 64 MiB，最多 4 个客户端 |
 | 服务端 local listener | 64 established、16 handshake、256 grant、native 全局 256 MiB |
 
-全局额度和单连接额度同时预留，扩容先计旧＋新峰值。`ikcp_allocator` 及 mbedTLS 分配钩子只初始化一次；每次 native 调用建立线程局部 owner，分配头存 owner/实际容量，free 按头归还。quota owner 必须活到最后一块内存释放，不把已释放 connection 指针作为残留分配的 owner。共享 cookie、凭据索引、熵/DRBG 状态计 listener/宿主额度。
+全局额度和单连接额度同时预留，扩容先计旧＋新峰值。`ikcp_allocator` 及 mbedTLS 分配钩子只初始化一次；每次 native 调用建立线程局部 owner，分配头存 owner/实际容量，free 按头归还。quota owner 必须活到最后一块内存释放，不把已释放 connection 指针作为残留分配的 owner。共享 cookie、凭据索引计 listener/宿主额度。PSA 全局初始化只执行一次；1024 个密钥槽元数据为固定静态存储，不计入动态 owned_bytes，其容量耗尽显式报 AllocationFailed。每个密钥材料和操作/复制缓冲仍按当前 native 调用的 connection/listener quota 分配、释放，PSA 全局状态不能持有已销毁 quota。
 
 客户端在 create 前从 8 MiB 连接/64 MiB 宿主额度预留完整 4 MiB native allowance，托管分配只能使用剩余额度，destroy 完成后才归还该 allowance。C 分配器在 allowance 内逐项检查实际容量；这样无需反向调用 C# 也能保证跨层总上限，不依赖滞后的统计采样做 admission。诊断分别报告预留额度和实际使用，不将 4 MiB 预留当作已经分配，也不在额度中重复扣一次 native 实际值。服务端 native 全局 allocator 则直接同时检查 listener 和子连接实际额度。
 
-mbedTLS 以独立静态依赖编入该插件，内部符号隐藏，避免污染其他原生插件的 allocator。随机数使用库支持的系统熵源，失败就终止初始化；各平台验证其实际支持。PSK/敏感缓冲释放前使用不能被优化删除的 zeroize。
+mbedTLS 以独立静态依赖编入该插件，内部符号隐藏，避免污染其他原生插件的 allocator。PSA 的 external RNG 回调直接使用系统密码级随机源，无共享堆上 DRBG：Windows BCryptGenRandom，Apple CommonCrypto CCRandomGenerateBytes，Android API23 /dev/urandom，Linux getrandom。失败清零输出并终止创建/握手，不重试初始化或切换随机源。PSA 默认复制缓冲保留，不启用 EXCLUSIVE_BUFFERS，因为 TLS AEAD 使用原地输入/输出。PSK/敏感缓冲释放前使用不能被优化删除的 zeroize。
 
 原生 feed 前后的托管复制与 native 源副本同时存在时分别记账，转移不是提前归还。原生 poll 后 socket WouldBlock 的托管副本仍属 in-flight。指标区分 native 活跃容量、托管容量、峰值和平台 socket 缓冲，不宣称预算等于进程 RSS。
 
@@ -181,7 +183,7 @@ native 统计提供分配当前/峰值、输入/输出包和字节、坏记录/�
 
 ## 7. 服务端授权接口与业务范围
 
-mbedTLS 已锁定为 3.6.7（3.6 LTS），DTLS 1.2、`TLS_PSK_WITH_AES_128_GCM_SHA256`、cookie、防重放；禁用 CBC、匿名、会话恢复和 CID。版本/commit/archive SHA 在 third_party/mbedtls.lock.json，准备阶段核验 archive 与源码树；发布前继续审查安全公告，不以版本锁定代替安全维护。
+mbedTLS 已锁定为 4.2.0 stable，包含 TF-PSA-Crypto 1.2.0（上游 LTS 为 4.1，4.2 不标为 LTS），DTLS 1.2、`TLS_PSK_WITH_AES_128_GCM_SHA256`、cookie、防重放；禁用 CBC、匿名、会话恢复和 CID。版本/commit/archive SHA 在 third_party/mbedtls.lock.json，准备阶段核验 archive 与源码树；发布前继续审查安全公告，不以版本锁定代替安全维护。
 
 应用负责认证与权限，框架提供 register/revoke、连接授权绑定和终态通知。凭据记录包含 grantId、identity、PSK、conv、ticket 摘要及单调到期时间；账号 epoch/目标世界合法性留在 .NET 应用授权入口，Runtime 不认识账号或角色。
 
@@ -212,7 +214,7 @@ Established/Closed 使用连接槽中的有界待投递标记，避免普通事�
 
 Unity 安装到 `Unity/Assets/Plugins/GameFrame/Native/Kcp/<platform>`，生成正确平台/CPU importer 设置。保留已有 `.meta` GUID，不启用所有平台通用导入。第一次显式建立 KCP 时加载并验证 ABI；WSS-only 初始化无需插件。缺库/错架构/ABI 不符明确失败，不回退 WSS。WebGL 在进入 P/Invoke 和线程/socket 路径前拒绝。
 
-脚本输出 artifact.json/build-manifest.json，记录 KCP 基线/当前 hash、本地修正、mbedTLS 版本/SHA、ABI、编译器/SDK/NDK、架构、配置、编译选项、二进制 hash 与相关验证；附 KCP/mbedTLS 许可证。不要复制 Sqlite 的库名、预加载策略或 ABI。替换已加载库后重启 Unity，sanitizer 产物只用于 native 验证。
+脚本输出 artifact.json/build-manifest.json，记录 KCP 基线/当前 hash、本地修正、mbedTLS 版本/SHA、ABI、编译器/SDK/NDK、架构、配置、编译选项、二进制 hash 与相关验证；附 KCP/mbedTLS/TF-PSA-Crypto 许可证。不要复制 Sqlite 的库名、预加载策略或 ABI。替换已加载库后重启 Unity，sanitizer 产物只用于 native 验证。
 
 构建前检查对应工具链版本与路径，缺失就报告具体依赖；实施前的机器环境快照放在实施记录，不作为设计契约。依赖准备是独立显式步骤，普通构建不自动访问浮动分支或升级工具链；lock 至少记录源码 URL、版本/commit、archive SHA-256 与 mbedTLS 配置 hash，hash 不符拒绝构建。插件升级需新安装包，Hotfix 无法替换 iOS 原生代码。
 
@@ -230,3 +232,12 @@ Unity 安装到 `Unity/Assets/Plugins/GameFrame/Native/Kcp/<platform>`，生成�
 每步保留可评审代码与实际结果，不把 C harness、.NET 编译、Unity Editor、Player 脚本编译、IL2CPP 打包或真机验证相互替代。接入阶段至少验证满窗 flush、最大 ACK、慢 socket、丢包/乱序、tick 延迟、应用队列龄、各层额度及关闭后的活跃分配归零。
 
 当前没有必须让用户再次选择的常规架构分支：已采用 C KCP＋mbedTLS、C# socket、单 owner、固定 ABI 和现有协议核心。实施中若锁定依赖不支持既定套件/分配钩子，或平台工具链无法支持必要能力，应停止对应步骤说明实际阻塞，再讨论设计变更；不静默更换传输或安全参数。
+
+
+## 本轮流程补齐（2026-10-12）
+
+可靠 admission、三路发送 FIFO 和单次可失败移交遵循总设计第10节。client/server 每轮首尾输出共用256包预算；listener 在 socket in-flight WouldBlock 时暂停新业务追加，不停止必要收包/tick/deadline。服务端 handler 显式携带不可变 connectionId/generation/grantId，授权注册期限从托管调用 admission 起算。
+
+普通 DTLS EOF 与 WSS EOF 都让现有业务 owner 继续消费已接受可靠输入；物理传输结束后不再发送回复。故障或显式停机取消并等待 handler，handler 必须协作取消。世界业务绑定/结束通知待真实业务 owner 接入，不在底层创建第二套会话管理。
+
+指标新增帧/业务字节、Ping RTT、预留峰值、native allocations/input/plaintext/output队龄与能力字段。完整元数据、分阶段/分位耗时、DTLS 内部细分丢弃仍未完成。审查清单与最新证据见 [NetworkReview.md](NetworkReview.md)。

@@ -72,3 +72,7 @@ GF_KCP_NATIVE_LIBRARY=/absolute/path/libgameframe_kcp.dylib dotnet test Tools/Ne
 ```
 
 未设置变量时该组明确 skipped，不算原生验收。Unity PlayMode `NetworkKcpLoopbackTests` 使用临时 `GF_KCP_LOOPBACK_CREDENTIALS` 文件（上述字段再加 `Port`）连接已启动的 local listener，默认不自动启动服务或保留测试凭据。
+
+当前native ABI为2，更新库与托管必须同批安装。KcpListenerHost handler参数为不可变KcpConnectionInfo（Id、Generation、GrantId）、OwnedFrame、发送预算与CancellationToken；不将借用native handle交给异步业务。RegisterGrantAsync从调用admission起算TTL，排队不续期。
+
+普通EOF让既有业务owner完成已接受可靠输入，物理EOF之后的回复直接释放；故障/显式停机取消并等待handler，handler必须响应取消。listener业务可靠发送128条、不可靠64条分别FIFO，共享64KiB预算；控制独立16KiB。输出首尾flush共用每轮256包预算，socket WouldBlock期间保留原包并暂停追加业务。

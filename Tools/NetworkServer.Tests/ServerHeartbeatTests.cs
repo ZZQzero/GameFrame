@@ -68,6 +68,29 @@ namespace GameFrame.Tests
         private void Advance(long timestamp) => Interlocked.Exchange(ref now, timestamp);
 
         [Test]
+        public async Task TransportCloseDrainsPreviouslyAdmittedLogoutAfterDelayedEcho()
+        {
+            long binding = (long)typeof(ServerConnection).GetField("binding", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(server)!;
+            var writer = new ArrayBufferWriter<byte>();
+            GameNetRoutes.Echo.RequestCodec.Encode(writer, new EchoRequest { DelayMs = 100 });
+            byte[] echo = new byte[32 + writer.WrittenCount];
+            FrameCodec.WriteHeader(echo, new FrameHeader(FrameKind.Request, GameNetRoutes.Echo.Opcode, 2, writer.WrittenCount));
+            writer.WrittenSpan.CopyTo(echo.AsSpan(32));
+            socket.Enqueue(echo);
+            writer.Clear();
+            GameNetRoutes.Logout.RequestCodec.Encode(writer, new LogoutRequest());
+            byte[] logout = new byte[32 + writer.WrittenCount];
+            FrameCodec.WriteHeader(logout, new FrameHeader(FrameKind.Request, GameNetRoutes.Logout.Opcode, 3, writer.WrittenCount));
+            writer.WrittenSpan.CopyTo(logout.AsSpan(32));
+            socket.Enqueue(logout);
+            socket.EnqueueTransportClose();
+            await running.WaitAsync(guard.Token);
+            Assert.That(accounts.IsCurrent(binding), Is.False, "The admitted Logout must execute before detach.");
+            Assert.That(socket.CloseOutputs, Is.EqualTo(1));
+            Assert.That(memory.OwnedBytes, Is.Zero);
+        }
+
+        [Test]
         public async Task ServerWatchdogContinuesWhilePingSendIsBlocked()
         {
             socket.HoldPing = true;

@@ -1,8 +1,8 @@
 {
-  "abi": 1,
+  "abi": 2,
   "binary": "libgameframe_kcp.a",
-  "sha256": "29b982c385bdfc13640aed82a340c1ccaacb0a9fe12ef1ea3220e3feb8e0dabf",
-  "build_id": "2e5cc3a021ab3419289f4265239edbd35ed3924f00d87426c95a85edc4c14b4d",
+  "sha256": "da74cb8d3b53ecd570a87d4b51c51e7df8b855df2eebd3141b54ccfc09b24b75",
+  "build_id": "d16e94bb170d346a3c79001dbdb965a3186a4afb328e9d7b60e19cd69b963fc0",
   "platform": "ios",
   "arch": "arm64"
 }

@@ -16,6 +16,7 @@ namespace GameFrame.Network.Transport.Kcp
             internal OwnedFrame Frame;
             internal CancellationToken Token;
             internal Func<bool> CanSend;
+            internal bool SingleAttempt;
             internal TaskCompletionSource<bool> Source = NewSource<bool>();
         }
 
@@ -47,6 +48,8 @@ namespace GameFrame.Network.Transport.Kcp
         private uint outputBorn;
         private long lastStep, deadline, tokenTime;
         private double businessTokens, unreliableTokens;
+        private double admissionTokens;
+        private long admissionTokenTime;
         private SendOperation send;
         private ReceiveOperation receive;
         private TaskCompletionSource<bool> closeOutput;
@@ -62,6 +65,21 @@ namespace GameFrame.Network.Transport.Kcp
             lock (gate)
             {
                 return metrics;
+            }
+        }
+
+        internal double EstimateReliableWaitMilliseconds(long queuedBytes, int length, long now)
+        {
+            lock (gate)
+            {
+                double available = Math.Min(options.BusinessBurstBytes, admissionTokens +
+                    Math.Max(0, now - admissionTokenTime) * (double)options.BusinessBytesPerSecond / 1000);
+                double tokenDeficit = Math.Max(0, queuedBytes + length - available);
+                long segments = (length + 1125L) / 1126;
+                // Native-accepted bytes have already spent tokens. Estimate only segment pressure
+                // beyond the admission window; do not charge all in-flight bytes a second time.
+                double windowDeficit = Math.Max(0, stats.Waitsnd + segments - 512) * 1126;
+                return Math.Max(tokenDeficit, windowDeficit) * 1000 / options.BusinessBytesPerSecond;
             }
         }
         public bool OwnsClock => true;
@@ -120,6 +138,16 @@ namespace GameFrame.Network.Transport.Kcp
 
         public Task SendAsync(OwnedFrame frame, CancellationToken token, Func<bool> canSend = null)
         {
+            return QueueSend(frame, token, canSend, false);
+        }
+
+        internal Task<bool> TrySendAsync(OwnedFrame frame, CancellationToken token, Func<bool> canSend)
+        {
+            return QueueSend(frame, token, canSend, true);
+        }
+
+        private Task<bool> QueueSend(OwnedFrame frame, CancellationToken token, Func<bool> canSend, bool singleAttempt)
+        {
             lock (gate)
             {
                 RequireRunning();
@@ -128,7 +156,7 @@ namespace GameFrame.Network.Transport.Kcp
                     throw new InvalidOperationException("KCP requires one send owner.");
                 }
 
-                send = new SendOperation { Frame = frame, Token = token, CanSend = canSend };
+                send = new SendOperation { Frame = frame, Token = token, CanSend = canSend, SingleAttempt = singleAttempt };
                 worker.Wake();
                 return send.Source.Task;
             }
@@ -246,9 +274,21 @@ namespace GameFrame.Network.Transport.Kcp
                     tokenTime = now;
                     businessTokens = options.BusinessBurstBytes;
                     unreliableTokens = options.UnreliableBurstBytes;
+                    lock (gate)
+                    {
+                        admissionTokens = businessTokens;
+                        admissionTokenTime = now;
+                    }
                 }
 
-                FlushOutput(now);
+                if (stats.State == KcpNative.PeerClosed)
+                {
+                    ProcessReceive(now);
+                    return;
+                }
+
+                int outputBudget = 256;
+                FlushOutput(now, ref outputBudget);
                 for (int i = 0; i < 64; i++)
                 {
                     int length;
@@ -278,7 +318,7 @@ namespace GameFrame.Network.Transport.Kcp
                 }
 
                 KcpNative.Check(KcpNative.Tick(handle, (uint)now), "tick");
-                stats = new KcpNative.Stats { Size = 168, Version = 1 };
+                stats = new KcpNative.Stats { Size = 168, Version = KcpNative.Version };
                 KcpNative.Check(KcpNative.GetStats(handle, ref stats), "stats");
                 if (!established && stats.State == KcpNative.Established)
                 {
@@ -288,14 +328,22 @@ namespace GameFrame.Network.Transport.Kcp
 
                 if (established)
                 {
-                    checkClock?.Invoke();
-                    ProcessSend(now);
-                    ProcessReceive();
+                    ProcessReceive(now);
+                    if (stats.State == KcpNative.Established)
+                    {
+                        checkClock?.Invoke();
+                        ProcessSend(now);
+                    }
                 }
 
-                FlushOutput(now);
+                if (stats.State != KcpNative.PeerClosed)
+                {
+                    FlushOutput(now, ref outputBudget);
+                }
                 lock (gate)
                 {
+                    admissionTokens = businessTokens;
+                    admissionTokenTime = tokenTime;
                     metrics = new KcpMetricsSnapshot(stats, nativeReserved ? options.NativeBytes : 0, wireSentBytes,
                         wireSentPackets, socketReceiveBuffer, socketSendBuffer, managedUnreliableDropped);
                     if (closeOutput != null && (closeToken.IsCancellationRequested ||
@@ -359,6 +407,10 @@ namespace GameFrame.Network.Transport.Kcp
             if (outputLength != 0 || (!control && (businessTokens < operation.Frame.Length ||
                 (unreliable && unreliableTokens < operation.Frame.Length))))
             {
+                if (operation.SingleAttempt)
+                {
+                    CompleteSend(operation, false);
+                }
                 return;
             }
 
@@ -366,6 +418,10 @@ namespace GameFrame.Network.Transport.Kcp
                 KcpNative.SendReliable(handle, operation.Frame.Bytes, operation.Frame.Length);
             if (result == KcpNative.Backpressure)
             {
+                if (operation.SingleAttempt)
+                {
+                    CompleteSend(operation, false);
+                }
                 return;
             }
 
@@ -385,16 +441,16 @@ namespace GameFrame.Network.Transport.Kcp
 
         private static bool IsUnreliableFrame(SendOperation operation) => operation.Frame.Delivery == NetDelivery.Unreliable;
 
-        private void CompleteSend(SendOperation operation)
+        private void CompleteSend(SendOperation operation, bool completed = true)
         {
             lock (gate)
             {
                 send = null;
-                operation.Source.TrySetResult(true);
+                operation.Source.TrySetResult(completed);
             }
         }
 
-        private void ProcessReceive()
+        private void ProcessReceive(long now)
         {
             ReceiveOperation operation;
             lock (gate)
@@ -408,7 +464,7 @@ namespace GameFrame.Network.Transport.Kcp
             }
 
             operation.Token.ThrowIfCancellationRequested();
-            int result = KcpNative.Peek(handle, out int channel, out int length);
+            int result = KcpNative.Peek(handle, out int channel, out int length, out uint born);
             KcpNative.Check(result, "peek frame");
             if (result == 0)
             {
@@ -425,6 +481,16 @@ namespace GameFrame.Network.Transport.Kcp
             }
 
             NetDelivery delivery = channel == 1 ? NetDelivery.Reliable : NetDelivery.Unreliable;
+            long receivedAt = now - unchecked((uint)now - born);
+            if (delivery == NetDelivery.Unreliable && now - receivedAt >= options.UnreliableMaxAge.TotalMilliseconds)
+            {
+                if (KcpNative.Receive(handle, input.Bytes, input.Capacity) != length)
+                {
+                    throw new NetworkProtocolException("Expired unreliable frame length mismatch.");
+                }
+                managedUnreliableDropped++;
+                return;
+            }
             int limit = delivery == NetDelivery.Reliable ? operation.ReliableLimit : operation.UnreliableLimit;
             KcpNative.Check(KcpNative.PeekHeader(handle, header.Bytes, header.Capacity), "peek header");
             FrameHeader decoded = FrameCodec.ReadHeader(header.Bytes, limit, delivery, operation.Direction, operation.Handshaking);
@@ -465,6 +531,7 @@ namespace GameFrame.Network.Transport.Kcp
                 frame.Header = decoded;
                 frame.Length = length;
                 frame.Delivery = delivery;
+                frame.AdmittedAt = receivedAt;
                 lock (gate)
                 {
                     receive = null;
@@ -478,9 +545,9 @@ namespace GameFrame.Network.Transport.Kcp
             }
         }
 
-        private void FlushOutput(long now)
+        private void FlushOutput(long now, ref int remaining)
         {
-            for (int i = 0; i < 256; i++)
+            while (remaining > 0)
             {
                 if (outputLength == 0)
                 {
@@ -507,6 +574,7 @@ namespace GameFrame.Network.Transport.Kcp
 
                     wireSentBytes += length;
                     wireSentPackets++;
+                    remaining--;
                     outputLength = 0;
                 }
                 catch (SocketException error) when (error.SocketErrorCode == SocketError.WouldBlock)
@@ -545,7 +613,7 @@ namespace GameFrame.Network.Transport.Kcp
                     handle = IntPtr.Zero;
                     try
                     {
-                        var finalStats = new KcpNative.Stats { Size = 168, Version = 1 };
+                        var finalStats = new KcpNative.Stats { Size = 168, Version = KcpNative.Version };
                         KcpNative.Check(KcpNative.GetStats(ownedHandle, ref finalStats), "final stats");
                         stats = finalStats;
                     }
@@ -589,8 +657,28 @@ namespace GameFrame.Network.Transport.Kcp
                     metrics = new KcpMetricsSnapshot(stats, nativeReserved ? options.NativeBytes : 0, wireSentBytes,
                         wireSentPackets, socketReceiveBuffer, socketSendBuffer, managedUnreliableDropped);
                     connected.TrySetException(error);
-                    send?.Source.TrySetException(error);
-                    receive?.Source.TrySetException(error);
+                    if (send != null)
+                    {
+                        if (send.Token.IsCancellationRequested)
+                        {
+                            send.Source.TrySetCanceled(send.Token);
+                        }
+                        else
+                        {
+                            send.Source.TrySetException(error);
+                        }
+                    }
+                    if (receive != null)
+                    {
+                        if (receive.Token.IsCancellationRequested)
+                        {
+                            receive.Source.TrySetCanceled(receive.Token);
+                        }
+                        else
+                        {
+                            receive.Source.TrySetException(error);
+                        }
+                    }
                     closeOutput?.TrySetException(error);
                     send = null;
                     receive = null;

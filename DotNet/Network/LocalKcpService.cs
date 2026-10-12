@@ -38,10 +38,9 @@ namespace GameFrame.Server.Network
                 CryptographicOperations.ZeroMemory(file);
             }
 
-            byte[] identity = Convert.FromHexString(credentials.Identity);
-            byte[] psk = Convert.FromHexString(credentials.Psk);
-            byte[] ticket = Convert.FromHexString(credentials.Ticket);
-            credentials.Identity = credentials.Psk = credentials.Ticket = string.Empty;
+            byte[] identity = Array.Empty<byte>();
+            byte[] psk = Array.Empty<byte>();
+            byte[] ticket = Array.Empty<byte>();
             using var stop = new CancellationTokenSource();
             ConsoleCancelEventHandler cancel = (_, args) =>
             {
@@ -51,6 +50,10 @@ namespace GameFrame.Server.Network
             Console.CancelKeyPress += cancel;
             try
             {
+                identity = Convert.FromHexString(credentials.Identity);
+                psk = Convert.FromHexString(credentials.Psk);
+                ticket = Convert.FromHexString(credentials.Ticket);
+                credentials.Identity = credentials.Psk = credentials.Ticket = string.Empty;
                 await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, port), GameNetProtocol.Catalog, HandleAsync);
                 await host.RegisterGrantAsync(credentials.Conv, identity, psk, ticket);
                 CryptographicOperations.ZeroMemory(psk);
@@ -64,6 +67,7 @@ namespace GameFrame.Server.Network
             }
             finally
             {
+                credentials.Identity = credentials.Psk = credentials.Ticket = string.Empty;
                 Console.CancelKeyPress -= cancel;
                 CryptographicOperations.ZeroMemory(identity);
                 CryptographicOperations.ZeroMemory(psk);
@@ -71,7 +75,7 @@ namespace GameFrame.Server.Network
             }
         }
 
-        internal static async Task<OwnedFrame?> HandleAsync(OwnedFrame frame, FrameMemoryBudget budget, CancellationToken token)
+        internal static async Task<OwnedFrame?> HandleAsync(KcpConnectionInfo connection, OwnedFrame frame, FrameMemoryBudget budget, CancellationToken token)
         {
             if (frame.Header.Kind != FrameKind.Request || frame.Header.Opcode != GameNetRoutes.Echo.Opcode)
             {

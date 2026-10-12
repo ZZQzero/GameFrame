@@ -38,6 +38,7 @@ namespace GameFrame.Server.Network
         private readonly Func<bool> admitLogin;
         private readonly Action authenticated;
         private readonly CancellationTokenSource lifetime;
+        private readonly CancellationTokenSource sendingLifetime;
         private readonly Channel<OwnedFrame> received;
         private readonly Channel<SendItem> businessSend;
         private readonly Channel<SendItem> controlSend;
@@ -50,6 +51,8 @@ namespace GameFrame.Server.Network
         private int authenticatedOnce;
         private int loginInFlight;
         private int terminating;
+        private volatile bool inputCompleted;
+        private volatile bool transportEnded;
         private int receiveCount;
         private int receiveBytes;
         private int businessCount;
@@ -86,6 +89,7 @@ namespace GameFrame.Server.Network
             this.admitLogin = admitLogin;
             this.authenticated = authenticated;
             lifetime = CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
+            sendingLifetime = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
             received = Channel.CreateBounded<OwnedFrame>(settings.ReceiveQueueCount);
             businessSend = Channel.CreateBounded<SendItem>(settings.BusinessQueueCount);
             controlSend = Channel.CreateBounded<SendItem>(settings.ControlQueueCount);
@@ -134,11 +138,32 @@ namespace GameFrame.Server.Network
 
                 loginDeadline = getMilliseconds() + (long)settings.LoginTimeout.TotalMilliseconds;
                 lastPing = getMilliseconds();
-                tasks.Add(SendLoopAsync());
-                tasks.Add(ReceiveLoopAsync());
-                tasks.Add(DispatchLoopAsync());
-                tasks.Add(HeartbeatLoopAsync());
-                await await Task.WhenAny(tasks);
+                Task sending = SendLoopAsync();
+                Task receiving = ReceiveLoopAsync();
+                Task dispatching = DispatchLoopAsync();
+                Task heartbeat = HeartbeatLoopAsync();
+                tasks.AddRange(new[] { sending, receiving, dispatching, heartbeat });
+                Task first = await Task.WhenAny(tasks);
+                await first;
+                if ((ReferenceEquals(first, receiving) || ReferenceEquals(first, dispatching)) && inputCompleted && !lifetime.IsCancellationRequested)
+                {
+                    // EOF transfers ownership to the existing dispatch loop. Faults/watchdog still
+                    // interrupt this drain; normal completion alone must not cancel accepted work.
+                    await await Task.WhenAny(dispatching, sending, heartbeat);
+                    await dispatching;
+                    await CloseSocketAsync();
+                    if (!peerClosed.Task.IsCompleted)
+                    {
+                        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+                        timeout.CancelAfter(TimeSpan.FromSeconds(2));
+                        using OwnedFrame? afterClose = await WebSocketFrameTransport.ReceiveAsync(socket!, receiveMemory,
+                            reliableLimit, FrameDirection.ClientToServer, false, timeout.Token, ValidateBusinessHeader);
+                        if (afterClose != null)
+                        {
+                            throw new NetworkProtocolException("Application input after orderly Close.");
+                        }
+                    }
+                }
             }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
             {
@@ -228,10 +253,12 @@ namespace GameFrame.Server.Network
                     FrameDirection.ClientToServer, false, lifetime.Token, ValidateBusinessHeader);
                 if (frame == null)
                 {
+                    transportEnded = true;
+                    sendingLifetime.Cancel();
                     peerClosed.TrySetResult();
                     if (Volatile.Read(ref terminating) == 0)
                     {
-                        await CloseSocketAsync();
+                        CompleteInput();
                     }
 
                     return;
@@ -393,11 +420,17 @@ namespace GameFrame.Server.Network
             else
             {
                 ControlCodec.ReadClose(frame.Body);
-                await CloseSocketAsync();
+                CompleteInput();
                 return false;
             }
 
             return true;
+        }
+
+        private void CompleteInput()
+        {
+            inputCompleted = true;
+            received.Writer.TryComplete();
         }
 
         private async Task DispatchLoopAsync()
@@ -578,6 +611,11 @@ namespace GameFrame.Server.Network
             try
             {
                 lifetime.Token.ThrowIfCancellationRequested();
+                if (transportEnded && !closeOutput)
+                {
+                    frame.Dispose();
+                    return Task.CompletedTask;
+                }
                 var item = new SendItem(frame, control, closeOutput, waitForSend);
                 lock (queueGate)
                 {
@@ -639,9 +677,18 @@ namespace GameFrame.Server.Network
 
                 try
                 {
+                    if (transportEnded && !item.CloseOutput)
+                    {
+                        item.Completion?.TrySetResult();
+                        continue;
+                    }
                     if (item.Control && getMilliseconds() - item.Frame.AdmittedAt >= 15000)
                     {
                         throw new NetworkException("Control frame send deadline elapsed.");
+                    }
+                    if (!item.Control && getMilliseconds() - item.Frame.AdmittedAt >= 250)
+                    {
+                        throw new NetworkBackpressureException("Reliable server send queue age exceeded.");
                     }
 
                     if (item.CloseOutput)
@@ -652,7 +699,7 @@ namespace GameFrame.Server.Network
                     }
                     else
                     {
-                        await WebSocketFrameTransport.SendAsync(socket!, item.Frame, lifetime.Token);
+                        await WebSocketFrameTransport.SendAsync(socket!, item.Frame, sendingLifetime.Token);
                     }
 
                     lock (queueGate)
@@ -669,6 +716,11 @@ namespace GameFrame.Server.Network
                 }
                 catch (Exception error)
                 {
+                    if (transportEnded && error is OperationCanceledException && !lifetime.IsCancellationRequested)
+                    {
+                        item.Completion?.TrySetResult();
+                        continue;
+                    }
                     item.Completion?.TrySetException(error);
                     throw;
                 }
@@ -742,14 +794,14 @@ namespace GameFrame.Server.Network
                     throw new NetworkException("Control frame send deadline elapsed.");
                 }
 
-                if (pendingNonce != 0 && pongDeadline != 0 && now >= pongDeadline)
+                if (!inputCompleted && pendingNonce != 0 && pongDeadline != 0 && now >= pongDeadline)
                 {
                     throw new NetworkException("Application heartbeat timed out.");
                 }
 
-                if (pendingNonce == 0 && now - lastPing >= 5000)
+                if (!inputCompleted && pendingNonce == 0 && now - lastPing >= 5000)
                 {
-                    sendNonce = ++nextNonce;
+                    sendNonce = nextNonce = checked(nextNonce + 1);
                     pendingNonce = sendNonce;
                     lastPing = now;
                 }
@@ -834,6 +886,7 @@ namespace GameFrame.Server.Network
             lock (finished)
             {
                 lifetime.Dispose();
+                sendingLifetime.Dispose();
                 sendSignal.Dispose();
                 finished.TrySetResult();
             }

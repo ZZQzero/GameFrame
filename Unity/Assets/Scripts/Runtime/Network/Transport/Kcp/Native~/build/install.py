@@ -23,8 +23,8 @@ def main():
     recorded_id = unsigned.pop('build_id')
     if hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode()).hexdigest() != recorded_id:
         raise ValueError('Build manifest changed after publication.')
-    if manifest['sanitized'] or manifest['abi'] != 1:
-        raise ValueError('Only non-sanitized ABI 1 builds are installable.')
+    if manifest['sanitized'] or manifest['abi'] != 2:
+        raise ValueError('Only non-sanitized ABI 2 builds are installable.')
     if manifest['sources'] != sources():
         raise ValueError('Maintained sources changed; rebuild before installation.')
     read_sources(UNITY / 'Assets/Plugins/GameFrame/Kcp')
@@ -75,7 +75,7 @@ def main():
     if not args.server_output:
         meta.write_text(metadata)
     (destination / 'build-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
-    (destination / 'artifact.json').write_text(json.dumps({'abi': 1, 'binary': name, 'sha256': digest(destination / name),
+    (destination / 'artifact.json').write_text(json.dumps({'abi': 2, 'binary': name, 'sha256': digest(destination / name),
                                                           'build_id': manifest['build_id'], 'platform': target, 'arch': arch}, indent=2) + '\n')
     shutil.copytree(build / 'licenses', destination / 'licenses', dirs_exist_ok=True)
     print('Installed verified artifact: ' + str(destination / name))

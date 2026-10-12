@@ -34,6 +34,14 @@ namespace GameFrame.Network
     public readonly struct KcpMetricsSnapshot
     {
         public bool Available { get; }
+        public bool DtlsDiscardDetailsAvailable => false;
+        public uint Capabilities { get; }
+        public ulong NativeAllocations { get; }
+        public ulong PolledUdpBytes { get; }
+        public ulong ReceivedUdpPackets { get; }
+        public uint InputQueueCount { get; }
+        public uint OutputOldestMilliseconds { get; }
+        public uint PlaintextQueueCount { get; }
         public int NativeState { get; }
         public int FatalCode { get; }
         public int NativeError { get; }
@@ -65,6 +73,13 @@ namespace GameFrame.Network
             long socketSentPackets, int socketReceiveBuffer, int socketSendBuffer, long transportUnreliableDropped = 0)
         {
             Available = true;
+            Capabilities = stats.Capabilities;
+            NativeAllocations = stats.Allocations;
+            PolledUdpBytes = stats.PolledBytes;
+            ReceivedUdpPackets = stats.ReceivedPackets;
+            InputQueueCount = stats.InputCount;
+            OutputOldestMilliseconds = stats.OutputOldestMs;
+            PlaintextQueueCount = stats.PlaintextCount;
             NativeState = (int)stats.State;
             FatalCode = stats.FatalCode;
             NativeError = stats.NativeError;
@@ -100,6 +115,12 @@ namespace GameFrame.Network
         public long UnreliableDropped { get; }
         public long Generation { get; }
         public long OwnedBytes { get; }
+        public long PeakReservedBytes { get; }
+        public long SentApplicationBytes { get; }
+        public long ReceivedApplicationBytes { get; }
+        public long SentBusinessBodyBytes { get; }
+        public long ReceivedBusinessBodyBytes { get; }
+        public long PingRoundTripMilliseconds { get; }
         public int ReliableSendCount { get; }
         public int ReliableReceiveCount { get; }
         public int PendingCount { get; }
@@ -113,10 +134,18 @@ namespace GameFrame.Network
 
         internal NetworkMetricsSnapshot(long generation, long ownedBytes, int sendCount, int receiveCount,
             int pendingCount, int deadlineCount, long sentFrames, long receivedFrames, long lateResponses,
-            long timeouts, long cancellations, long queueAgeWarnings, KcpMetricsSnapshot kcp = default, long unreliableDropped = 0)
+            long timeouts, long cancellations, long queueAgeWarnings, KcpMetricsSnapshot kcp = default, long unreliableDropped = 0,
+            long peakReservedBytes = 0, long sentApplicationBytes = 0, long receivedApplicationBytes = 0,
+            long sentBusinessBodyBytes = 0, long receivedBusinessBodyBytes = 0, long pingRoundTripMilliseconds = 0)
         {
             Generation = generation;
             OwnedBytes = ownedBytes;
+            PeakReservedBytes = peakReservedBytes;
+            SentApplicationBytes = sentApplicationBytes;
+            ReceivedApplicationBytes = receivedApplicationBytes;
+            SentBusinessBodyBytes = sentBusinessBodyBytes;
+            ReceivedBusinessBodyBytes = receivedBusinessBodyBytes;
+            PingRoundTripMilliseconds = pingRoundTripMilliseconds;
             ReliableSendCount = sendCount;
             ReliableReceiveCount = receiveCount;
             PendingCount = pendingCount;

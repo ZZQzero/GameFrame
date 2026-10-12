@@ -4,8 +4,8 @@
 #include "ikcp.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/ssl_cookie.h"
-#include "mbedtls/entropy.h"
-#include "mbedtls/ctr_drbg.h"
+#include "psa/crypto.h"
+#include "mbedtls/threading.h"
 #include "mbedtls/platform.h"
 #include "mbedtls/platform_util.h"
 #include <limits.h>
@@ -13,9 +13,13 @@
 #include <string.h>
 #if defined(_WIN32)
 #include <windows.h>
+#endif
+#if defined(_MSC_VER)
 #define GFNET_TLS __declspec(thread)
 #else
+#if !defined(_WIN32)
 #include <pthread.h>
+#endif
 #define GFNET_TLS _Thread_local
 #endif
 #define GFNET_CONNECTION_MAGIC 0x47464e43u
@@ -48,18 +52,16 @@ typedef struct gfnet_connection {
     gfnet_quota* quota;
     struct gfnet_listener* listener;
     uint64_t connection_id, generation, grant_id;
-    gfnet_peer_v1 peer;
+    gfnet_peer_v2 peer;
     int state, fatal_code, native_error, clock_set, cookie_verified, hello_verify;
     int bound, established_event, closed_event;
-    uint32_t now, next_tick, input_since_flush, input_round;
+    uint32_t now, next_tick, input_since_flush, input_round, receive_turn;
     uint32_t timer_start, timer_intermediate, timer_final;
     uint32_t hello_deadline;
     uint8_t identity[16], psk[32];
     mbedtls_ssl_context ssl;
     mbedtls_ssl_config config;
     mbedtls_ssl_cookie_ctx cookie;
-    mbedtls_entropy_context entropy;
-    mbedtls_ctr_drbg_context drbg;
     ikcpcb* kcp;
     gfnet_queue input, output, plaintext, unreliable;
     uint64_t udp_rx_bytes, udp_tx_bytes, udp_rx_packets, udp_tx_packets;
@@ -68,9 +70,10 @@ typedef struct gfnet_connection {
 extern GFNET_TLS gfnet_quota* gfnet_current_quota;
 #ifdef GFNET_TESTING
 extern GFNET_TLS int64_t gfnet_test_fail_after;
+extern GFNET_TLS int gfnet_test_rng_failure;
 #endif
 uintptr_t gfnet_thread_id(void);
-void gfnet_initialize(void);
+int gfnet_initialize(void);
 gfnet_quota* gfnet_quota_create(uint64_t, gfnet_quota*);
 void gfnet_quota_destroy(gfnet_quota*);
 void* gfnet_alloc(size_t);
@@ -82,7 +85,8 @@ void gfnet_queue_pop(gfnet_queue*);
 void gfnet_queue_clear(gfnet_queue*);
 int gfnet_check_connection(gfnet_connection*);
 int gfnet_fault(gfnet_connection*, int, int);
-int gfnet_connection_create(const gfnet_config_v1*, gfnet_quota*, struct gfnet_listener*, const gfnet_peer_v1*, gfnet_connection**);
+int gfnet_dtls_fault(gfnet_connection*, int);
+int gfnet_connection_create(const gfnet_config_v2*, gfnet_quota*, struct gfnet_listener*, const gfnet_peer_v2*, gfnet_connection**);
 void gfnet_connection_free(gfnet_connection*);
 int gfnet_connection_tick(gfnet_connection*, uint32_t);
 int gfnet_listener_psk(void*, mbedtls_ssl_context*, const unsigned char*, size_t);

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "local-wss": {
+      "commandName": "Project",
+      "commandLineArgs": "--profile local-wss",
+      "launchBrowser": false
+    },
+    "local-kcp-dtls": {
+      "commandName": "Project",
+      "commandLineArgs": "--profile local-kcp-dtls",
+      "launchBrowser": false
+    }
+  }
+}

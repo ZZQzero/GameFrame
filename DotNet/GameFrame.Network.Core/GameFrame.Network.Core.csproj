@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <ItemGroup>
+        <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/ProtocolContracts/*.cs" Link="Contracts/%(Filename)%(Extension)" />
+        <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/Protocol/*.cs" Link="Protocol/%(Filename)%(Extension)" />
+        <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/Messaging/NetProtocolCatalog.cs" Link="Messaging/NetProtocolCatalog.cs" />
+        <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/NetworkException.cs" Link="NetworkException.cs" />
+        <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/NetworkClock.cs" Link="NetworkClock.cs" />
+        <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/Transport/WebSocketFrameTransport.cs" Link="Transport/WebSocketFrameTransport.cs" />
+        <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/Transport/OwnedFrame.cs" Link="Transport/OwnedFrame.cs" />
+        <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/KcpNative.cs" Link="Transport/KcpNative.cs" />
+    </ItemGroup>
+</Project>

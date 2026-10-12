@@ -50,6 +50,9 @@
         "type": "Transitive",
         "resolved": "3.2.52",
         "contentHash": "zOpGtUo2QTgbsiI0D0yCe8aUTgDPov6kqIu1CDHI6isqhYcAHdirRrdnfsQXmAUfAWx1LwVYGgC6xe6fNS4UAg=="
+      },
+      "gameframe.network.core": {
+        "type": "Project"
       }
     }
   }

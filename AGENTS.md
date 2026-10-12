@@ -27,10 +27,12 @@
 | `Unity/Config` | Luban 配置、Excel 输入和生成脚本 |
 | `Unity/Assets/Config` | YooAsset 采集的配置数据等资源；不是 Luban 的 Excel 输入目录 |
 | `Unity/Assets/Plugins/GameFrame` | 平台插件和原生库安装产物 |
+| `DotNet` | .NET 服务端：Core/Server 为业务无关框架，Game.Protocol 为同源生成协议，Game.Server 为业务与部署入口 |
 | `Docs` | 各系统的使用说明、API 与行为契约，另含启动及跨模块说明 |
 | `Tools` | 项目维护脚本与原生插件布局说明 |
 | `skills` | 仓库内的验证、原生插件和 Luban 工作流说明 |
 
+- 服务端 Core/Server 不引用 Game.Protocol 或 Game.Server；账号、角色、世界状态与登录/授权策略放入 Game.Server，通过强类型应用接口接入框架。
 - Runtime 不依赖 Editor、AOT 或 Hotfix；AOT 不引用 Hotfix，Hotfix 可以引用 AOT 和 Runtime。
 - Runtime 中的平台适配或必要的编辑器条件编译应保持用途明确；不要引入对 `GameFrame.Editor` 的程序集依赖。
 - `AssemblyInfo.cs` 中的 `InternalsVisibleTo` 用于声明内部 API 的访问范围，不因为有 asmdef 就直接删除。
@@ -126,7 +128,7 @@ if (config.Enabled) { Initialize(config); }
 - 程序集边界或条件编译变更需检查 Player 脚本编译；启动流程变更还需验证 `Unity/Assets/Scenes/Launch.unity`、GameEntry 就绪和相机 Stack。
 - 记录测试前的场景和 EditorSettings，结束后恢复工具造成的变化，保留用户设置与已有修改。
 - macOS/Linux 从仓库根目录运行 `bash Unity/Config/gen.sh`；Windows 在 `Unity/Config` 目录运行 `gen.bat`。生成依赖 .NET 8，Unity/Hub 启动环境可能与终端 PATH 不同；优先使用脚本现有的路径配置。
-- 原生插件的 `build.py`、`install.py` 位于各模块的 `Native~/build`，执行前查看参数和目标平台；先构建安装 Sqlite，再让 MediaBackup 使用同一核心产物。替换已加载的原生库后需重启 Unity 才能有效验证。
+- 原生插件的 `build.py`、`install.py`：Sqlite/MediaBackup 位于各模块的 `Native~/build`，KCP 位于仓库公共目录 `Native/Kcp/build`。执行前查看参数和目标平台；先构建安装 Sqlite，再让 MediaBackup 使用同一核心产物。替换已加载的原生库后需重启 Unity 才能有效验证。
 - `python3 Tools/migrate_native_layout.py` 用于核验既有迁移产物，不是通用构建入口；不要为普通构建调用其 `--apply`。
 - 汇报明确说明改了什么、验证了什么及未验证部分；区分源码检查、Editor 编译、Player 脚本编译、原生 IL2CPP 构建和真机验证，不将其中一项当作其余项完成。
 

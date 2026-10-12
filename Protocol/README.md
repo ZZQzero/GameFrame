@@ -10,15 +10,15 @@
 - `World/WorldProto.proto`、`WorldService.proto`：世界入场/恢复/离场、实体成员事件、输入与快照。
 - `Diagnostics/DiagnosticsProto.proto`、`DiagnosticsService.proto`：仅 local profile 注册的 Echo 联调路由。
 - 各域按 message/service 分离；opcode 放在 method 上，DTO 可被多条路由复用。
-- `GameFrame.Protocol.projitems`：DotNet 和 .NET 测试的共享源码引用入口。
+- `GameFrame.Protocol.projitems`：仅包含生成 C# 的共享引用入口，由 Game.Protocol 编译，.NET 测试引用该项目。
 
-默认只输出 `GameNetMessages.cs` 与 `GameNetProtocol.cs` 到 `Unity/Assets/Scripts/Hotfix/Network/Generated/`。Unity 编译该目录；DotNet 导入 projitems 编译完全相同的源码，并按自己的目标框架运行 MemoryPack 的 source generator。无需复制 DTO，也不引用 Unity DLL。
+默认只输出 `GameNetMessages.cs` 与 `GameNetProtocol.cs` 到 `Unity/Assets/Scripts/Hotfix/Network/Generated/`。Unity 编译该目录；DotNet/Game.Protocol 导入 projitems 编译完全相同的源码，并按自己的目标框架运行 MemoryPack 的 source generator。无需复制 DTO，也不引用 Unity DLL。
 
 开发验证使用 `--artifacts`，额外输出 `protocol.manifest.json`、`protocol.sha256`、`golden-vectors.json` 到仓库根的 `Protocol/Generated/`。这些文件不属于 Unity 资产，不参与正式资源打包或运行时加载。协议指纹始终写入生成的 C# catalog，正式代码生成仍在内存中计算规范清单与 hash；省略辅助文件不会改变协议。默认模式也不构造序列化测试样本。
 
 工具自身不编译磁盘上的旧生成代码，缺少或损坏产物时仍可 generate。工具会先在内存中编译新 DTO 和完整生成源码，并与 MemoryPack serialization-info 对照，再写入结果。临时编译信息在系统临时目录创建，完成后清理。
 
-工具入口为 `Program.cs`，`ProtoProtocolGenerator.cs` 负责解析 Proto 与生成 DTO，`MemoryPackProtocolGenerator.cs` 负责分析实际 MemoryPack 布局并生成 codec/catalog、校验器和向量。这些都是协议生成工具，`DotNet/` 是实际服务端宿主；现已实现 Kestrel local-wss、登录/恢复/注销/Echo，运行配置见 [服务端说明](../DotNet/README.md)。世界服务与生产认证 provider 尚未实现。客户端连接配置与帧控制代码仅由测试工程链接，不作为生成工具的依赖。
+工具入口为 `Program.cs`，`ProtoProtocolGenerator.cs` 负责解析 Proto 与生成 DTO，`MemoryPackProtocolGenerator.cs` 负责分析实际 MemoryPack 布局并生成 codec/catalog、校验器和向量。这些都是协议生成工具，`DotNet/` 是实际服务端宿主；现已实现 Kestrel local-wss、登录/恢复/注销/Echo，运行配置见 [服务端说明](../DotNet/README.md)。世界服务与生产认证 provider 尚未实现。生成工具引用纯网络 Core；客户端连接实现仅由集成测试工程显式链接，不进入 Core、服务端或生成协议项目。框架与业务程序集关系见 [服务端说明](../DotNet/README.md)。
 
 ## 命令
 

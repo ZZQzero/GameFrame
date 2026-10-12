@@ -5,6 +5,8 @@ using GameFrame.Network;
 using GameFrame.Network.Protocol;
 using GameFrame.Network.Transport;
 using GameFrame.Server.Network;
+using Game.Server;
+using Game.Server.Login;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 
@@ -13,7 +15,7 @@ namespace GameFrame.Tests
     [TestFixture]
     public sealed class ServerHeartbeatTests
     {
-        private ServerSettings settings = null!;
+        private LocalAccountSettings settings = null!;
         private AccountSessions accounts = null!;
         private FrameMemoryBudget memory = null!;
         private ServerConnection server = null!;
@@ -27,12 +29,12 @@ namespace GameFrame.Tests
         {
             now = 1000;
             guard = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            settings = new ServerSettings("test", "secret");
+            settings = new LocalAccountSettings("test", "secret");
             accounts = new AccountSessions(settings);
             memory = new FrameMemoryBudget(64 * 1024 * 1024);
             socket = new ConnectionRaceTests.ControlledSocket(FrameDirection.ServerToClient);
-            server = new ServerConnection(settings, accounts, memory, () => true, () => { }, guard.Token,
-                NullLogger.Instance, () => Interlocked.Read(ref now), (_, token) => Task.Delay(Timeout.Infinite, token));
+            server = new ServerConnection(new WssServerOptions(), new LobbyApplication(accounts, settings).Application, memory, () => { }, guard.Token,
+                NullLogger.Instance, 1, new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 1234), () => Interlocked.Read(ref now), (_, token) => Task.Delay(Timeout.Infinite, token));
             byte[] hello = new byte[80];
             FrameCodec.WriteHeader(hello, new FrameHeader(FrameKind.Control, (uint)ControlOpcode.ClientHello, 0, 48));
             ControlCodec.WriteClientHello(hello.AsSpan(32), GameNetProtocol.Catalog.Hash, 32768,
@@ -70,7 +72,7 @@ namespace GameFrame.Tests
         [Test]
         public async Task TransportCloseDrainsPreviouslyAdmittedLogoutAfterDelayedEcho()
         {
-            long binding = (long)typeof(ServerConnection).GetField("binding", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(server)!;
+            long binding = ((LoginSession)server.Context.Session).Binding;
             var writer = new ArrayBufferWriter<byte>();
             GameNetRoutes.Echo.RequestCodec.Encode(writer, new EchoRequest { DelayMs = 100 });
             byte[] echo = new byte[32 + writer.WrittenCount];

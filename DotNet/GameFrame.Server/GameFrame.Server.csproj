@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <ItemGroup>
+        <FrameworkReference Include="Microsoft.AspNetCore.App" />
+        <ProjectReference Include="../GameFrame.Network.Core/GameFrame.Network.Core.csproj" />
+    </ItemGroup>
+</Project>

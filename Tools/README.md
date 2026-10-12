@@ -4,7 +4,7 @@ Native source and build scripts live in:
 
 - `Unity/Assets/Scripts/Runtime/Sqlite/Native~`
 - `Unity/Assets/Scripts/Runtime/MediaBackup/Native~`
-- `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~`
+- `Native/Kcp`
 
 Installers publish to `Unity/Assets/Plugins/GameFrame/Native/<module>/<platform>`.
 Build and install Sqlite first, then build MediaBackup against that same core build
@@ -12,10 +12,11 @@ and install it. Keep binaries together with their `.meta`, `artifact.json` and
 `build-manifest.json` files. Restart Unity after replacing a loaded native library.
 
 KCP source-fix notes and native regression tests live in
-`Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~`.
-Its [README](../Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/README.md)
+`Native/Kcp`.
+Its [README](../Native/Kcp/README.md)
 documents the integrated fast-ACK and allocation-safety fixes, hash-locked source copying
-and native regression commands. The C gfnet/mbedTLS library, managed UDP bridge,
+and native regression commands. The shared native directory also contains the only KCP sources under `third_party/kcp`.
+The C gfnet/mbedTLS library, managed UDP bridge,
 `build/build.py` and `build/install.py` are implemented; KCP installs to
 `Unity/Assets/Plugins/GameFrame/Native/Kcp`. macOS universal, Android arm64 and
 iOS device/simulator arm64 artifacts are installed; the simulator archive is
@@ -51,6 +52,8 @@ and the exact allowed source transformations. It replaces the macOS binary
 atomically rather than modifying an inode that Unity may have loaded.
 
 
-Network generation/check is in `NetworkProtocol`; the real Kestrel/WSS and pure client-core integration tests are in `NetworkServer.Tests`. Run `(cd Tools && dotnet test NetworkServer.Tests)` from the repository root. This project references the existing DotNet server and links the same connection-core sources without a Unity/UniTask shim; runtime usage and remaining platform gates are documented in [Network.md](../Docs/Network.md).
+Network generation/check is in `NetworkProtocol`; the real Kestrel/WSS and pure client-core integration tests are in `NetworkServer.Tests`. Run `(cd Tools && dotnet test NetworkServer.Tests)` from the repository root. This project references Game.Server and links the same connection-core sources without a Unity/UniTask shim; runtime usage and remaining platform gates are documented in [Network.md](../Docs/Network.md).
 
 `.github/workflows/network.yml` checks locked dependency restoration, generated protocol drift, .NET protocol/WSS tests and native KCP regressions on network changes. Native safety verification runs both assertions/NDEBUG and ASan/UBSan with sanitizer errors treated as failures. Unity Editor, Player/IL2CPP and device gates remain separate.
+
+`NetworkFramework.Tests` references GameFrame.Server only and runs an independent catalog without Game.Protocol or account logic. It covers typed RPC/Notify/Push, pre-decode admission, connection completion and host shutdown. Run `(cd Tools && dotnet test NetworkFramework.Tests)`. Both test projects are included in network CI.

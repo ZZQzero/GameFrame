@@ -263,7 +263,7 @@ namespace GameFrame.Network.Transport.Kcp
                     input = memory.Allocate(1201);
                     output = memory.Allocate(1200);
                     header = memory.Allocate(32);
-                    handle = KcpNative.Create(connect, options.NativeBytes);
+                    handle = KcpNative.Create(connect.Conv, connect.PskIdentity, connect.Psk, connect.ReliableLimit, connect.UnreliableLimit, options.NativeBytes);
                     socket = new Socket(endpoint.AddressFamily, SocketType.Dgram, ProtocolType.Udp) { Blocking = false };
                     socket.ReceiveBufferSize = 256 * 1024;
                     socket.SendBufferSize = 256 * 1024;

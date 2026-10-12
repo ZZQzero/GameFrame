@@ -1,6 +1,7 @@
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Threading.Channels;
 using Game.Hotfix.Network.Generated;
 using Game.Hotfix.Network.Protocol;
 using GameFrame.Network;
@@ -30,28 +31,29 @@ namespace GameFrame.Tests
             KcpNative.ValidateAbi();
         }
 
-        private static async Task<OwnedFrame?> Echo(KcpConnectionInfo connection, OwnedFrame frame, FrameMemoryBudget budget, CancellationToken token)
+        private static async Task<EchoResponse> Echo(ServerConnectionContext connection, EchoRequest request, CancellationToken token)
         {
-            if (frame.Header.Opcode != GameNetRoutes.Echo.Opcode)
-            {
-                throw new NetworkProtocolException("The local test handler only accepts Echo.");
-            }
-
-            EchoRequest request = GameNetRoutes.Echo.RequestCodec.Decode(frame.Body);
             await Task.Delay((int)request.DelayMs, token);
-            OwnedFrame reply = budget.Allocate(32 + GameNetRoutes.Echo.ResponseMaxBodyBytes);
-            try
-            {
-                var writer = new BoundedFrameWriter(reply);
-                GameNetRoutes.Echo.ResponseCodec.Encode(writer, new EchoResponse { Text = request.Text });
-                writer.Complete(FrameKind.Response, frame.Header.Opcode, frame.Header.CorrelationId);
-                return reply;
-            }
-            catch
-            {
-                reply.Dispose();
-                throw;
-            }
+            return new EchoResponse { Text = request.Text };
+        }
+
+        private static ServerApplication Application(
+            Func<ServerConnectionContext, EchoRequest, CancellationToken, Task<EchoResponse>>? echo = null,
+            Func<ServerConnectionContext, MoveInput, CancellationToken, Task>? move = null,
+            Func<ServerConnectionContext, ServerSession>? session = null)
+        {
+            var application = new ServerApplication(GameNetProtocol.Catalog, session);
+            application.Rpc(GameNetRoutes.Echo, echo ?? Echo);
+            application.Notify(GameNetRoutes.MoveInput, move ?? ((_, _, _) => Task.CompletedTask));
+            application.Notify(GameNetRoutes.MoveInputReliable, move ?? ((_, _, _) => Task.CompletedTask));
+            application.Reject(GameNetRoutes.Login);
+            application.Reject(GameNetRoutes.ResumeLogin);
+            application.Reject(GameNetRoutes.Logout);
+            application.Reject(GameNetRoutes.RequestWorldGrant);
+            application.Reject(GameNetRoutes.EnterWorld);
+            application.Reject(GameNetRoutes.RestoreWorld);
+            application.Reject(GameNetRoutes.LeaveWorld);
+            return application;
         }
 
         private static async Task<(NetworkConnectOptions Connect, ulong Grant)> Grant(KcpListenerHost host, uint conv)
@@ -99,6 +101,138 @@ namespace GameFrame.Tests
             return (Task)method.Invoke(host, new object[] { command })!;
         }
 
+        private sealed class CaptureSession : ServerSession
+        {
+            private readonly Channel<ServerConnectionContext> connected;
+            internal int Closed;
+
+            internal CaptureSession(Channel<ServerConnectionContext> connected)
+            {
+                this.connected = connected;
+            }
+
+            public override ValueTask ConnectedAsync(ServerConnectionContext connection)
+            {
+                Assert.That(Thread.CurrentThread.Name, Is.Not.EqualTo("GameFrame KCP Listener"));
+                Assert.That(connected.Writer.TryWrite(connection), Is.True);
+                return ValueTask.CompletedTask;
+            }
+
+            public override ValueTask ClosedAsync(ServerConnectionContext connection, ServerCloseInfo result)
+            {
+                Assert.That(Thread.CurrentThread.Name, Is.Not.EqualTo("GameFrame KCP Listener"));
+                Interlocked.Increment(ref Closed);
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        [Test]
+        public async Task ActivePushAndPublicCloseDoNotAffectANewerConnection()
+        {
+            var connected = Channel.CreateBounded<ServerConnectionContext>(2);
+            var sessions = new List<CaptureSession>();
+            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), Application(session: _ =>
+            {
+                var state = new CaptureSession(connected);
+                lock (sessions)
+                {
+                    sessions.Add(state);
+                }
+
+                return state;
+            }));
+            var firstGrant = await Grant(host, 851);
+            var secondGrant = await Grant(host, 852);
+            var memory = new FrameMemoryBudget(64 * 1024 * 1024);
+            var worker = new KcpWorker();
+            ConnectionContext first = Context(firstGrant.Connect, memory, worker);
+            ConnectionContext second = Context(secondGrant.Connect, memory, worker);
+            try
+            {
+                await PumpUntil(first, first.ConnectTask);
+                await PumpUntil(second, second.ConnectTask);
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                ServerConnectionContext one = await connected.Reader.ReadAsync(timeout.Token);
+                ServerConnectionContext two = await connected.Reader.ReadAsync(timeout.Token);
+                ServerConnectionContext firstServer = one.GrantId == firstGrant.Grant ? one : two;
+                ServerConnectionContext secondServer = one.GrantId == firstGrant.Grant ? two : one;
+                var received = new TaskCompletionSource<WorldSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+                second.Push = (_, frame) => received.TrySetResult(GameNetRoutes.WorldSnapshotReliable.Codec.Decode(frame.Body));
+                await secondServer.PushAsync(GameNetRoutes.WorldSnapshotReliable,
+                    new WorldSnapshot { ServerTick = 91, Entities = Array.Empty<EntityState>() });
+                await PumpUntil(second, received.Task);
+                Assert.That(received.Task.Result.ServerTick, Is.EqualTo(91));
+                Assert.Throws<ArgumentException>(() => secondServer.TryPushUnreliable(GameNetRoutes.WorldSnapshotReliable, new WorldSnapshot()));
+                await firstServer.CloseAsync().WaitAsync(timeout.Token);
+                await firstServer.CloseAsync().WaitAsync(timeout.Token);
+                Task<EchoResponse> rpc = second.Request(GameNetRoutes.Echo, new EchoRequest { Text = "isolated" }, TimeSpan.FromSeconds(2), default);
+                await PumpUntil(second, rpc);
+                Assert.That(rpc.Result.Text, Is.EqualTo("isolated"));
+                Assert.Throws<OperationCanceledException>(() => firstServer.PushAsync(GameNetRoutes.WorldSnapshotReliable, new WorldSnapshot()));
+                await Close(first);
+                await Close(second);
+                await secondServer.Completion.WaitAsync(timeout.Token);
+                lock (sessions)
+                {
+                    Assert.That(sessions.All(state => state.Closed == 1), Is.True);
+                }
+            }
+            finally
+            {
+                first.FailHost(new NetworkException("Test cleanup."));
+                second.FailHost(new NetworkException("Test cleanup."));
+                await worker.ShutdownAsync();
+            }
+
+            await host.DisposeAsync();
+            Assert.That(host.OwnedBytes, Is.Zero);
+            Assert.That(memory.OwnedBytes, Is.Zero);
+        }
+
+        [Test]
+        public async Task CloseAfterResponseDeliversTheReplyBeforeClosingAndCompletesCleanup()
+        {
+            ServerConnectionContext server = null!;
+            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), Application(
+                (connection, request, _) =>
+                {
+                    server = connection;
+                    connection.CloseAfterResponse(7);
+                    return Task.FromResult(new EchoResponse { Text = request.Text });
+                }));
+            var grant = await Grant(host, 861);
+            var memory = new FrameMemoryBudget(64 * 1024 * 1024);
+            var worker = new KcpWorker();
+            ConnectionContext client = Context(grant.Connect, memory, worker);
+            try
+            {
+                await PumpUntil(client, client.ConnectTask);
+                Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest { Text = "last reply" },
+                    TimeSpan.FromSeconds(2), default);
+                await PumpUntil(client, request);
+                Assert.That(request.Result.Text, Is.EqualTo("last reply"));
+                await PumpUntil(client, server.Completion);
+                ServerCloseInfo result = await server.Completion;
+                Assert.That(result.Reason, Is.EqualTo(7));
+                Assert.That(result.Error, Is.Null);
+                Assert.Throws<OperationCanceledException>(server.EnableFullTraffic);
+                IPEndPoint endpoint = server.RemoteEndpoint;
+                int originalPort = endpoint.Port;
+                endpoint.Port = 1;
+                Assert.That(server.RemoteEndpoint.Port, Is.EqualTo(originalPort));
+                await Close(client);
+            }
+            finally
+            {
+                client.FailHost(new NetworkException("Test cleanup."));
+                await worker.ShutdownAsync();
+            }
+
+            await host.DisposeAsync();
+            Assert.That(host.OwnedBytes, Is.Zero);
+            Assert.That(memory.OwnedBytes, Is.Zero);
+        }
+
         [Test]
         public async Task NormalTransportEndDrainsAcceptedRequestsWithoutCancelingTheHandler()
         {
@@ -106,9 +240,9 @@ namespace GameFrame.Tests
             var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var drained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var calls = new List<ulong>();
-            KcpConnectionInfo identity = default;
-            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), GameNetProtocol.Catalog,
-                async (connection, frame, budget, token) =>
+            ServerConnectionContext identity = null!;
+            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), Application(
+                async (connection, request, token) =>
                 {
                     identity = connection;
                     if (calls.Count == 0)
@@ -117,13 +251,13 @@ namespace GameFrame.Tests
                         await release.Task.WaitAsync(token);
                     }
                     token.ThrowIfCancellationRequested();
-                    calls.Add(frame.Header.CorrelationId);
+                    calls.Add(ulong.Parse(request.Text));
                     if (calls.Count == 3)
                     {
                         drained.TrySetResult();
                     }
-                    return null;
-                });
+                    return new EchoResponse();
+                }));
             var grant = await Grant(host, 601);
             var memory = new FrameMemoryBudget(64 * 1024 * 1024);
             var worker = new KcpWorker();
@@ -134,7 +268,7 @@ namespace GameFrame.Tests
                 await PumpUntil(context, context.ConnectTask);
                 for (int i = 0; i < 3; i++)
                 {
-                    requests.Add(context.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(5), default));
+                    requests.Add(context.Request(GameNetRoutes.Echo, new EchoRequest { Text = (i + 1).ToString() }, TimeSpan.FromSeconds(5), default));
                 }
                 await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
                 bool queued = false;
@@ -182,7 +316,7 @@ namespace GameFrame.Tests
         [Test]
         public async Task ReliableAdmissionRejectsBeforeAllocatingCorrelationOrPendingSlot()
         {
-            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), GameNetProtocol.Catalog, Echo);
+            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), Application());
             var grant = await Grant(host, 701);
             var memory = new FrameMemoryBudget(64 * 1024 * 1024);
             var worker = new KcpWorker();
@@ -233,9 +367,7 @@ namespace GameFrame.Tests
         [Test]
         public async Task ReliableRpcPassesAnUnreliableFrameWaitingForItsTokenBucket()
         {
-            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), GameNetProtocol.Catalog,
-                (connection, frame, budget, token) => frame.Header.Opcode == GameNetRoutes.Echo.Opcode ?
-                    Echo(connection, frame, budget, token) : Task.FromResult<OwnedFrame?>(null));
+            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), Application());
             var grant = await Grant(host, 751);
             var memory = new FrameMemoryBudget(64 * 1024 * 1024);
             var worker = new KcpWorker();
@@ -288,7 +420,12 @@ namespace GameFrame.Tests
         [Test]
         public async Task HelloEchoAndCloseReleaseBothOwners()
         {
-            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), GameNetProtocol.Catalog, Echo);
+            ServerConnectionContext server = null!;
+            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), Application((connection, request, token) =>
+            {
+                server = connection;
+                return Echo(connection, request, token);
+            }));
             var grant = await Grant(host, 101);
             var memory = new FrameMemoryBudget(64 * 1024 * 1024);
             var worker = new KcpWorker();
@@ -302,6 +439,9 @@ namespace GameFrame.Tests
                 await PumpUntil(context, request);
                 Assert.That(request.Result.Text, Is.EqualTo("native UDP"));
                 await Close(context);
+                ServerCloseInfo closed = await server.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.That(closed.Reason, Is.EqualTo(1));
+                Assert.That(closed.Error, Is.Null);
                 Assert.That(memory.OwnedBytes, Is.Zero);
             }
             finally
@@ -319,14 +459,14 @@ namespace GameFrame.Tests
         {
             var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var callbackFailure = new InvalidOperationException("Application cancellation failed.");
-            var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), GameNetProtocol.Catalog,
-                async (connection, frame, budget, token) =>
+            var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), Application(
+                async (connection, request, token) =>
                 {
                     using CancellationTokenRegistration registration = token.Register(() => throw callbackFailure);
                     entered.TrySetResult(true);
                     await Task.Delay(Timeout.Infinite, token);
-                    return null;
-                });
+                    return new EchoResponse();
+                }));
             var worker = new KcpWorker();
             ConnectionContext? context = null;
             try
@@ -367,7 +507,7 @@ namespace GameFrame.Tests
         [Test]
         public async Task ClosingOneChildPreservesSharedListenerAndOtherClient()
         {
-            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), GameNetProtocol.Catalog, Echo);
+            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), Application());
             var firstGrant = await Grant(host, 201);
             var secondGrant = await Grant(host, 202);
             var memory = new FrameMemoryBudget(64 * 1024 * 1024);
@@ -395,7 +535,7 @@ namespace GameFrame.Tests
         [Test]
         public async Task RejectedHandshakePreservesEstablishedChildAndNewAdmission()
         {
-            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), GameNetProtocol.Catalog, Echo);
+            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), Application());
             var grant = await Grant(host, 251);
             var memory = new FrameMemoryBudget(64 * 1024 * 1024);
             var worker = new KcpWorker();
@@ -437,7 +577,7 @@ namespace GameFrame.Tests
         [Test]
         public async Task MainThreadPauseDoesNotStopUdpAndDeadline()
         {
-            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), GameNetProtocol.Catalog, Echo);
+            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), Application());
             var grant = await Grant(host, 301);
             var memory = new FrameMemoryBudget(64 * 1024 * 1024);
             var worker = new KcpWorker();
@@ -465,7 +605,7 @@ namespace GameFrame.Tests
         [Test]
         public async Task GrantRevocationStopsDeliveryAndLeavesListenerUsable()
         {
-            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), GameNetProtocol.Catalog, Echo);
+            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), Application());
             var grant = await Grant(host, 401);
             var memory = new FrameMemoryBudget(64 * 1024 * 1024);
             var worker = new KcpWorker();
@@ -493,18 +633,14 @@ namespace GameFrame.Tests
         [Test]
         public async Task UnreliableNotifyAndPushUseTheSameDtlsSession()
         {
-            Task<OwnedFrame?> Handler(KcpConnectionInfo connection, OwnedFrame input, FrameMemoryBudget budget, CancellationToken token)
+            Task Handler(ServerConnectionContext connection, MoveInput move, CancellationToken token)
             {
-                MoveInput move = GameNetRoutes.MoveInput.Codec.Decode(input.Body);
-                OwnedFrame reply = budget.Allocate(32 + GameNetRoutes.WorldSnapshot.MaxBodyBytes);
-                var writer = new BoundedFrameWriter(reply);
-                GameNetRoutes.WorldSnapshot.Codec.Encode(writer, new WorldSnapshot { ServerTick = move.ClientTick, Entities = Array.Empty<EntityState>() });
-                writer.Complete(FrameKind.Push, GameNetRoutes.WorldSnapshot.Opcode, 0);
-                reply.Delivery = NetDelivery.Unreliable;
-                return Task.FromResult<OwnedFrame?>(reply);
+                Assert.That(connection.TryPushUnreliable(GameNetRoutes.WorldSnapshot,
+                    new WorldSnapshot { ServerTick = move.ClientTick, Entities = Array.Empty<EntityState>() }), Is.True);
+                return Task.CompletedTask;
             }
 
-            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), GameNetProtocol.Catalog, Handler);
+            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), Application(move: Handler));
             var grant = await Grant(host, 501);
             var memory = new FrameMemoryBudget(64 * 1024 * 1024);
             var worker = new KcpWorker();

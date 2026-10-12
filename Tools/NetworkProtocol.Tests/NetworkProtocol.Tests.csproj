@@ -15,11 +15,12 @@
     <PackageReference Include="NUnit" Version="3.14.0" />
     <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
   </ItemGroup>
-  <Import Project="../../Protocol/GameFrame.Protocol.projitems" />
+  <ItemGroup>
+    <ProjectReference Include="../../DotNet/Game.Protocol/Game.Protocol.csproj" />
+  </ItemGroup>
   <ItemGroup>
     <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/NetworkOptions.cs" Link="Contracts/NetworkOptions.cs" />
     <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/NetworkConnectOptions.cs" Link="Contracts/NetworkConnectOptions.cs" />
-    <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/Protocol/*.cs" Link="ProtocolCore/%(Filename)%(Extension)" />
     <ProjectReference Include="../NetworkProtocol/NetworkProtocol.csproj" />
     <Compile Include="../../Unity/Assets/Scripts/Tests/EditMode/Network/NetworkProtocolTests.cs" Link="NetworkProtocolTests.cs" />
     <Compile Include="../../Unity/Assets/Scripts/Tests/EditMode/Network/NetworkMemoryPackTests.cs" Link="NetworkMemoryPackTests.cs" />

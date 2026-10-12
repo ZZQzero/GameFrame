@@ -15,8 +15,6 @@
     <Reference Include="MemoryPack.Generator" HintPath="$(PkgMemoryPack_Generator)/analyzers/dotnet/cs/MemoryPack.Generator.dll" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/ProtocolContracts/*.cs" Link="Contracts/%(Filename)%(Extension)" />
-    <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/NetworkException.cs" Link="Contracts/NetworkException.cs" />
-    <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/Messaging/NetProtocolCatalog.cs" Link="Messaging/NetProtocolCatalog.cs" />
+    <ProjectReference Include="../../DotNet/GameFrame.Network.Core/GameFrame.Network.Core.csproj" />
   </ItemGroup>
 </Project>

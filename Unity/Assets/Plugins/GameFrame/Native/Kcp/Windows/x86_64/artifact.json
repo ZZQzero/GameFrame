@@ -1,8 +1,8 @@
 {
   "abi": 2,
   "binary": "gameframe_kcp.dll",
-  "sha256": "c02137aa896877cef0b7cfe319e297302d9b3390795927d5775cb233f3309013",
-  "build_id": "1876585f9180e9c313aa65dff32d59619f4ecab280e78d3fc8cb34fd3371d078",
+  "sha256": "747c8d606722e21f9b832901dd1d7943f968fb7197e03e807d3a9c0efca1956c",
+  "build_id": "de84cb79d1ee184647d9aef030d7470d592dce81da4e7d0fd03b520c95afdc73",
   "platform": "windows",
   "arch": "x86_64"
 }

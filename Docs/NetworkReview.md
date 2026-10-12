@@ -24,18 +24,23 @@
 | `Docs/NetworkImplementation.md` | 已读 |
 | `Docs/NetworkNativeDesign.md` | 已读 |
 | `Docs/Scope.md` | 已读 |
-| `DotNet/AssemblyInfo.cs` | 已读 |
-| `DotNet/DotNet.csproj` | 已读 |
-| `DotNet/Network/AccountSessions.cs` | 已读 |
-| `DotNet/Network/KcpListenerHost.cs` | 已读 |
-| `DotNet/Network/LocalKcpService.cs` | 已读 |
-| `DotNet/Network/LocalWssService.cs` | 已读 |
-| `DotNet/Network/ServerConnection.cs` | 已读 |
-| `DotNet/Network/ServerSettings.cs` | 已读 |
-| `DotNet/Program.cs` | 已读 |
+| `DotNet/Game.Server/AssemblyInfo.cs` | 已读 |
+| `DotNet/Game.Server/Game.Server.csproj` | 已读 |
+| `DotNet/Game.Server/Login/AccountSessions.cs` | 已读 |
+| `DotNet/GameFrame.Server/KcpListenerHost.cs` | 已读 |
+| `DotNet/Game.Server/LocalKcpService.cs` | 已读 |
+| `DotNet/GameFrame.Server/WssServer.cs` | 已读 |
+| `DotNet/GameFrame.Server/ServerConnection.cs` | 已读 |
+| `DotNet/Game.Server/Login/LocalAccountSettings.cs` | 已读 |
+| `DotNet/Game.Server/Program.cs` | 已读 |
+| `DotNet/Game.Server/LobbyApplication.cs` | 已读 |
+| `DotNet/Game.Server/Login/LoginHandlers.cs` | 已读 |
+| `DotNet/Game.Server/Login/LoginSession.cs` | 已读 |
+| `DotNet/Game.Server/LocalEnvironment.cs` | 已读 |
+| `DotNet/Game.Server/LocalWssService.cs` | 已读 |
 | `DotNet/README.md` | 已读 |
 | `DotNet/global.json` | 已读 |
-| `DotNet/packages.lock.json` | 已读 |
+| `DotNet/Game.Server/packages.lock.json` | 已读 |
 | `Protocol/Common/ResultProto.proto` | 已读 |
 | `Protocol/Common/net_options.proto` | 已读 |
 | `Protocol/Diagnostics/DiagnosticsProto.proto` | 已读 |
@@ -71,9 +76,9 @@
 | `Tools/NetworkServer.Tests/packages.lock.json` | 已读 |
 | `Tools/README.md` | 已读 |
 | `Tools/global.json` | 已读 |
-| `Unity/Assets/Plugins/GameFrame/Kcp/LICENSE` | 已读 |
-| `Unity/Assets/Plugins/GameFrame/Kcp/ikcp.c` | 已读 |
-| `Unity/Assets/Plugins/GameFrame/Kcp/ikcp.h` | 已读 |
+| `Native/Kcp/third_party/kcp/LICENSE` | 已读 |
+| `Native/Kcp/third_party/kcp/ikcp.c` | 已读 |
+| `Native/Kcp/third_party/kcp/ikcp.h` | 已读 |
 | `Unity/Assets/Scripts/Hotfix/Network/Generated/GameNetMessages.cs` | 已读 |
 | `Unity/Assets/Scripts/Hotfix/Network/Generated/GameNetProtocol.cs` | 已读 |
 | `Unity/Assets/Scripts/Runtime/AssemblyInfo.cs` | 已读 |
@@ -96,27 +101,27 @@
 | `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/KcpNative.cs` | 已读 |
 | `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/KcpTransport.cs` | 已读 |
 | `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/KcpWorker.cs` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/ABI.md` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/CMakeLists.txt` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/README.md` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/build.py` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/install.py` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/prepare_kcp.py` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/prepare_mbedtls.py` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/verify_windows.py` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/windows-llvm-mingw.cmake` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/config/mbedtls_config.h` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/include/gfnet.h` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/src/gfnet_connection.c` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/src/gfnet_internal.h` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/src/gfnet_listener.c` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/src/gfnet_memory.c` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/tests/allocation_safety.c` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/tests/fastack_regression.cpp` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/tests/gfnet_regression.c` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/tests/verify_allocation_safety.py` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/tests/verify_fastack.py` | 已读 |
-| `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/third_party/mbedtls.lock.json` | 已读 |
+| `Native/Kcp/ABI.md` | 已读 |
+| `Native/Kcp/CMakeLists.txt` | 已读 |
+| `Native/Kcp/README.md` | 已读 |
+| `Native/Kcp/build/build.py` | 已读 |
+| `Native/Kcp/build/install.py` | 已读 |
+| `Native/Kcp/build/prepare_kcp.py` | 已读 |
+| `Native/Kcp/build/prepare_mbedtls.py` | 已读 |
+| `Native/Kcp/build/verify_windows.py` | 已读 |
+| `Native/Kcp/build/windows-llvm-mingw.cmake` | 已读 |
+| `Native/Kcp/config/mbedtls_config.h` | 已读 |
+| `Native/Kcp/include/gfnet.h` | 已读 |
+| `Native/Kcp/src/gfnet_connection.c` | 已读 |
+| `Native/Kcp/src/gfnet_internal.h` | 已读 |
+| `Native/Kcp/src/gfnet_listener.c` | 已读 |
+| `Native/Kcp/src/gfnet_memory.c` | 已读 |
+| `Native/Kcp/tests/allocation_safety.c` | 已读 |
+| `Native/Kcp/tests/fastack_regression.cpp` | 已读 |
+| `Native/Kcp/tests/gfnet_regression.c` | 已读 |
+| `Native/Kcp/tests/verify_allocation_safety.py` | 已读 |
+| `Native/Kcp/tests/verify_fastack.py` | 已读 |
+| `Native/Kcp/third_party/mbedtls.lock.json` | 已读 |
 | `Unity/Assets/Scripts/Runtime/Network/Transport/OwnedFrame.cs` | 已读 |
 | `Unity/Assets/Scripts/Runtime/Network/Transport/WebSocketFrameTransport.cs` | 已读 |
 | `Unity/Assets/Scripts/Runtime/Network/Transport/WebSocketTransport.cs` | 已读 |
@@ -169,3 +174,7 @@ Unity asmdef/asmref、相关 .meta 与原生安装清单另按程序集边界、
 ## 后续依赖升级记录
 
 2026-10-12 用户要求升级到 mbedTLS 4.2.0。此前109文件全量网络审查的源码/测试证据对应3.6.7；升级改动和重新执行的原生、.NET、Unity证据独立记录于 [NetworkImplementation.md](NetworkImplementation.md) 的“mbedTLS 4.2.0 升级”。本次针对依赖迁移读取官方4.0迁移说明、4.2/TF1.2 API与实际涉及的构建/配置/native生命周期代码，修正错误码、PSA内存归属、系统随机数和MinGW TLS声明；官方源码内容/哈希核验不等于逐文件审查全部第三方实现，也不等于平台实跑。原全量审查清单继续保留，不以依赖升级替代其中未完成的平台/诊断门禁。
+
+原生目录迁移说明：本记录中的源码清单与链接已更新为公共 `Native/Kcp` 路径；先前审查和运行证据保留其原有时间与范围，迁移后的验证另见 NetworkImplementation.md。
+
+服务端程序集拆分后，清单中的服务端路径已更新到维护位置；历史审查结论与当时验证不改写。现行边界、接口与本轮验证见 [NetworkServerReview](NetworkServerReview.md) 第 8 节。

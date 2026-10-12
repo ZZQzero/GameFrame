@@ -10,6 +10,8 @@ using GameFrame.Network.Protocol;
 using GameFrame.Network.Transport;
 using GameFrame.Network.Connection;
 using GameFrame.Server.Network;
+using Game.Server;
+using Game.Server.Login;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -25,8 +27,9 @@ namespace GameFrame.Tests
     public sealed class WssServerTests
     {
         private WebApplication app = null!;
-        private LocalWssService server = null!;
-        private ServerSettings settings = null!;
+        private WssServer server = null!;
+        private LocalAccountSettings settings = null!;
+        private AccountSessions accounts = null!;
         private X509Certificate2 certificate = null!;
         private Uri endpoint = null!;
         private readonly FrameMemoryBudget memory = new FrameMemoryBudget(1024 * 1024);
@@ -46,15 +49,17 @@ namespace GameFrame.Tests
             san.AddIpAddress(IPAddress.Loopback);
             request.CertificateExtensions.Add(san.Build());
             certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
-            settings = new ServerSettings("local-test", "local-secret")
+            settings = new LocalAccountSettings("local-test", "local-secret")
             {
-                LoginTimeout = TimeSpan.FromMilliseconds(500),
-                HelloTimeout = TimeSpan.FromMilliseconds(500)
+                LoginTimeout = TimeSpan.FromMilliseconds(500)
             };
-            server = new LocalWssService(settings);
+            accounts = new AccountSessions(settings);
+            server = new WssServer(new LobbyApplication(accounts, settings).Application, new WssServerOptions { HelloTimeout = TimeSpan.FromMilliseconds(500) });
             WebApplicationBuilder builder = WebApplication.CreateBuilder();
             builder.Logging.ClearProviders();
             builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0, listen => listen.UseHttps(certificate)));
+            builder.Services.AddSingleton(server);
+            builder.Services.AddHostedService(provider => provider.GetRequiredService<WssServer>());
             app = builder.Build();
             app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.Zero });
             app.MapGet("/network", server.HandleAsync);
@@ -79,6 +84,7 @@ namespace GameFrame.Tests
             await app.StopAsync();
             await app.DisposeAsync();
             certificate.Dispose();
+            accounts.Dispose();
             settings.Dispose();
             timeout.Dispose();
             Assert.That(server.OwnedBytes, Is.Zero, "All in-flight/queued buffers must be released.");
@@ -560,7 +566,7 @@ namespace GameFrame.Tests
         public void ProductionWithoutAuthenticationProviderRefusesStartup()
         {
             Assert.ThrowsAsync<InvalidOperationException>(async () =>
-                await GameFrame.Server.Program.Main(Array.Empty<string>()));
+                await Game.Server.Program.Main(Array.Empty<string>()));
         }
 
         [Test]

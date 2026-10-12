@@ -3,16 +3,6 @@ using System.Diagnostics;
 
 namespace GameFrame.Network
 {
-    public static class NetworkClock
-    {
-        public static long GetMilliseconds()
-        {
-            long timestamp = Stopwatch.GetTimestamp();
-            long frequency = Stopwatch.Frequency;
-            return timestamp / frequency * 1000 + timestamp % frequency * 1000 / frequency;
-        }
-    }
-
     /// <summary>凭据数组属于调用者；Connect 完成前不修改，使用后由会话所有者清零。</summary>
     public sealed class NetworkConnectOptions
     {

@@ -2,7 +2,7 @@
 
 完整契约见 [NetworkDesign.md](NetworkDesign.md)，分阶段进度见 [NetworkImplementation.md](NetworkImplementation.md)，本地服务运行见 [DotNet/README.md](../DotNet/README.md)。当前实现 WSS 可靠通道与 C KCP/DTLS 的可靠/不可靠双通道；游戏世界会话业务延后。用户确认第一版不实现 WebGL WSS，当前 WebGL 建连明确报平台不支持。
 
-C 原生实现的职责、ABI、工作线程和平台构建安装方案见 [NetworkNativeDesign.md](NetworkNativeDesign.md)。原生使用/构建入口见 [原生说明](../Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/README.md)，精确 ABI 见同目录 ABI.md。
+C 原生实现的职责、ABI、工作线程和平台构建安装方案见 [NetworkNativeDesign.md](NetworkNativeDesign.md)。原生使用/构建入口见 [原生说明](../Native/Kcp/README.md)，精确 ABI 见同目录 ABI.md。
 
 ## 宿主和客户端
 
@@ -71,3 +71,5 @@ KCP 使用 ABI2，原生库与 C# 必须同时更新。可靠 admission 在分�
 正常 EOF 会保留此前接收可靠帧的派发顺序，服务端继续完成已接受输入；回复已无法发送时释放。显式关闭/故障会取消处理并等待真实 owner 退出。业务 handler 必须响应取消，框架不强杀仍持有缓冲的任务。
 
 GetMetrics 新增 Sent/ReceivedApplicationBytes（Hello 完成后的 GFNP 帧）、Sent/ReceivedBusinessBodyBytes（业务正文）、PingRoundTripMilliseconds（最近匹配 Pong，未测时0）和 PeakReservedBytes（含 reservation/native allowance 的峰值）。这些值不代表网络 wire bytes 或进程 RSS；完整对象布局、RPC阶段/分位耗时仍需验收。Kcp.DtlsDiscardDetailsAvailable=false 明确表示库未开放细分坏记录指标。完整本轮审查记录见 [NetworkReview.md](NetworkReview.md)。
+
+.NET 服务端已按 Core/Server/Game.Protocol/Game.Server 拆分；通用框架通过强类型 ServerApplication 与业务组合，不依赖账号或游戏路由。应用会话、主动 Push、关闭和 host 生命周期契约见 [服务端框架 API](../DotNet/GameFrame.Server/README.md)。

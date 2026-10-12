@@ -1,6 +1,6 @@
 # GameFrame 商业网络模块设计
 
-> 状态：分阶段实施中，2026-10-11。本文定义第一版实现与验收契约；已完成项与验证范围见 [实施记录](NetworkImplementation.md)，不代表完整模块已经通过正式包验证。
+> 状态：分阶段实施中，2026-10-12。本文定义第一版实现与验收契约；已完成项与验证范围见 [实施记录](NetworkImplementation.md)，不代表完整模块已经通过正式包验证。
 > 技术基线：WebSocket/WSS、MemoryPack 1.21.4、原版 C KCP；服务端已确定为 C#/.NET 10。
 > 会话入口：WSS 建连与协议握手 → 登录 RPC → 大厅会话；战斗按配置复用 WSS，或通过大厅申请授权后建立 KCP/DTLS。
 
@@ -30,10 +30,10 @@
 | --- | --- | --- |
 | GameFrame 网络 | `GameFrame.Network` 已实现桌面 WSS、RPC、缓冲预算与主线程派发；`GameMediaNetwork` 是独立的媒体网络策略工具 | 补齐 KCP/DTLS、业务会话与完整验收；WebGL WSS 延后 |
 | MemoryPack | 已安装 1.21.4；Editor 和 StandaloneOSX Player 脚本编译通过 | 已有同源 DTO/生成检查/跨端向量；补齐 HybridCLR 实机测试 |
-| KCP | `Unity/Assets/Plugins/GameFrame/Kcp` 下已有 `ikcp.c`、`ikcp.h`、MIT LICENSE；已直接合入 #467 ACK 修复、分配失败处理及标准 offsetof 修正 | 保留文件路径和 GUID，新增固定 ABI 包装、UDP 集成及构建产物 |
+| KCP | `Native/Kcp/third_party/kcp` 下已有 `ikcp.c`、`ikcp.h`、MIT LICENSE；已直接合入 #467 ACK 修复、分配失败处理及标准 offsetof 修正 | 公共目录维护唯一源码，保留迁移前源码字节及 GUID 记录；固定 ABI、UDP 集成及构建产物 |
 | KCP 版本 | 上游基线为 `b1a7a2101dcbb96017681a500d6b82bbe5a88766`，包含 `IKCPOPS`/`ikcp_setcc`；本地修正与当前 c/h hash 已锁定 | 锁定基线与本地源码 hash；不得直接按旧版 C# KCP 包的内部结构接入 |
 | 生命周期 | `GameRuntime` 已可选持有网络宿主；GameEntry 当前启动本地五子棋 | 保持离线默认，业务接入 GameNetworkSession |
-| 服务端 | `DotNet/DotNet.csproj` 已采用 Web SDK/net10.0，实现显式 local-wss Kestrel、登录/恢复/注销/Echo，共用生成协议 | 接入世界服务、DTLS listener 与生产认证 provider |
+| 服务端 | `DotNet` 已拆为 Core、Server、Game.Protocol、Game.Server 四工程；WSS/KCP 共用强类型应用接口，local 账号与配置属于业务宿主 | 生产认证/世界应用接入，完整诊断和平台容量验收 |
 
 MemoryPack 安装与当前验证边界见 [MemoryPack.md](MemoryPack.md)。启动、资源所有权与失败处理以 [Launch.md](Launch.md)、[Scope.md](Scope.md)、[ErrorContract.md](ErrorContract.md) 为基础；本文补充网络模块的固定策略。
 
@@ -95,21 +95,28 @@ GameFrame.Runtime / GameFrame.Network
   Transport/Kcp/                  UDP、DTLS、KCP 驱动
   Diagnostics/                    指标快照、限额错误、脱敏日志
              ↓
-Transport/Kcp/Native~             ABI、构建脚本、原生测试、DTLS 依赖锁
-Assets/Plugins/GameFrame/Kcp      KCP 源码与 LICENSE，已合入 #467 与分配安全修正
-Assets/Plugins/GameFrame/Native/Kcp/<platform>
+Native/Kcp/                      ABI、构建脚本、原生测试、DTLS 依赖锁
+Native/Kcp/third_party/kcp/       KCP 源码与 LICENSE，已合入 #467 与分配安全修正
+Unity/Assets/Plugins/GameFrame/Native/Kcp/<platform>
                                 gameframe_kcp 原生安装产物
 Protocol/                        唯一手写 .proto 协议源、共享 MSBuild 引用与编写说明
 Tools/NetworkProtocol/            Proto → MemoryPack .NET 生成/校验工具
 DotNet/DotNet.sln                 已有服务端解决方案，与 Unity/ 同级
-DotNet/DotNet.csproj              已有 .NET 10 入口项目，承载服务端与联调模式
+DotNet/GameFrame.Network.Core/    共享 wire、路由/codec 契约、缓冲预算与 native ABI
+DotNet/GameFrame.Server/          通用 WSS/KCP 服务端与强类型应用接口
+DotNet/Game.Protocol/             双端同源生成的 MemoryPack 游戏协议
+DotNet/Game.Server/               唯一业务可执行入口、local 配置、账号与处理器
 ```
 
 上述目录表达职责划分；实际文件落点与完成范围见实施记录。WSS 核心、协议工具、local-wss、C KCP/DTLS bridge、C# worker 与 local-kcp-dtls 已实现；GameNetworkSession 与世界业务按当前范围延后，平台/容量发布验收仍待完成。不新建与已有模块重复的计时器、全局任务管理器或事件总线。`NetworkRuntime` 是必要的网络资源宿主，可由 `GameRuntime` 选配持有；业务只持有自己的 `NetworkClient`。
 
-服务端复用 `DotNet/DotNet.csproj`，初版在同一项目内按 Hosting、Network、Sessions、World、Diagnostics 组织实际需要的代码，先以单进程跑通 WSS/KCP 与世界业务。P1 接入 ASP.NET Core/Kestrel 时将项目 SDK 调整为 `Microsoft.NET.Sdk.Web`，目标框架保持 `net10.0`。本地联调通过显式 profile 启用测试账号与故障注入，生产配置不能启用这些功能；不另建 `Tools/NetworkTestServer`，也不提前拆成网关、账号、世界等多个可执行项目。第 14 节的职责与所有权边界保留，后续按实际容量需要拆分部署。
+服务端保留单进程、单业务入口，通过四个程序集落实职责边界。Core 不引用游戏协议/Unity/业务，Server 只依赖 Core 与 ASP.NET Core；Game.Protocol 导入生成源码并引用 Core/MemoryPack，Game.Server 组合 Server 与 Protocol。账号、恢复、顶号、登录期限和权限策略全部属于 Game.Server；网络框架仅通过 ServerSession 的头部准入、派发复查和期限 hook 接入应用策略。RPC/Notify 处理器只使用 DTO，框架负责关联、编码、队列与释放；Push 与连接关闭采用公开强类型接口，不暴露借用 native handle。具体契约见 [服务端框架 API](../DotNet/GameFrame.Server/README.md)。
 
-Git 保留 DotNet 源码、解决方案、项目和依赖锁文件；忽略其 bin/obj、artifacts、TestResults、日志及 IDE 本地配置。Tools 下的 .NET 工程采用相同过滤，原生 Native~/build 中维护的构建脚本与已安装插件产物继续保留。
+Game.Server 使用 Web SDK/net10.0，local 功能需显式 profile；生产未配置认证时拒绝启动。WssServer 通过 hosted lifecycle 的 StoppingAsync 阶段在 Kestrel 等 StopAsync 前 join 网络，不能仅依赖注册先后或 RunAsync 返回后的清理。不提前增加网关/账号/世界等可执行项目；第 14 节业务契约保留供后续实现。
+
+Game.Server 内按业务功能建目录：Login/ 集中账号、本地认证配置、登录/恢复/注销处理器和每连接登录状态。LobbyApplication 作为大厅组合入口显式注册模块与路由；Program 仅校验 profile 并选择 LocalWssService/LocalKcpService。启动入口负责配置校验、资源创建、运行及关闭所有权，不增加反射注册或额外生命周期管理器。配置或初始化失败停止后续步骤，已创建资源按原所有权释放。
+
+Git 保留 DotNet 源码、解决方案、项目和依赖锁文件；忽略其 bin/obj、artifacts、TestResults、日志及 IDE 本地配置。Tools 下的 .NET 工程采用相同过滤，公共 Native/Kcp/build 中维护的构建脚本与已安装插件产物继续保留。
 
 `GameFrame.Runtime` 不引用 `Game.Hotfix`；业务通过冻结的 `NetProtocolCatalog` 向客户端注册生成的类型信息和编解码委托。Runtime 中的系统控制包固定二进制编码，不依赖业务 DTO。UnityEngine 类型不能进入共享业务协议，服务端不引用 Unity 程序集。
 
@@ -545,7 +552,7 @@ int32_t gfnet_get_state(void* handle, int32_t* state);
 int32_t gfnet_destroy(void* handle);
 ```
 
-config/stats 首字段为 struct_size 与 abi_version；显式规定字段偏移、对齐和所有 bool 的 u32 表示，由 C 静态断言与 C# size/offset 测试锁定。配置传入 conv、角色 client/server、限额、参数、PSK/identity 的指针长度；create 同步复制，不能持有托管临时指针。MTU、时钟定时、错误码、state 枚举精确布局与函数状态矩阵见 [ABI.md](../Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/ABI.md)。
+config/stats 首字段为 struct_size 与 abi_version；显式规定字段偏移、对齐和所有 bool 的 u32 表示，由 C 静态断言与 C# size/offset 测试锁定。配置传入 conv、角色 client/server、限额、参数、PSK/identity 的指针长度；create 同步复制，不能持有托管临时指针。MTU、时钟定时、错误码、state 枚举精确布局与函数状态矩阵见 [ABI.md](../Native/Kcp/ABI.md)。
 
 包装 send 成功统一返回 0，错误返回固定负码。**不能因此假设原版 `ikcp_send` 成功返回 0**：当前源码返回实际接收字节数；包装层只有返回值等于输入长度才成功，负数/短写一律标记句柄 fatal。分配失败可能已经入队部分 segment，不能对同一请求再调用一次 send。
 
@@ -563,7 +570,7 @@ KCP output 副本先进入有界明文队列，再由 owner 的 DTLS 阶段加�
 
 已确认采用 [PR #467](https://github.com/skywind3000/kcp/pull/467)，直接将 ACK 聚合中 `_itimediff(ts, latest_ts) > 0` 改为 `>= 0`。同一次 flush 产生的 ACK 可具有相同时间戳，应允许更大序号成为 maxack；仍保留逐 segment 的旧时间戳检查和每次 input 最多一次 fastack 增量。此修复不改变线协议、ABI 或拥塞算法，不再保存独立补丁供构建重复应用；其余扩展 PR 不纳入第一版。
 
-分配安全修正也已直接合入 c/h：ACK 扩容和接收 segment 检查分配失败，send 不在 NULL 检查前 assert，队列偏移使用标准 offsetof。input 分配失败返回 -4、send/setmtu 返回 -2、create 返回 NULL；发生局部状态修改的失败必须由包装层锁定 fatal 后销毁，禁止重试。这些修正不改变线协议、结构布局、重传或拥塞算法。`prepare_kcp.py` 校验当前 c/h hash 后仅向 Unity 外的新目录逐字节复制，不应用独立补丁。上游基线、本地来源/hash 和逐分配点回归证据统一见 [KCP 原生说明](../Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/README.md)；DTLS 分配与 gfnet Fatal 边界已落地；源码回归和 host harness 不等于完整平台安全验收。
+分配安全修正也已直接合入 c/h：ACK 扩容和接收 segment 检查分配失败，send 不在 NULL 检查前 assert，队列偏移使用标准 offsetof。input 分配失败返回 -4、send/setmtu 返回 -2、create 返回 NULL；发生局部状态修改的失败必须由包装层锁定 fatal 后销毁，禁止重试。这些修正不改变线协议、结构布局、重传或拥塞算法。`prepare_kcp.py` 校验当前 c/h hash 后仅向 Unity 外的新目录逐字节复制，不应用独立补丁。上游基线、本地来源/hash 和逐分配点回归证据统一见 [KCP 原生说明](../Native/Kcp/README.md)；DTLS 分配与 gfnet Fatal 边界已落地；源码回归和 host harness 不等于完整平台安全验收。
 
 认证后的 KCP datagram 仍须在 input 前完整检查 segment 头、长度、conv、command、PUSH 分片范围及尾随字节；`ikcp_input` 成功不替代项目边界验证。非法数据故障当前连接，不改变正常 KCP 算法。
 
@@ -571,7 +578,7 @@ KCP output 副本先进入有界明文队列，再由 owner 的 DTLS 阶段加�
 
 ### 12.5 DTLS 依赖与授权
 
-KCP 自身不加密。第一版安全适配锁定 **mbedTLS 4.2.0 stable + TF-PSA-Crypto 1.2.0**（上游 LTS 为 4.1，4.2 不标为 LTS），版本/commit/archive SHA-256 在 `Native~/third_party/mbedtls.lock.json`，最小 TLS／PSA 配置分别在 `Native~/config/mbedtls_config.h` 与 `crypto_config.h`。该版本发布说明及关联安全修复已核对，依赖独立静态编入插件；普通构建不下载、不浮动升级。升级时重新审查安全公告、配置、ABI 与跨平台验证。
+KCP 自身不加密。第一版安全适配锁定 **mbedTLS 4.2.0 stable + TF-PSA-Crypto 1.2.0**（上游 LTS 为 4.1，4.2 不标为 LTS），版本/commit/archive SHA-256 在 `Native/Kcp/third_party/mbedtls.lock.json`，最小 TLS／PSA 配置分别在 `Native/Kcp/config/mbedtls_config.h` 与 `crypto_config.h`。该版本发布说明及关联安全修复已核对，依赖独立静态编入插件；普通构建不下载、不浮动升级。升级时重新审查安全公告、配置、ABI 与跨平台验证。
 
 
 固定 DTLS 1.2、`TLS_PSK_WITH_AES_128_GCM_SHA256`、系统 CSPRNG、anti-replay 和服务端 cookie 校验，禁用明文/CBC/匿名套件、会话恢复与 CID。PSK 模式不额外提供前向保密；本版使用短时、单连接随机 PSK，通过已登录 WSS 的 RequestWorldGrant RPC 下发，不能在客户端安装包中写全服共享密钥。若项目要求前向保密，必须单独变更安全配置并重新联调，不能口头把 PSK 说成具备该能力。
@@ -892,7 +899,7 @@ UI 使用 `OpenScope.Token` 取消请求，将 IDisposable 注册到 OpenScope/L
 | iOS Simulator | 平台栈 | 独立 simulator 构建 | 不能使用设备 .a 代替 |
 | WebGL | 第一版不支持；后续可用 `.jslib` 浏览器 WSS | 不支持 | 当前保留平台拒绝与条件隔离；JS 缓冲限制及前后台验收延后 |
 
-构建脚本计划位于 `Runtime/Network/Transport/Kcp/Native~/build/build.py` 与 `install.py`，安装到 `Assets/Plugins/GameFrame/Native/Kcp/<platform>`，遵循 [Tools/README.md](../Tools/README.md) 的产物/元数据习惯。已合入 #467 的 KCP 源码保留当前路径，通过构建参数引用，不移动资产。
+构建脚本位于 `Native/Kcp/build/build.py` 与 `install.py`，安装到 `Unity/Assets/Plugins/GameFrame/Native/Kcp/<platform>`，遵循 [Tools/README.md](../Tools/README.md) 的产物/元数据习惯。已合入 #467 的 KCP 唯一源码位于 `Native/Kcp/third_party/kcp`；Unity 和 .NET 共享构建入口，分别安装匹配平台产物，服务端部署不携带源码。
 
 原生脚本开工时必须定义 `--platform`、`--arch`、`--configuration`、`--dry-run`；安装必须保留现有 `.meta` GUID，并生成 artifact.json/build-manifest.json，记录 KCP/mbedTLS SHA、编译器、ABI、架构、构建参数与二进制 hash。加载库后替换产物需重启 Unity，不用缓存刷新冒充生效。
 
@@ -926,9 +933,9 @@ KCP MIT、MemoryPack MIT 及 mbedTLS 对应版本许可证/第三方声明随安
 | P5 会话与样例 | GameRuntime 可选配置、Hotfix 双连接状态、入场/离场/恢复/幂等示例、Docs/Network.md | 离线行为保留；WSS-only/KCP 两模式、故障隔离、恢复不重复结算 |
 | P6 平台与发布 | Android/iOS、HybridCLR、新 DTO、压测/浸泡/部署演练；WebGL WSS 延后 | 所有第一版发布平台门禁通过，形成实际设备与容量报告 |
 
-P1 可使用手工固定测试 DTO，不能因此绕过 P2 直接投产。P3 原生安全任务可在 P0 冻结后独立推进，但 P4 依赖 P1/P2/P3。第一版交付需包括 Native~/ABI.md、Docs/Network.md（公开使用说明）与 DotNet/README.md（服务端运行、配置和联调 profile），并同步更新 Launch/Tools 中实际变化的契约。
+P1 可使用手工固定测试 DTO，不能因此绕过 P2 直接投产。P3 原生安全任务可在 P0 冻结后独立推进，但 P4 依赖 P1/P2/P3。第一版交付需包括 Native/Kcp/ABI.md、Docs/Network.md（公开使用说明）与 DotNet/README.md（服务端运行、配置和联调 profile），并同步更新 Launch/Tools 中实际变化的契约。
 
-命令入口如下，从仓库根目录进入对应目录执行。协议工具已实现，默认仅生成或检查正式 C#；`--artifacts` 额外生成或检查仓库根 `Protocol/Generated/` 下的 manifest/hash/vector，供开发验证与 CI 使用。辅助文件不进入正式运行资源，协议指纹始终内嵌于 C# catalog。DotNet 的 `local-wss` 已实现（配置见 `DotNet/README.md`）；`local-kcp-dtls` 与 gfnet 构建/安装脚本仍尚未实现。以下后两个 native 命令及 KCP profile 是规划入口，不能当成已运行日志：
+命令入口如下，从仓库根目录进入对应目录执行。协议工具已实现，默认仅生成或检查正式 C#；`--artifacts` 额外生成或检查仓库根 `Protocol/Generated/` 下的 manifest/hash/vector，供开发验证与 CI 使用。辅助文件不进入正式运行资源，协议指纹始终内嵌于 C# catalog。DotNet 的 `local-wss`、`local-kcp-dtls` 与 gfnet 构建/安装脚本均已实现（配置见 `DotNet/README.md` 与 `Native/Kcp/README.md`）。KCP profile 仍是显式凭据的底层联调入口，账号到世界的业务授权延后；实际平台验证与剩余门禁见 [实施记录](NetworkImplementation.md)，以下命令示例不表示所有平台已执行：
 
 ```sh
 (cd Tools && dotnet run --project NetworkProtocol -- generate)
@@ -938,8 +945,8 @@ P1 可使用手工固定测试 DTO，不能因此绕过 P2 直接投产。P3 原
 (cd Tools && dotnet test NetworkProtocol.Tests)
 (cd DotNet && dotnet run --project DotNet.csproj -- --profile local-wss)
 (cd DotNet && dotnet run --project DotNet.csproj -- --profile local-kcp-dtls)
-python3 Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/build.py --help
-python3 Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/install.py --help
+python3 Native/Kcp/build/build.py --help
+python3 Native/Kcp/build/install.py --help
 ```
 
 本地 WSS 使用显式信任的开发证书，不修改生产证书验证。联调服务提供测试 Login/ResumeLogin、RequestWorldGrant、Logout、入场/离场、echo RPC、顺序 Push、错误响应与延迟/断线注入。完整业务联调阶段再由同一profile接入WSS大厅与UDP listener，并从已登录WSS取得ticket/PSK；当前按用户确认只实现底层，`local-kcp-dtls`仅监听loopback，以显式短时测试凭据验证Hello/Echo/撤销，不提供取票HTTP接口，也不实施世界入场。生产未配置认证/授权provider拒绝启动；测试账号/密钥不进入正式资源。服务端本机可走 loopback，但仍应有真实 IPv6/WAN 网络阶段。
@@ -967,7 +974,7 @@ python3 Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/build/install
 当前已有 #467 原生回归入口，使用项目实际源码与仅还原 ACK 时间戳比较的临时对照；双方保留相同分配安全修正，不将对照称为未修改上游源码。覆盖 PR/项目参数、升序/逆序 ACK、普通/回绕时钟和 assert/NDEBUG 构建，并验证 check/update 的同刻调度边界：
 
 ```sh
-python3 Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/tests/verify_fastack.py
+python3 Native/Kcp/tests/verify_fastack.py
 ```
 
 该入口仅覆盖已合入的 ACK 修复和原生调度条件，不代表 UDP/DTLS、Unity 工作线程或完整原生模块已实现。

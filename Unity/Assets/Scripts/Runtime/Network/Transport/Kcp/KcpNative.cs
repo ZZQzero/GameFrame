@@ -134,19 +134,19 @@ namespace GameFrame.Network.Transport.Kcp
             }
         }
 
-        internal static IntPtr Create(NetworkConnectOptions options, int nativeBytes)
+        internal static IntPtr Create(uint conv, byte[] identityBytes, byte[] pskBytes, int reliableLimit, int unreliableLimit, int nativeBytes)
         {
             GCHandle identity = default;
             GCHandle psk = default;
             try
             {
-                identity = GCHandle.Alloc(options.PskIdentity, GCHandleType.Pinned);
-                psk = GCHandle.Alloc(options.Psk, GCHandleType.Pinned);
+                identity = GCHandle.Alloc(identityBytes, GCHandleType.Pinned);
+                psk = GCHandle.Alloc(pskBytes, GCHandleType.Pinned);
                 var config = new Config
                 {
-                    Size = 64, Version = KcpNative.Version, Role = 1, Conv = options.Conv,
-                    NativeLimit = checked((uint)nativeBytes), ReliableLimit = (uint)options.ReliableLimit,
-                    UnreliableLimit = (uint)options.UnreliableLimit, Identity = identity.AddrOfPinnedObject(),
+                    Size = 64, Version = KcpNative.Version, Role = 1, Conv = conv,
+                    NativeLimit = checked((uint)nativeBytes), ReliableLimit = (uint)reliableLimit,
+                    UnreliableLimit = (uint)unreliableLimit, Identity = identity.AddrOfPinnedObject(),
                     IdentityLength = 16, Psk = psk.AddrOfPinnedObject(), PskLength = 32
                 };
                 Check(CreateNative(ref config, out IntPtr handle), "create");

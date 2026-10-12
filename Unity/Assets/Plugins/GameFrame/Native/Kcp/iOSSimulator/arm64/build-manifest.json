@@ -6,10 +6,10 @@
   "sanitized": false,
   "sources": {
     "CMakeLists.txt": "ba774b9f4c1bc57e7089694d7982a4543b02fe62e678e2893943c5b127ad535b",
-    "build/build.py": "f07af93a6f89b8c3ef66aa5481a893f4c037fc3eac2e101603173bf094589f92",
-    "build/install.py": "51db23d6102d55fbad456d6f896ee61f846cc2f94ce94285dd5db3e730df9ba2",
-    "build/prepare_kcp.py": "8866386a19673dc36aab923cb39fe72c008dd4d2c746fbe18885173ded0e4fd7",
-    "build/prepare_mbedtls.py": "c3927652d41603bb9d4b5a1da1112d6f796ebc5a7041c1095e754a99a009ff4c",
+    "build/build.py": "aa1c1145f04488b67dd8603b8754a83a3739122ac578986f1ceb62b1130a1929",
+    "build/install.py": "859868fe53f670af40cd9236ec6a8022af107ac1fdae55a609120b07d0825194",
+    "build/prepare_kcp.py": "d0d3bdb5fd367d9aab2d49e3e53c182c024f657a279393acbfe760c18606e84d",
+    "build/prepare_mbedtls.py": "b1b7721cd479d30bc324bb3a7fa35183f055f824bdb4faefd21f414e4ea44376",
     "build/verify_windows.py": "6c07e8757730ce347a5280f01e0c2b06c7c3c65a5dd2423f4af153f1c18b127c",
     "build/windows-llvm-mingw.cmake": "368cabacf46539417f0c08b668d76c2017929081822669c0d9f9241a8e24411b",
     "config/crypto_config.h": "a9e32dbeb79f8d89e1de2e3947434363fc0ace72f23c1a872b4fd3f1ec45884d",
@@ -22,8 +22,8 @@
     "src/gfnet_memory.c": "abfbf8058d18732b019e671672180a41807cfd828d08169376bd56d3af9974bf",
     "tests/allocation_safety.c": "312cac0aea85064c0380c94a0a1a39461624bad6d48b45bf56a090fbc617bbcc",
     "tests/gfnet_regression.c": "58270499f1806ecc216b3cab6f21bfac82f23cc5f316f87f1f1462c9a1c3c7af",
-    "tests/verify_allocation_safety.py": "86fe67e67a741bdcd34d72eeb71f40a5007c5f621bd9702c8cca4e5539344f37",
-    "tests/verify_fastack.py": "bdfaa9553ee9ab09e667b22993db1541bba1c6a042d7bf97a84444e7d1fc585e",
+    "tests/verify_allocation_safety.py": "b8d1b745c4d34b17887b71ed2611aad6829c9d9c3c5c441ae4b45dcc3b380721",
+    "tests/verify_fastack.py": "0dfee6aab9d7250cafd9d8560f8d095fc36d6d5d0d54d9c6346b3ee93d5d60b9",
     "third_party/mbedtls.lock.json": "22fd6777cf9d8b2a1da4869ba6bd3c58b92237ca9d386d68054e5a213cc50cbc"
   },
   "mbedtls": {
@@ -60,11 +60,11 @@
     [
       "/Users/zzq/Library/Android/sdk/cmake/3.22.1/bin/cmake",
       "-S",
-      "/Users/zzq/GameFrame/Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~",
+      "/Users/zzq/GameFrame/Native/Kcp",
       "-B",
-      "/Users/zzq/GameFrame/Tools/Artifacts/NetworkNative/mbed42-ios-simulator-arm64-release",
+      "/Users/zzq/GameFrame/Tools/Artifacts/NetworkNative/shared-ios-simulator-arm64-release",
       "-DGFNET_MBEDTLS_SOURCE=/Users/zzq/GameFrame/Tools/Artifacts/NetworkNative/mbedtls-4.2.0-portable",
-      "-DGFNET_KCP_SOURCE=/Users/zzq/GameFrame/Tools/Artifacts/NetworkNative/mbed42-ios-simulator-arm64-release/kcp-source",
+      "-DGFNET_KCP_SOURCE=/Users/zzq/GameFrame/Tools/Artifacts/NetworkNative/shared-ios-simulator-arm64-release/kcp-source",
       "-DCMAKE_BUILD_TYPE=Release",
       "-DGFNET_TESTS=OFF",
       "-DGFNET_SANITIZERS=OFF",
@@ -76,7 +76,7 @@
     [
       "/Users/zzq/Library/Android/sdk/cmake/3.22.1/bin/cmake",
       "--build",
-      "/Users/zzq/GameFrame/Tools/Artifacts/NetworkNative/mbed42-ios-simulator-arm64-release",
+      "/Users/zzq/GameFrame/Tools/Artifacts/NetworkNative/shared-ios-simulator-arm64-release",
       "--config",
       "Release",
       "--parallel",
@@ -107,7 +107,7 @@
     "executed": false
   },
   "artifacts": {
-    "libgameframe_kcp-combined.a": "d57835f3b39f841acc16d10133b24853f21c71cb0448bfef7ef1be453aeaf606"
+    "libgameframe_kcp-combined.a": "9af5d55f6b50a5be1ea9c088f08e78f59a63e8d86811a39a3cabd158d768e7bf"
   },
-  "build_id": "6523739ae8aad1b3b0403b215354c5b6bf9abdc3a9e8b94472666d9d7a86f6e7"
+  "build_id": "b0882ac582f17514b1aac6600062b3bd34beca69fa9b440398afe8c02c60b1c9"
 }

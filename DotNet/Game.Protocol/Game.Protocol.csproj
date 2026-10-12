@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <ItemGroup>
+        <PackageReference Include="MemoryPack" Version="1.21.4" />
+        <ProjectReference Include="../GameFrame.Network.Core/GameFrame.Network.Core.csproj" />
+    </ItemGroup>
+    <Import Project="../../Protocol/GameFrame.Protocol.projitems" />
+</Project>

@@ -119,9 +119,20 @@
           "protobuf-net.Core": "3.2.52"
         }
       },
+      "game.protocol": {
+        "type": "Project",
+        "dependencies": {
+          "GameFrame.Network.Core": "[1.0.0, )",
+          "MemoryPack": "[1.21.4, )"
+        }
+      },
+      "gameframe.network.core": {
+        "type": "Project"
+      },
       "networkprotocol": {
         "type": "Project",
         "dependencies": {
+          "GameFrame.Network.Core": "[1.0.0, )",
           "MemoryPack.Core": "[1.21.4, )",
           "MemoryPack.Generator": "[1.21.4, )",
           "Microsoft.CodeAnalysis.CSharp": "[4.14.0, )",

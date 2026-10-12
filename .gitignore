@@ -3,8 +3,6 @@
 !Unity/Assets/Scripts/Runtime/Sqlite/Native~/**
 !Unity/Assets/Scripts/Runtime/MediaBackup/Native~/
 !Unity/Assets/Scripts/Runtime/MediaBackup/Native~/**
-!Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/
-!Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/**
 
 # Local OS and IDE files.
 .DS_Store

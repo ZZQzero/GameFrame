@@ -1,8 +1,8 @@
 {
   "abi": 2,
   "binary": "libgameframe_kcp.so",
-  "sha256": "76856eb18e7aadd565dc7bddaded65743f0eb7f23330d637a94d29d271a59390",
-  "build_id": "d1b869d8b00abea2ddf0f81df9eccd516ff39bca5eb672b0d2666d2f03e57119",
+  "sha256": "a5457eb8e45f26897f24ceaa59187823f0927723dd2f5961345f6ddf821dda24",
+  "build_id": "58876307e6c5b5a34624b85b364fd1b4add86b871ecd62a9867a1c5203347995",
   "platform": "android",
   "arch": "arm64"
 }

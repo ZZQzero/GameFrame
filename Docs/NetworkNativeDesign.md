@@ -4,7 +4,7 @@
 
 当前范围是框架底层：原版 C KCP、mbedTLS、固定 C ABI、C# UDP 驱动、Unity/.NET 接入、构建安装及底层验收。游戏世界会话、角色权限、AOI、移动和恢复业务延后；WebGL WSS 延后，WebGL KCP 明确不支持。
 
-文档职责固定：NetworkDesign 定义公开行为和参数；本文件定义内部实现边界与交付步骤；`Native~/ABI.md` 定义精确函数签名、结构布局和错误码；NetworkImplementation 只记录实际进度/验证。相同规则优先引用，不在各文档维护不同默认值。精确 API 与错误码已冻结在 Native~/ABI.md。
+文档职责固定：NetworkDesign 定义公开行为和参数；本文件定义内部实现边界与交付步骤；`Native/Kcp/ABI.md` 定义精确函数签名、结构布局和错误码；NetworkImplementation 只记录实际进度/验证。相同规则优先引用，不在各文档维护不同默认值。精确 API 与错误码已冻结在 Native/Kcp/ABI.md。
 
 ## 1. 总体结构与职责
 
@@ -45,29 +45,31 @@ Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/
     KcpNative.cs                 P/Invoke、ABI 检查、错误映射
     KcpTransport.cs              每连接传输状态、native handle 和 socket
     KcpWorker.cs                 单 owner 线程、轮转、唤醒、命令交接
-    Native~/
-        CMakeLists.txt
-        include/gfnet.h          唯一公开原生头文件
-        src/gfnet_connection.c   单连接 DTLS/KCP 状态机
-        src/gfnet_listener.c     cookie、凭据、服务端连接所有权
-        src/gfnet_memory.c       分配头、配额、清零、统计
-        third_party/mbedtls.lock.json
-        config/mbedtls_config.h
-        ABI.md
-        build/prepare_kcp.py     已存在：hash 校验及源码复制
-        build/build.py          统一 CMake 入口
-        build/install.py        平台产物与 Unity importer 元数据
-        tests/                  保留已有回归，补 ABI/DTLS/listener 测试
 
-DotNet/Network/
-    KcpListenerHost.cs           UDP listener、native owner、受控联调入口
+Native/Kcp/                     Unity/.NET 共用原生源码与构建入口
+    CMakeLists.txt
+    include/gfnet.h              唯一公开原生头文件
+    src/gfnet_connection.c       单连接 DTLS/KCP 状态机
+    src/gfnet_listener.c         cookie、凭据、服务端连接所有权
+    src/gfnet_memory.c           分配头、配额、清零、统计
+    third_party/kcp/             唯一 KCP c/h 与 LICENSE
+    third_party/mbedtls.lock.json
+    config/mbedtls_config.h
+    ABI.md
+    build/prepare_kcp.py         已存在：hash 校验及源码复制
+    build/build.py              统一 CMake 入口
+    build/install.py            平台产物与 Unity importer 元数据
+    tests/                      保留已有回归，补 ABI/DTLS/listener 测试
+
+DotNet/GameFrame.Server/
+    KcpListenerHost.cs           UDP listener、native owner、强类型应用接口
 ```
 
-KCP 唯一源码仍在 `Unity/Assets/Plugins/GameFrame/Kcp`，保留 GUID；目前已直接合入 #467、分配失败处理与标准 `offsetof` 修正。构建引用经过 `prepare_kcp.py` 校验的逐字节副本，不再次打补丁。
+KCP 唯一源码位于 `Native/Kcp/third_party/kcp`，迁移保留源码字节和原 GUID 记录；目前已直接合入 #467、分配失败处理与标准 `offsetof` 修正。构建引用经过 `prepare_kcp.py` 校验的逐字节副本，不再次打补丁。
 
 `ConnectionContext` 现通过 IFrameTransport 接入两种传输，仅抽出连接、整帧收发、关闭和能力查询所需的内部传输边界，保留现有 pending/deadline、队列、Hello 和主线程派发。WSS 继续使用现有 IO owner，KCP 使用宿主单 worker；不复制整套 RPC 栈，也不让每个 KCP 连接再启动独立原生驱动线程。
 
-Unity/.NET 共用 `KcpNative` 及不依赖 Unity 的驱动代码，显式加入共享 MSBuild 源码清单；共享 MSBuild 清单已显式包含 `Transport/Kcp/*.cs`、options/clock/diagnostics。Unity 的宿主/Pump 仍留在 Runtime 的 Unity 部分，服务端拥有自己的 listener 生命周期。
+Unity/.NET 共用 KcpNative、NetworkClock、帧/codec/预算源码；服务端的 GameFrame.Network.Core 只链接这些基础实现，不编入 KcpWorker、KcpTransport 或客户端 ConnectionContext/options。客户端代码仅由 .NET 客户端集成测试显式链接。Protocol/GameFrame.Protocol.projitems 只包含生成 DTO/catalog。Unity 的宿主/Pump 保留在 Runtime，服务端 GameFrame.Server 拥有自己的 listener 和应用 owner 生命周期。
 
 复用客户端 ConnectionContext 不意味着让服务端使用客户端状态机；服务端保留自身收发方向、阶段权限与业务 owner，共用 native ABI、帧协议、生成 codec 及适用的纯 C# 辅助代码。
 
@@ -95,7 +97,7 @@ Unity/.NET 共用 `KcpNative` 及不依赖 Unity 的驱动代码，显式加入�
 
 listener poll UDP 的元数据包含 peer、connectionId/generation 和原始入队时间，便于托管 in-flight 检查连接有效性及总队龄；未分配连接的 cookie 输出使用明确的无连接标识并受 listener 队龄/额度约束。不能仅凭相同 peer 判断包属于当前连接。
 
-在实施第一步冻结 `Native~/ABI.md`，至少包括：
+在实施第一步冻结 `Native/Kcp/ABI.md`，至少包括：
 
 - Cdecl，`int32_t/uint32_t/uint64_t` 与 opaque handle；无 C `long`、C bool、变长结构、内部结构 Marshal 或隐式字符串编码。
 - config/stats 首字段 `struct_size`、`abi_version`；明确全部字段偏移、对齐、保留字段必须为零及结构大小。输入缓冲指针只在同步调用内有效；事件可携带 listener 拥有的 opaque connection handle，但不携带借用的 payload/字符串指针。C 静态断言及 C# `Marshal.SizeOf/OffsetOf` 验证目标架构。
@@ -238,6 +240,8 @@ Unity 安装到 `Unity/Assets/Plugins/GameFrame/Native/Kcp/<platform>`，生成�
 
 可靠 admission、三路发送 FIFO 和单次可失败移交遵循总设计第10节。client/server 每轮首尾输出共用256包预算；listener 在 socket in-flight WouldBlock 时暂停新业务追加，不停止必要收包/tick/deadline。服务端 handler 显式携带不可变 connectionId/generation/grantId，授权注册期限从托管调用 admission 起算。
 
-普通 DTLS EOF 与 WSS EOF 都让现有业务 owner 继续消费已接受可靠输入；物理传输结束后不再发送回复。故障或显式停机取消并等待 handler，handler 必须协作取消。世界业务绑定/结束通知待真实业务 owner 接入，不在底层创建第二套会话管理。
+普通 DTLS EOF 与 WSS EOF 都让现有业务 owner 继续消费已接受可靠输入；物理传输结束后不再发送回复。故障或显式停机取消并等待 handler，handler 必须协作取消。通用 Connected/Closed 与连接终态接口已提供，世界业务绑定/结束处理由未来的业务 owner 接入，不在底层创建第二套会话管理。
 
 指标新增帧/业务字节、Ping RTT、预留峰值、native allocations/input/plaintext/output队龄与能力字段。完整元数据、分阶段/分位耗时、DTLS 内部细分丢弃仍未完成。审查清单与最新证据见 [NetworkReview.md](NetworkReview.md)。
+
+服务端已拆为 Core/Server/Protocol/Game.Server，KcpListenerHost 使用与 WSS 相同的强类型 ServerApplication，业务只收发 DTO，不持有 native handle/OwnedFrame。默认容量通过 KcpServerOptions 固定，完整 API/owner/关闭契约见 [服务端框架说明](../DotNet/GameFrame.Server/README.md)，本轮证据见 [服务端审查第8节](NetworkServerReview.md)。

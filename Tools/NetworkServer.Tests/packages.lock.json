@@ -83,10 +83,27 @@
         "resolved": "13.0.3",
         "contentHash": "HrC5BXdl00IP9zeV+0Z848QWPAoCr9P3bDEZguI+gkLcBKAOxix/tLEAAHC+UvDNPv4a2d18lOReHMOagPa+zQ=="
       },
-      "dotnet": {
+      "game.protocol": {
         "type": "Project",
         "dependencies": {
+          "GameFrame.Network.Core": "[1.0.0, )",
           "MemoryPack": "[1.21.4, )"
+        }
+      },
+      "game.server": {
+        "type": "Project",
+        "dependencies": {
+          "Game.Protocol": "[1.0.0, )",
+          "GameFrame.Server": "[1.0.0, )"
+        }
+      },
+      "gameframe.network.core": {
+        "type": "Project"
+      },
+      "gameframe.server": {
+        "type": "Project",
+        "dependencies": {
+          "GameFrame.Network.Core": "[1.0.0, )"
         }
       }
     }

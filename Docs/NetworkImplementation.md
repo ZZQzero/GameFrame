@@ -2,7 +2,7 @@
 
 设计契约见 [NetworkDesign.md](NetworkDesign.md)。本记录区分已实现代码、已执行验证和待实现项，不将协议单元测试视为完整网络验收。
 
-最新状态见文末“mbedTLS 4.2.0 升级”：ABI2 五平台产物已更新到 4.2.0 + TF-PSA-Crypto 1.2.0，原生 ASan/UBSan、网络59/59及重启后 Unity 生命周期/真实UDP通过。此前的3.6.7、ABI1和验证数量属于历史；逐文件审查范围及限制见 [NetworkReview.md](NetworkReview.md)。
+最新状态见文末“应用启动封装与登录功能目录”。ABI2 五平台产物已更新到 mbedTLS 4.2.0 + TF-PSA-Crypto 1.2.0；服务端已拆为四工程，协议178/178、独立框架10/10、网络61/61与 Unity 相关编译/测试通过。应用启动与登录目录调整后再次通过 Release build、网络61/61及真实入口启动/停止验证。此前版本和数量属于历史；全量审查、当前完成项与验证限制见 [NetworkServerReview.md](NetworkServerReview.md) 第 8～9 节。
 
 ## 初次底层实现记录（2026-10-12）
 
@@ -19,7 +19,7 @@
 | 现有平台产物 | macOS universal、Android arm64、iOS device arm64、独立 simulator arm64 已构建安装 | 移动产物仅构建/清单验证；simulator 默认禁用以避免重复链接 |
 | 计账和诊断 | native 实际/峰值精确容量；客户端 native allowance 预留；帧/pending 各额外 512 字节保守 reservation；KCP/socket 快照 | CLR/Mono/IL2CPP 完整元数据审计、第17节全部阶段指标、平台内部缓冲和 RSS |
 
-代码入口：`Runtime/Network/Transport/Kcp`，原生源码与 ABI 在其 `Native~`；服务端入口在 `DotNet/Network/KcpListenerHost.cs`、`LocalKcpService.cs`。公开调用方式见 [Network.md](Network.md)，工具命令见 [原生 README](../Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~/README.md)。自动生成消息没有新增第二套手写协议。
+代码入口：`Runtime/Network/Transport/Kcp`，原生源码、ABI 与构建入口在仓库公共目录 `Native/Kcp`；服务端框架在 `DotNet/GameFrame.Server/KcpListenerHost.cs`，联调应用在 `DotNet/Game.Server/LocalKcpService.cs`。公开调用方式见 [Network.md](Network.md)，工具命令见 [原生 README](../Native/Kcp/README.md)。自动生成消息没有新增第二套手写协议。
 
 原生分配器计入真实分配头/容量，释放前清零；KCP 部分发送、分配或 output 失败锁 Fatal 后销毁。listener UDP 输出带 connectionId/generation，托管移交前检查，包括尚未发布 Established 的握手子连接。DTLS Established 不等于应用 Connected；GFNP Hello/hash/ticket 绑定成功后才提交 ServerHello。
 
@@ -56,7 +56,7 @@
 - `Runtime/Network/Messaging/NetProtocolCatalog.cs`：不可变强类型路由、codec 与 catalog，验证重复 opcode、目录路由归属与最大正文。
 - `Runtime/Network/ProtocolContracts/NetWireReader.cs` 与生成的验证器：反序列化前检查对象布局、数组/字符串长度、UTF-8、深度/节点预算与尾随字节；序列化前检查 DTO 约束。
 - `Tools/NetworkProtocol`：以 Proto 为唯一手写源，使用 protobuf-net.Reflection 3.2.52 解析、生成 C# DTO/枚举，使用 Roslyn 4.14.0 和 MemoryPack.Generator 1.21.4 编译 DTO 与完整生成代码，分析实际成员并核对序列化信息；输出强类型 codec/catalog，可选导出规范 manifest、SHA-256 与 54 组默认/普通/最大值向量；`check` 校验生成产物一致性。支持顶层 int32 枚举与枚举数组，入站/出站检查声明值集合，定义纳入 hash；拒绝别名、Flags、Nullable<T>、递归、缺少限额、重复 opcode、自定义 formatter 与序列化回调。目前限于顶层非泛型 DTO 和一维非交错数组。
-- `DotNet/DotNet.csproj`：通过 `Protocol/GameFrame.Protocol.projitems` 编译相同生成源码与纯协议基础代码，MemoryPack 1.21.4 依赖锁文件已保存。入口现已实现显式 local-wss Kestrel 服务，见下方 P1 进度。
+- 当时的 `DotNet/DotNet.csproj`（现已拆分，见文末）：通过 `Protocol/GameFrame.Protocol.projitems` 编译相同生成源码与纯协议基础代码，MemoryPack 1.21.4 依赖锁文件已保存。入口现已实现显式 local-wss Kestrel 服务，见下方 P1 进度。
 - `Tools/NetworkProtocol.Tests`：链接相同 Runtime 源码与协议测试，使用 .NET 10；Tools/DotNet 分别锁定 SDK 10.0.401，测试依赖锁文件纳入版本管理，不改变 Luban 的 .NET 8 环境。
 
 协议工具清理：命令入口与 MemoryPack 代码生成实现已拆分，后者命名为 `MemoryPackProtocolGenerator`；连接配置和帧控制代码移至测试工程编译，生成工具只链接协议契约、异常与 catalog。参数快照测试移至独立的 `NetworkOptionsTests`，生成产物与协议格式不变。这里的代码生成实现不代表 DotNet 服务端已实现。
@@ -90,7 +90,7 @@
 - 宿主 Pump 异常或 Runner/root 提前销毁、禁用会锁定故障、停止正常派发，所有客户端失败并拒绝新连接；独立 PlayerLoop 清理不依赖 Runner，不解码 DTO/执行 Push。保留响应也失败，Close/Dispose/Shutdown 等待实际 IO 退出仍可完成；故障只在宿主边界记录一次。另修复 Connected 观察者主动 Close 后 Connect 仍误报成功的竞态。
 - 补齐控制发送的 15 秒期限，队列与 in-flight 均受约束；服务端 Ping admission 不再 await 慢 Send 而阻塞 watchdog，发送 owner 成功后提交 Pong deadline。客户端发送 owner 在 WS Send 前重查请求取消/截止时间，不依赖下一次 clock tick；在期限上或之后到达的响应同时计入 timeout/late，且不解码。
 - `.github/workflows/network.yml` 对相关改动执行 locked restore、协议漂移检查、.NET 协议/WSS 回归与独立 KCP native 回归；不自动 generate 掩盖差异。工作流已写入源码，本地对应命令验证；尚未推送或宣称远程 CI 已执行。
-- KCP 分配安全修正与 `Native~/build/prepare_kcp.py`：最初通过精确补丁应用到构建副本，后按用户要求直接合入 `ikcp.c`/`ikcp.h`，删除补丁文件与应用逻辑；源码准备改为当前 SHA 校验与逐字节复制，保留 CRLF 和 GUID。ACK/segment/发送分配失败返回而非 abort/assert/空指针，另修复上游队列偏移宏的 UBSan 问题。失败后的部分状态必须由未来 gfnet 锁 fatal 再销毁，不重试。临时 source manifest 记录上游基线与已合入修正，不代表 native 插件构建清单，DTLS/gfnet 尚未实现。
+- KCP 分配安全修正与 `Native/Kcp/build/prepare_kcp.py`：最初通过精确补丁应用到构建副本，后按用户要求直接合入 `ikcp.c`/`ikcp.h`，删除补丁文件与应用逻辑；源码准备改为当前 SHA 校验与逐字节复制，保留 CRLF 和 GUID。ACK/segment/发送分配失败返回而非 abort/assert/空指针，另修复上游队列偏移宏的 UBSan 问题。失败后的部分状态必须由未来 gfnet 锁 fatal 再销毁，不重试。临时 source manifest 记录上游基线与已合入修正，不代表 native 插件构建清单，DTLS/gfnet 尚未实现。
 
 当前资源指标可靠覆盖拥有的帧数组，pending 采用每条 512 字节固定 reservation；CLR/Unity/IL2CPP 的完整 pending、取消注册、completion、队列元数据布局及常驻目录/观察者仍需审计，不把当前指标宣称为完整托管内存验收。ClientWebSocket 不暴露底层 TCP socket buffers 的设置/真实值，当前未伪造 256 KiB 设置成功；平台内存仍待实测。
 
@@ -115,7 +115,7 @@
 
 ## KCP 修正直接合入源码（2026-10-11）
 
-按用户要求，分配失败检查与标准 `offsetof` 修正已直接写入 `Unity/Assets/Plugins/GameFrame/Kcp/ikcp.c`、`ikcp.h`，与先前直接合入的 #467 共用同一份源码。源码字节与原安全补丁准备后的结果一致，CRLF 与两个 `.meta` GUID 保留。删除独立 patch 及构建时应用逻辑；`prepare_kcp.py` 简化为当前源码 hash 校验、逐字节复制与来源清单，拒绝漂移、Unity 内输出和覆盖。
+按用户要求，分配失败检查与标准 `offsetof` 修正已直接写入 `Native/Kcp/third_party/kcp/ikcp.c`、`ikcp.h`，与先前直接合入的 #467 共用同一份源码。源码字节与原安全补丁准备后的结果一致，CRLF 与两个 `.meta` GUID 保留。删除独立 patch 及构建时应用逻辑；`prepare_kcp.py` 简化为当前源码 hash 校验、逐字节复制与来源清单，拒绝漂移、Unity 内输出和覆盖。
 
 两个原生入口在 macOS arm64 复跑通过：分配成功/逐点失败 75/75（assert/NDEBUG/ASan+UBSan）、ACK 24/24、tick 3/3；独立 ACK 修正回归 16/16、tick 4/4。ACK 对照只还原时间戳比较，保留相同分配修正，不再冒充原始上游源码。ASan/UBSan 无错误，存活分配归零，临时产物已清理。源码 hash/copy/漂移拒绝及元数据保留检查通过；未构建安装插件或执行 DTLS/Unity/IL2CPP 验收。
 
@@ -331,3 +331,49 @@ listener feed 返回的 InternalError 可来自临时握手 create/tick，不能
 | 清理与恢复 | 本地服务Ctrl+C退出码0；恢复原环境变量、EditorSettings文件字节及Launch.unity/未播放/无场景改动；临时Editor桥接脚本、目录/meta和凭据清理。 |
 
 协议生成代码未修改，未重复178个协议测试；此前Player脚本43程序集结果为历史。本次未执行IL2CPP原生链接与Player运行、Windows/Linux宿主执行、远程CI、移动真机/模拟器、IPv6/后台/换网和长期容量验收。这些不以源码、编译或Editor联调结果代替。世界业务与WebGL WSS继续按已确认范围延后。
+
+
+## 2026-10-12 原生源码公共目录迁移
+
+原 `Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/Native~` 整体迁到仓库公共 `Native/Kcp`，原 `Unity/Assets/Plugins/GameFrame/Kcp` 的唯一 KCP 源码与许可证迁到 `Native/Kcp/third_party/kcp`。C/header/CMake/config/依赖锁逐文件 SHA 与迁移前一致；原第三方 `.meta` 字节/GUID 在公共目录保留为迁移记录，不再由 Unity 导入。未保留旧目录副本、链接或旧入口。
+
+C# P/Invoke 与 worker 留在 Unity Runtime；Unity 原生库仍安装到 `Unity/Assets/Plugins/GameFrame/Native/Kcp/<platform>`。统一构建器、准备器、安装器和安全测试改为读取公共目录，构建/依赖准备禁止向 Unity 或维护源码目录输出。CI 路径过滤/命令、ABI 链接、原生设计及服务端发布说明同步更新。服务端部署对应平台二进制、清单和许可证即可，无需复制源码或安装 Unity。
+
+本轮实际验证：
+
+- 30 个公共维护文件均未被 Git 忽略；所有 Python 语法/CLI 帮助、六个平台 dry-run、源码/输出保护、网络 Markdown 本地链接检查通过。旧路径引用与差异空白检查通过。
+- 独立 KCP ACK 回归 16/16、调度边界 4/4；分配失败入口 assert/NDEBUG/ASan+UBSan 共 75/75，含 ACK/回绕和源码完整性检查，sanitizer 无错误。
+- 使用现有锁定 mbedTLS 4.2.0 + TF-PSA-Crypto 1.2.0 依赖，从全新 `Tools/Artifacts/NetworkNative/shared-<platform>-<arch>-release` 目录构建并安装 macOS universal、Windows x86_64（LLVM-MinGW）、Android arm64（NDK 27.2.12479018/API23）、iOS arm64 与 simulator arm64。每个产物都由正常构建重新生成清单，安装后的清单、源码 SHA、build_id、二进制 hash 验证通过；所有既有 Unity importer `.meta` 字节保持一致，模拟器产物继续默认禁用。
+- macOS Release `gfnet_regression` 8,326 次检查通过，live native bytes=0；Windows PE/导出/系统依赖检查通过，回归 exe 已编译但未执行。
+- 发布 .NET Release 到系统临时目录，通过 `install.py --server-output` 安装新 macOS 库；未配置自定义 native resolver 的真实 `DotNet.dll --profile local-kcp-dtls` 从程序旁加载库、注册临时凭据并启动 UDP listener，Ctrl+C 正常关闭、退出码 0。临时凭据/发布目录验证后删除。
+- 指向该新安装库的 `Tools/NetworkServer.Tests` 59/59 通过，0 skipped，包含真实 KCP/DTLS UDP 与 WSS 测试。
+
+本次范围是公共源码与构建目录迁移；未改变原生 ABI、协议或服务端业务分层。未运行 Linux/Windows 平台实测或远端 CI，未在重启后的 Unity 执行 Editor/Player/IL2CPP 与移动设备验收；这些不能由交叉编译或 .NET/macOS 回归替代。服务端框架分层审查与后续建议继续见 [NetworkServerReview.md](NetworkServerReview.md)。
+
+## 服务端程序集与应用边界拆分（2026-10-12）
+
+按服务端全量审查实施 Core → Server / Game.Protocol → Game.Server 的四工程边界，保留一个业务进程。Core/Server 不引用游戏协议或账号；Protocol.projitems 只包含双端同源生成 C#。客户端 ConnectionContext、worker/options 不再编入服务端基础工程；Unity Runtime 与 Hotfix 的程序集名、生成 namespace 和 wire/hash 未变。
+
+ServerApplication 冻结强类型 RPC/Notify/显式拒绝注册，ServerConnectionContext 提供主动可靠/不可靠 Push、外部 CloseAsync、响应后关闭、不可变身份与终态；ServerSession 接入头部准入、派发复查、期限和 Connected/Closed。账号、本地认证/登录限流/恢复/顶号/注销与 Echo 移入 Game.Server。框架拥有帧、预算、编码和请求关联，不把 OwnedFrame/native handle 交给业务。
+
+WssServer 通过 hosted lifecycle 的 StoppingAsync 在 Kestrel 停止前 join 网络；取消回调和 Closed 异常仍完成资源/配额释放，重复停止返回一致结果。KCP 统一可靠 correlation 规则，主动 Push/公开 Close 隔离旧连接，CloseAfterResponse 等回复交给 native 后再发送可靠 Close。连接结束与受限流量提升串行，正常 EOF 保留既有可靠工作；单连接故障不扩大为 listener 故障。网络选项在 host 构造时验证/复制；完整诊断快照与生产容量验收仍待完成。
+
+本轮验证：四工程 locked restore/Release build 0 警告错误；协议178/178、独立框架10/10、应用/真实 WSS/DTLS 61/61（0跳过），生成 check --artifacts 退出0。实际发布 Game.Server、安装已有 macOS 原生库，从程序旁默认加载并启动 listener，Ctrl+C 退出0。Unity 6000.3.19f1 Editor 错误0、相关 EditMode143/143，StandaloneOSX Player脚本编译43程序集成功；原场景/设置保持。独立框架测试加入 CI，尚未远程执行。
+
+本轮不重新构建 native、未执行 Windows/Linux/移动设备、IL2CPP 原生链接裁剪或生产负载；世界业务与 WebGL 延后。详情、历史问题状态及逐文件核对见 [服务端审查第8节](NetworkServerReview.md#8-已实施的服务端拆分2026-10-12)。公开接入见 [Server API](../DotNet/GameFrame.Server/README.md)，启动/部署改为 dotnet run --project Game.Server 与 Game.Server.dll，见 [DotNet README](../DotNet/README.md)。
+
+
+## 应用启动封装与登录功能目录（2026-10-12）
+
+Program 仅验证 --profile 并选择 LocalWssService/LocalKcpService；单参数对直接校验，移除通用参数遍历循环。两个应用启动入口分别持有配置、证书/凭据、应用与网络资源；WSS host 建立释放所有权后配置路由，保留 hosted lifecycle 先 join 网络的停止顺序。
+
+Game.Server/Login 集中 LoginHandlers、LoginSession、AccountSessions、LocalAccountSettings，负责登录/恢复/注销、限流、权限/期限与敏感数据清理。LobbyApplication 仅组合登录模块、本地 Echo 和世界路由的显式拒绝。网络框架、生成协议、native ABI 与 Unity 编译边界未变；目录与流程见 DotNet/README.md。
+
+本次新增验证：Release build 0 警告/错误；网络61/61，0跳过；真实进程参数/缺失配置6/6拒绝；实际 local-wss TLS/WebSocket 升级后带活动连接 Ctrl+C 约23ms、退出0；临时发布 local-kcp-dtls 默认加载已安装macOS原生库、注册grant并启动，Ctrl+C约11ms、退出0。临时证书/凭据/发布目录已删除，没有更改系统信任。没有重新执行 Unity、原生构建或其他平台实跑。范围及源码核对见 NetworkServerReview.md 第9节。
+
+
+## IDE 本地启动配置补齐（2026-10-12）
+
+用户直接运行 Debug Game.Server 时未提供 --profile，触发生产认证未配置的拒绝；先前入口验证使用显式 local 参数，未覆盖 IDE 默认项目运行配置。新增 Game.Server/Properties/launchSettings.json，分别提供 local-wss/local-kcp-dtls commandLineArgs；不包含凭据，Debug 和发布程序均不会因无参数自动启用本地认证。无参数错误增加启动指引。DotNet README 补充 Rider/Visual Studio profile、普通项目运行参数、必填环境变量和直接可执行文件不读取 launchSettings 的区别。本机 Rider 原有 Game.Server 配置的空程序参数已改为 --profile local-wss；其他本机设置未变，IDE 可能需重新载入以读取磁盘改动。
+
+本次证据：Debug build 0警告/错误；使用用户给出的 Debug apphost 路径复现无参数拒绝；两个 dotnet run --launch-profile 均正确传参、缺失配置时明确拒绝；临时配置下 Debug local-wss 实际 TLS 验证/WebSocket 升级成功，活动连接 Ctrl+C 退出0；既有 ProductionWithoutAuthenticationProviderRefusesStartup 测试1/1通过。临时证书、凭据和探针目录已清理。没有在 IDE 界面实点运行，没有重复执行整套网络/Unity/native测试。本机真实账号、密码和PFX仍需开发者显式配置，未创建默认测试凭据或更改系统证书信任。

@@ -192,6 +192,7 @@ namespace GameFrame.Network
         }
 
         internal ReadOnlySpan<byte> Hash => hash;
+        internal IEnumerable<NetRoute> Routes => routes.Values;
 
         internal NetRoute Find(uint opcode)
         {

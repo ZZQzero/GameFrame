@@ -11,7 +11,14 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="NUnit" Version="3.14.0" />
     <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
-    <ProjectReference Include="../../DotNet/DotNet.csproj" />
+    <ProjectReference Include="../../DotNet/Game.Server/Game.Server.csproj" />
+    <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/NetworkOptions.cs" Link="Client/NetworkOptions.cs" />
+    <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/NetworkConnectOptions.cs" Link="Client/NetworkConnectOptions.cs" />
+    <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/NetworkDiagnostics.cs" Link="Client/NetworkDiagnostics.cs" />
+    <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/Transport/IFrameTransport.cs" Link="Client/IFrameTransport.cs" />
+    <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/Transport/WebSocketTransport.cs" Link="Client/WebSocketTransport.cs" />
+    <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/KcpTransport.cs" Link="Client/KcpTransport.cs" />
+    <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/KcpWorker.cs" Link="Client/KcpWorker.cs" />
     <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/Connection/*.cs" Link="ClientCore/%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

@@ -6,6 +6,14 @@ import "Common/ResultProto.proto";
 import "Session/SessionProto.proto";
 
 service SessionService {
+  rpc Register(RegisterRequest) returns (game.protocol.common.OperationResponse) {
+    option (game.net.opcode) = 1004;
+    option (game.net.route_kind) = ROUTE_KIND_RPC;
+    option (game.net.delivery) = DELIVERY_RELIABLE;
+    option (game.net.max_body) = 2048;
+    option (game.net.response_max_body) = 64;
+  }
+
   rpc Login(LoginRequest) returns (LoginResponse) {
     option (game.net.opcode) = 1000;
     option (game.net.route_kind) = ROUTE_KIND_RPC;

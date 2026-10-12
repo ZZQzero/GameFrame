@@ -6,7 +6,7 @@
 
 - `Common/net_options.proto`：全项目唯一的路由、长度、可空性和收窄整数选项。
 - `Common/ResultProto.proto`：唯一业务结果码枚举与简单操作响应。
-- `Session/SessionProto.proto`、`SessionService.proto`：账号登录、恢复、世界授权与注销。
+- `Session/SessionProto.proto`、`SessionService.proto`：账号注册、登录、恢复、世界授权与注销。
 - `World/WorldProto.proto`、`WorldService.proto`：世界入场/恢复/离场、实体成员事件、输入与快照。
 - `Diagnostics/DiagnosticsProto.proto`、`DiagnosticsService.proto`：仅 local profile 注册的 Echo 联调路由。
 - 各域按 message/service 分离；opcode 放在 method 上，DTO 可被多条路由复用。
@@ -18,7 +18,7 @@
 
 工具自身不编译磁盘上的旧生成代码，缺少或损坏产物时仍可 generate。工具会先在内存中编译新 DTO 和完整生成源码，并与 MemoryPack serialization-info 对照，再写入结果。临时编译信息在系统临时目录创建，完成后清理。
 
-工具入口为 `Program.cs`，`ProtoProtocolGenerator.cs` 负责解析 Proto 与生成 DTO，`MemoryPackProtocolGenerator.cs` 负责分析实际 MemoryPack 布局并生成 codec/catalog、校验器和向量。这些都是协议生成工具，`DotNet/` 是实际服务端宿主；现已实现 Kestrel local-wss、登录/恢复/注销/Echo，运行配置见 [服务端说明](../DotNet/README.md)。世界服务与生产认证 provider 尚未实现。生成工具引用纯网络 Core；客户端连接实现仅由集成测试工程显式链接，不进入 Core、服务端或生成协议项目。框架与业务程序集关系见 [服务端说明](../DotNet/README.md)。
+工具入口为 `Program.cs`，`ProtoProtocolGenerator.cs` 负责解析 Proto 与生成 DTO，`MemoryPackProtocolGenerator.cs` 负责分析实际 MemoryPack 布局并生成 codec/catalog、校验器和向量。这些都是协议生成工具，`DotNet/` 是实际服务端宿主；现已实现 Kestrel local-wss、PostgreSQL 注册/登录/恢复/注销/Echo，运行配置见 [服务端说明](../DotNet/README.md)。世界服务与生产部署/跨进程账号会话尚未实现。生成工具引用纯网络 Core；客户端连接实现仅由集成测试工程显式链接，不进入 Core、服务端或生成协议项目。框架与业务程序集关系见 [服务端说明](../DotNet/README.md)。
 
 ## 命令
 

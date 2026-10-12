@@ -1,81 +1,102 @@
-using GameFrame.Network;
 using System.Security.Cryptography;
-using System.Text;
 using Game.Hotfix.Network.Protocol;
+using GameFrame.Network;
+using GameFrame.Server.Network;
 
 namespace Game.Server.Login
 {
     internal sealed class AccountSessions : IDisposable
     {
-        private readonly object gate = new object();
-        private readonly LocalAccountSettings settings;
-        private byte[] sessionId = Array.Empty<byte>();
-        private byte[] resumeDigest = Array.Empty<byte>();
-        private ulong epoch;
-        private long deadline;
-        private long expiresUtc;
-        private bool active;
-        private Action? disconnectLobby;
-        private long lobbyBinding;
-        private long loginWindow;
-        private int loginAttempts;
-
-        public AccountSessions(LocalAccountSettings settings)
+        private sealed class Session
         {
-            this.settings = settings;
+            internal ulong AccountId;
+            internal ulong Epoch;
+            internal long Binding;
+            internal byte[] Id = Array.Empty<byte>();
+            internal byte[] ResumeDigest = Array.Empty<byte>();
+            internal long Deadline;
+            internal long ExpiresUtc;
+            internal Action? Disconnect;
+            internal long AttemptWindow;
+            internal int Attempts;
         }
 
+        private readonly object gate = new object();
+        private readonly LoginOptions options;
+        private readonly Dictionary<ulong, Session> accounts = new Dictionary<ulong, Session>();
+        private readonly Dictionary<string, Session> sessions = new Dictionary<string, Session>();
+        private readonly Dictionary<long, Session> bindings = new Dictionary<long, Session>();
+        private long nextBinding;
+        private bool disposed;
         internal static long Now => NetworkClock.GetMilliseconds();
 
-        internal (LoginResponse Response, long Binding) Login(LoginRequest request, Action disconnect)
+        internal AccountSessions(LoginOptions options)
         {
-            byte[] passwordBytes = Encoding.UTF8.GetBytes(request.Password);
-            byte[] digest;
-            try
-            {
-                digest = SHA256.HashData(passwordBytes);
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(passwordBytes);
-            }
+            options.Validate();
+            this.options = options;
+        }
 
-            Action? revoke = null;
-            (LoginResponse, long) result;
-            try
+        internal (LoginResponse Response, long Binding) Login(AuthenticatedAccount account, Action disconnect, CancellationToken cancellation)
+        {
+            Action? revoke;
+            (LoginResponse Response, long Binding) result;
+            lock (gate)
             {
-                lock (gate)
+                ObjectDisposedException.ThrowIf(disposed, this);
+                cancellation.ThrowIfCancellationRequested();
+                if (account.Id == 0 || account.Epoch == 0)
                 {
-                    if (!AllowAttempt() || request.Account != settings.Account ||
-                        !CryptographicOperations.FixedTimeEquals(digest, settings.PasswordDigest))
-                    {
-                        return (Failure(), 0);
-                    }
-
-                    if (epoch == ulong.MaxValue || lobbyBinding == long.MaxValue)
-                    {
-                        throw new InvalidOperationException("Account generation exhausted.");
-                    }
-
-                    revoke = disconnectLobby;
-                    ClearCredentials();
-                    sessionId = RandomNumberGenerator.GetBytes(16);
-                    epoch++;
-                    active = true;
-                    deadline = checked(Now + (long)settings.AccountLifetime.TotalMilliseconds);
-                    expiresUtc = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + (long)settings.AccountLifetime.TotalMilliseconds;
-                    disconnectLobby = disconnect;
-                    lobbyBinding++;
-                    result = (RotateToken(), lobbyBinding);
+                    throw new ArgumentException("Authenticated account identity must be nonzero.");
                 }
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(digest);
+
+                if (accounts.TryGetValue(account.Id, out Session? previous) && previous.Epoch >= account.Epoch)
+                {
+                    return (Failure(), 0);
+                }
+
+                foreach (Session expired in accounts.Values.Where(value => Now >= value.Deadline).ToArray())
+                {
+                    Remove(expired);
+                }
+
+                accounts.TryGetValue(account.Id, out previous);
+                if (previous == null && accounts.Count >= options.MaxSessions)
+                {
+                    throw new ServerRequestException(3);
+                }
+
+                revoke = previous?.Disconnect;
+                if (previous != null)
+                {
+                    Remove(previous);
+                }
+
+                var session = new Session
+                {
+                    AccountId = account.Id,
+                    Epoch = account.Epoch,
+                    Binding = NextBinding(),
+                    Id = RandomNumberGenerator.GetBytes(16),
+                    Deadline = checked(Now + (long)options.AccountLifetime.TotalMilliseconds),
+                    ExpiresUtc = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + (long)options.AccountLifetime.TotalMilliseconds,
+                    Disconnect = disconnect
+                };
+                accounts.Add(account.Id, session);
+                sessions.Add(Convert.ToHexString(session.Id), session);
+                bindings.Add(session.Binding, session);
+                result = (RotateToken(session), session.Binding);
             }
 
-            revoke?.Invoke();
-            return result;
+            try
+            {
+                revoke?.Invoke();
+                return result;
+            }
+            catch
+            {
+                ClearResponse(result.Response);
+                throw;
+            }
         }
 
         internal (LoginResponse Response, long Binding) Resume(ResumeLoginRequest request, Action disconnect)
@@ -87,28 +108,26 @@ namespace Game.Server.Login
 
             byte[] digest = SHA256.HashData(request.ResumeToken);
             Action? revoke;
-            (LoginResponse, long) result;
+            (LoginResponse Response, long Binding) result;
             try
             {
                 lock (gate)
                 {
-                    if (!AllowAttempt() || !active || Now >= deadline ||
-                        !CryptographicOperations.FixedTimeEquals(request.AccountSessionId, sessionId) ||
-                        !CryptographicOperations.FixedTimeEquals(digest, resumeDigest))
+                    ObjectDisposedException.ThrowIf(disposed, this);
+                    if (!sessions.TryGetValue(Convert.ToHexString(request.AccountSessionId), out Session? session) ||
+                        Now >= session.Deadline || !AllowAttempt(session) ||
+                        !CryptographicOperations.FixedTimeEquals(digest, session.ResumeDigest))
                     {
                         return (Failure(), 0);
                     }
 
-                    if (lobbyBinding == long.MaxValue)
-                    {
-                        throw new InvalidOperationException("Lobby binding generation exhausted.");
-                    }
-
-                    revoke = disconnectLobby;
-                    disconnectLobby = disconnect;
-                    lobbyBinding++;
-                    // Consume and rotate under the account gate; no IO is performed in this critical section.
-                    result = (RotateToken(), lobbyBinding);
+                    long binding = NextBinding();
+                    revoke = session.Disconnect;
+                    bindings.Remove(session.Binding);
+                    session.Binding = binding;
+                    session.Disconnect = disconnect;
+                    bindings.Add(binding, session);
+                    result = (RotateToken(session), binding);
                 }
             }
             finally
@@ -116,15 +135,23 @@ namespace Game.Server.Login
                 CryptographicOperations.ZeroMemory(digest);
             }
 
-            revoke?.Invoke();
-            return result;
+            try
+            {
+                revoke?.Invoke();
+                return result;
+            }
+            catch
+            {
+                ClearResponse(result.Response);
+                throw;
+            }
         }
 
         internal bool IsCurrent(long binding)
         {
             lock (gate)
             {
-                return active && binding != 0 && binding == lobbyBinding && Now < deadline;
+                return bindings.TryGetValue(binding, out Session? session) && Now < session.Deadline;
             }
         }
 
@@ -132,14 +159,12 @@ namespace Game.Server.Login
         {
             lock (gate)
             {
-                if (!active || binding != lobbyBinding || Now >= deadline)
+                if (!bindings.TryGetValue(binding, out Session? session) || Now >= session.Deadline)
                 {
                     return false;
                 }
 
-                active = false;
-                disconnectLobby = null;
-                ClearCredentials();
+                Remove(session);
                 return true;
             }
         }
@@ -148,40 +173,50 @@ namespace Game.Server.Login
         {
             lock (gate)
             {
-                if (binding == lobbyBinding)
+                if (bindings.TryGetValue(binding, out Session? session))
                 {
-                    disconnectLobby = null;
+                    session.Disconnect = null;
                 }
             }
         }
 
-        private bool AllowAttempt()
+        private long NextBinding()
         {
-            long window = Now / 1000;
-            if (loginWindow != window)
+            if (nextBinding == long.MaxValue)
             {
-                loginWindow = window;
-                loginAttempts = 0;
+                throw new InvalidOperationException("Lobby binding generation exhausted.");
             }
 
-            return ++loginAttempts <= settings.MaxLoginAttemptsPerSecond;
+            return ++nextBinding;
         }
 
-        private LoginResponse RotateToken()
+        private bool AllowAttempt(Session session)
+        {
+            long window = Now / 1000;
+            if (session.AttemptWindow != window)
+            {
+                session.AttemptWindow = window;
+                session.Attempts = 0;
+            }
+
+            return ++session.Attempts <= options.MaxLoginAttemptsPerSecond;
+        }
+
+        private static LoginResponse RotateToken(Session session)
         {
             byte[] token = RandomNumberGenerator.GetBytes(32);
-            CryptographicOperations.ZeroMemory(resumeDigest);
-            resumeDigest = SHA256.HashData(token);
-            uint ttl = checked((uint)Math.Max(0, deadline - Now));
+            CryptographicOperations.ZeroMemory(session.ResumeDigest);
+            session.ResumeDigest = SHA256.HashData(token);
+            uint ttl = checked((uint)Math.Max(0, session.Deadline - Now));
             return new LoginResponse
             {
                 ResultCode = ResultCode.Success,
-                AccountId = 1,
-                AccountSessionId = (byte[])sessionId.Clone(),
-                AuthEpoch = epoch,
+                AccountId = session.AccountId,
+                AccountSessionId = (byte[])session.Id.Clone(),
+                AuthEpoch = session.Epoch,
                 ResumeToken = token,
-                ResumeExpiresAtUtcMs = expiresUtc,
-                AccountExpiresAtUtcMs = expiresUtc,
+                ResumeExpiresAtUtcMs = session.ExpiresUtc,
+                AccountExpiresAtUtcMs = session.ExpiresUtc,
                 ResumeRemainingTtlMs = ttl,
                 AccountRemainingTtlMs = ttl
             };
@@ -189,21 +224,31 @@ namespace Game.Server.Login
 
         private static LoginResponse Failure() => new LoginResponse { ResultCode = ResultCode.InvalidCredentials };
 
-        private void ClearCredentials()
+        internal static void ClearResponse(LoginResponse response)
         {
-            CryptographicOperations.ZeroMemory(sessionId);
-            CryptographicOperations.ZeroMemory(resumeDigest);
-            sessionId = Array.Empty<byte>();
-            resumeDigest = Array.Empty<byte>();
+            CryptographicOperations.ZeroMemory(response.ResumeToken);
+            CryptographicOperations.ZeroMemory(response.AccountSessionId);
+        }
+
+        private void Remove(Session session)
+        {
+            accounts.Remove(session.AccountId);
+            sessions.Remove(Convert.ToHexString(session.Id));
+            bindings.Remove(session.Binding);
+            session.Disconnect = null;
+            CryptographicOperations.ZeroMemory(session.Id);
+            CryptographicOperations.ZeroMemory(session.ResumeDigest);
         }
 
         public void Dispose()
         {
             lock (gate)
             {
-                active = false;
-                disconnectLobby = null;
-                ClearCredentials();
+                disposed = true;
+                foreach (Session session in accounts.Values.ToArray())
+                {
+                    Remove(session);
+                }
             }
         }
     }

@@ -1,4 +1,5 @@
 using System.Security.Cryptography.X509Certificates;
+using Game.Server.Database;
 using Game.Server.Login;
 using GameFrame.Server.Network;
 
@@ -9,15 +10,20 @@ namespace Game.Server
         internal static async Task RunAsync()
         {
             int port = LocalEnvironment.Port("GF_LOCAL_PORT", 7443);
-            using var settings = new LocalAccountSettings(LocalEnvironment.Required("GF_LOCAL_ACCOUNT"), LocalEnvironment.Required("GF_LOCAL_PASSWORD"));
+            var options = new LoginOptions();
             var networkOptions = new WssServerOptions
             {
                 AllowedOrigins = (Environment.GetEnvironmentVariable("GF_LOCAL_ORIGINS") ?? string.Empty)
                     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             };
             using X509Certificate2 certificate = LoadCertificate();
-            using var accounts = new AccountSessions(settings);
-            var application = new LobbyApplication(accounts, settings);
+            await using var database = new PostgresDatabase(LocalEnvironment.Required("GF_DATABASE_CONNECTION"));
+            await database.ValidateAsync(CancellationToken.None);
+            var repository = new PostgresAccountRepository(database.DataSource);
+            await repository.ValidateAsync(CancellationToken.None);
+            using var service = new AccountService(repository);
+            using var accounts = new AccountSessions(options);
+            var application = new LobbyApplication(accounts, service, options);
             await using var network = new WssServer(application.Application, networkOptions);
             await using WebApplication app = CreateHost(network, networkOptions, certificate, port);
             ConfigurePipeline(app, network);

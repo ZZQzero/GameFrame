@@ -31,7 +31,7 @@
 | `DotNet/Game.Server/LocalKcpService.cs` | 已读 |
 | `DotNet/GameFrame.Server/WssServer.cs` | 已读 |
 | `DotNet/GameFrame.Server/ServerConnection.cs` | 已读 |
-| `DotNet/Game.Server/Login/LocalAccountSettings.cs` | 已读 |
+| `DotNet/Game.Server/Login/LoginOptions.cs` | 已读 |
 | `DotNet/Game.Server/Program.cs` | 已读 |
 | `DotNet/Game.Server/LobbyApplication.cs` | 已读 |
 | `DotNet/Game.Server/Login/LoginHandlers.cs` | 已读 |

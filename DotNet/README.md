@@ -19,26 +19,34 @@
 Game.Server/
   Program.cs                 校验 --profile 并选择启动入口
   LocalEnvironment.cs        读取 local 必填配置与校验端口
-  LocalWssService.cs         创建账号服务、应用、网络及 HTTPS host，配置路由并运行
+  LocalWssService.cs         校验 PostgreSQL 与证书，创建应用、网络及 HTTPS host
   LocalKcpService.cs         读取临时 grant，创建并运行底层联调 listener
   LobbyApplication.cs        组合登录模块与本地 Echo，明确拒绝未接入的世界路由
   Login/
     LoginHandlers.cs         注册 Login/ResumeLogin/Logout，IP 登录限流及敏感 DTO 清理
     LoginSession.cs          每连接登录状态、准入、权限复查、期限与关闭解绑
     AccountSessions.cs       账号凭据、恢复轮换、顶号与注销
-    LocalAccountSettings.cs  本地账号配置及登录策略
+    LoginOptions.cs          登录期限、限流和内存会话容量
+    AccountService.cs        注册、密码校验与认证并发限制
+    IAccountRepository.cs    账号持久化契约
+    PostgresAccountRepository.cs PostgreSQL 参数化查询与原子 epoch 分配
+    PasswordHasher.cs        带盐 PBKDF2-SHA256
+  Database/
+    PostgresDatabase.cs      共享连接池、连通性检查与异步释放
+    001_accounts.sql         显式数据库初始化脚本
 ```
 
-`Program` 不创建证书、账号或传输资源。两个启动入口负责各自资源的创建与释放；WSS 先校验配置，再创建账号与应用、网络、HTTP host，配置管线后运行。停止时先由 hosted lifecycle join 网络，再停止 HTTP host，最后释放账号与证书。初始化失败立即停止，已创建资源按所有权释放。后续业务模块沿用功能目录，在应用组合入口显式注册，不通过反射扫描处理器。
+`Program` 不创建证书、账号或传输资源。两个启动入口负责各自资源的创建与释放；WSS 先校验证书与数据库表，再创建账号服务、应用、网络、HTTP host，配置管线后运行。停止时先由 hosted lifecycle join 网络，再停止 HTTP host，最后释放账号服务、连接池与证书。初始化失败立即停止，已创建资源按所有权释放。后续业务模块沿用功能目录，在应用组合入口显式注册，不通过反射扫描处理器。
+
+PostgreSQL 初始化由 Database/PostgresDatabase 统一管理；账号及其他仓库借用同一个 NpgsqlDataSource，SQL 和事务各自归业务仓库所有。连通性检查与业务表检查分别执行，网络底层不依赖数据库。数据库进程使用 `Tools/postgres.py` 的 start/stop/status 管理，create-db/init-schema 用于显式首次准备；详细 API、参数与资源所有权见 [服务端账号](../Docs/ServerAccounts.md)。
 
 ## 启动
 
-WSS 使用显式 `local-wss` profile；仅监听 localhost，不使用默认账号或密码。先配置环境变量：
+WSS 使用显式 `local-wss` profile，仅监听 localhost。先准备 PostgreSQL 并执行 [账号表脚本](Game.Server/Database/001_accounts.sql)，再配置环境变量；完整数据库准备、注册登录与持久化说明见 [服务端账号](../Docs/ServerAccounts.md)：
 
 | 变量 | 用途 |
 | --- | --- |
-| `GF_LOCAL_ACCOUNT` | 本地测试账号，最多 64 个 UTF-16 字符 |
-| `GF_LOCAL_PASSWORD` | 本地测试密码，最多 128 个 UTF-16 字符 |
+| `GF_DATABASE_CONNECTION` | Npgsql 连接字符串，包含数据库地址、库名与数据库访问凭据；不是玩家账号密码 |
 | `GF_LOCAL_CERTIFICATE` | 带私钥的 HTTPS `.pfx` 文件路径 |
 | `GF_LOCAL_CERTIFICATE_PASSWORD` | 可选 PFX 密码 |
 | `GF_LOCAL_PORT` | 可选端口，默认 7443 |
@@ -51,19 +59,19 @@ WSS 使用显式 `local-wss` profile；仅监听 localhost，不使用默认账�
 (cd DotNet && dotnet run --project Game.Server -- --profile local-wss)
 ```
 
-项目提供 `Game.Server/Properties/launchSettings.json`，包含 `local-wss` 与 `local-kcp-dtls` 两个本地启动配置；它们自动传入对应的 `--profile`，不包含账号、密码或证书。也可执行 `dotnet run --project DotNet/Game.Server --launch-profile local-wss`。在 Rider/Visual Studio 中选择相应的 launch profile，并在本机运行配置中填写上述 `GF_LOCAL_*` 环境变量。已存在的普通“.NET 项目”运行配置可能不会自动使用 launchSettings，此时需在程序参数中显式填写 `--profile local-wss`。只有参数、没有账号/密码/证书仍会拒绝启动；IDE 从桌面启动时也不一定继承终端中 export 的变量。
+项目提供 `Game.Server/Properties/launchSettings.json`，包含 `local-wss` 与 `local-kcp-dtls` 两个本地启动配置；它们自动传入对应的 `--profile`，不包含数据库凭据或证书。也可执行 `dotnet run --project DotNet/Game.Server --launch-profile local-wss`。在 Rider/Visual Studio 中选择相应的 launch profile，并在本机运行配置中填写上述 `GF_LOCAL_*` 环境变量。已存在的普通“.NET 项目”运行配置可能不会自动使用 launchSettings，此时需在程序参数中显式填写 `--profile local-wss`。只有参数、没有数据库连接/证书仍会拒绝启动；IDE 从桌面启动时也不一定继承终端中 export 的变量。
 
 直接运行 `bin/Debug/net10.0/Game.Server` 或发布后的可执行程序不会读取 launchSettings，必须自行传入 `--profile` 并配置环境变量。省略参数保持生产启动限制，不因 Debug 构建自动启用测试认证。
 
 入口为 `wss://localhost:7443/network`，可按配置修改端口。开发证书必须由开发者显式生成并在客户端信任，证书 SAN 应覆盖 localhost。程序不会安装证书、修改系统信任或忽略证书校验。启动前检查私钥及有效期；客户端仍执行正常域名、证书链和有效期校验。WebSocket 禁用应用压缩，不接收 query 或 Authorization header 中的凭据。
 
-未指定 profile、生产 profile、未配置认证或缺少 local 必填项时拒绝启动。另有显式 `local-kcp-dtls` 底层联调入口，见下节。这个 profile 是联调服务，不能作为生产账号系统；本地密码摘要只用于固定测试账号比对，不是生产密码存储方案。
+未指定 profile、生产 profile 或缺少本地数据库/证书配置时拒绝启动。PostgreSQL 认证已接入，生产监听地址、容量、部署与账号会话跨进程协调仍未配置；本地服务不自动变成生产部署。另有显式 `local-kcp-dtls` 底层联调入口，见下节。服务启动不再读取 GF_LOCAL_ACCOUNT/PASSWORD；玩家通过客户端 Register/Login RPC 提交凭据。
 
 ## 当前行为
 
-ClientHello → ServerHello 后还未登录。10 秒内只能发送 Login/ResumeLogin 或控制消息；首个 Hello 期限 5 秒。协议 hash 不符在提交账号凭据前 Reject。
+ClientHello → ServerHello 后还未登录。10 秒内只能发送 Register/Login/ResumeLogin 或控制消息；首个 Hello 期限 5 秒。协议 hash 不符在提交账号凭据前 Reject。
 
-实现 Login、ResumeLogin、Logout、Echo；所有业务路由使用生成的 `GameNetRoutes`。本地服务只配置一个账号（accountId=1），新 Login 撤销旧账号 epoch/大厅连接。Resume 原子消费并轮换 32 字节恢复凭据，保留账号会话 ID/epoch；仅替换大厅绑定。服务端仅保留恢复凭据 SHA-256 摘要。账号期限最多 24 小时，TTL 使用服务端单调时钟；恢复不会延长账号期限。
+实现 Register、Login、ResumeLogin、Logout、Echo；所有业务路由使用生成的 `GameNetRoutes`。Register 创建 PostgreSQL 账号但不登录，客户端随后发送 Login。账号名区分大小写，拒绝空白、首尾空白和控制字符，上限 64 个 UTF-16 字符；密码长度 8～128，不自动裁剪。数据库唯一约束保证并发注册只成功一次，重复返回 AccountAlreadyExists。密码使用随机16字节盐、PBKDF2-SHA256 600000次、32字节哈希，原文不保存。不同账号独立，新 Login 仅撤销同账号旧 epoch/大厅连接。Resume 原子消费并轮换 32 字节恢复凭据，保留账号会话 ID/epoch；仅替换大厅绑定。服务端仅保留恢复凭据 SHA-256 摘要。账号期限最多 24 小时，TTL 使用服务端单调时钟；恢复不会延长账号期限。
 
 Logout 先撤销账号及恢复凭据，再发送成功响应并关闭。登录失败统一返回 InvalidCredentials，再关闭。Echo 仅注册在本地服务中，delayMs 接受 0～5000；系统错误响应为空正文，客户端不能把本地超时/取消视为服务端未执行。
 
@@ -71,7 +79,7 @@ Logout 先撤销账号及恢复凭据，再发送成功响应并关闭。登录�
 
 每连接一个收循环、一个发循环和有界业务 owner 队列；账号提交在账号 gate 内串行，不持锁等待网络 IO。应用心跳每 5 秒且只有一个待确认 nonce，Ping 发送完成后 15 秒内必须收到匹配 Pong；控制包从 admission 起也受独立 15 秒发送期限约束，包含排队和 Send 未返回。watchdog 不等待 Ping 的慢发送，发送 owner 移交前再次检查控制期限。Hello/登录期限和心跳不依赖 Unity 帧。
 
-local 默认网络容量在 `GameFrame.Server/WssServerOptions.cs`，账号 TTL、登录期限和登录尝试限额单独位于 `Game.Server/Login/LocalAccountSettings.cs`：32 个连接、每 IP 4 个，其中未登录总计 16 个/每 IP 2 个；未登录每秒 5 包/16 KiB，账号与 IP 登录每秒 5 次。认证后每秒 128 包/128 KiB；可靠接收 128 条/2 MiB，业务发送 128 条/64 KiB，控制 64 条/16 KiB。缓冲按实际数组容量计账，包含在途发送、接收扩容的旧＋新峰值，释放前清零全部容量。全局 64 MiB、每连接 8 MiB。TLS/Kestrel 内部空间与内核缓冲不包含在可控制缓冲额度中。
+local 默认网络容量在 `GameFrame.Server/WssServerOptions.cs`，账号 TTL、登录期限和登录尝试限额单独位于 `Game.Server/Login/LoginOptions.cs`：32 个连接、每 IP 4 个，其中未登录总计 16 个/每 IP 2 个；未登录每秒 5 包/16 KiB，账号与 IP 登录每秒 5 次。认证后每秒 128 包/128 KiB；可靠接收 128 条/2 MiB，业务发送 128 条/64 KiB，控制 64 条/16 KiB。缓冲按实际数组容量计账，包含在途发送、接收扩容的旧＋新峰值，释放前清零全部容量。全局 64 MiB、每连接 8 MiB。TLS/Kestrel 内部空间与内核缓冲不包含在可控制缓冲额度中。
 
 WssServer 注册为 hosted lifecycle service，在所有 hosted StopAsync（包括 Kestrel）之前的 StoppingAsync 阶段停止准入、取消并 join 连接，随后 HTTP host 排空请求。应用会话退出后归还连接配额，再发布连接终态；重复关闭等待同一结果。
 
@@ -82,7 +90,7 @@ WssServer 注册为 hosted lifecycle service，在所有 hosted StopAsync（包�
 (cd Tools && dotnet test NetworkFramework.Tests)
 ```
 
-测试使用实际 Kestrel HTTPS 和 ClientWebSocket；测试进程只信任该次生成的精确临时证书，没有系统信任变更或生产证书豁免。包含认证、原子恢复/顶号/注销、恶意帧、Origin、分片及实际客户端核心的 Pump/超时/取消/关闭测试。它不代表 Unity IL2CPP 或真机 TLS 已通过。
+WssServerTests 同时运行确定性仓库与真实 PostgreSQL 两组；后者需要 GF_POSTGRES_TEST_CONNECTION，缺失时明确 skipped。PostgresAccountTests 验证持久化、并发唯一约束、SQL 参数、取消与错误传播；每次只创建并删除自己的随机 schema，不清空既有数据。CI 已配置 PostgreSQL service。测试使用实际 Kestrel HTTPS 和 ClientWebSocket；测试进程只信任该次生成的精确临时证书，没有系统信任变更或生产证书豁免。包含认证、原子恢复/顶号/注销、恶意帧、Origin、分片及实际客户端核心的 Pump/超时/取消/关闭测试。它不代表 Unity IL2CPP 或真机 TLS 已通过。
 
 另以内部可控 WebSocket/时钟测试 RPC 截止边界、迟到恶意 DTO、控制优先、慢发送控制期限、Pong 起算点和双方 watchdog；生产仍使用标准 ClientWebSocket/Kestrel 与 Stopwatch，不开放证书绕过或业务故障注入接口。
 

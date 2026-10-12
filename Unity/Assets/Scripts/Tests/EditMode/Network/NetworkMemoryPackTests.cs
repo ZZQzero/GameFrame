@@ -29,7 +29,7 @@ namespace GameFrame.Tests
         public void RouteFirstInitializationDoesNotCreateNullCatalogEntries()
         {
             Assert.AreEqual(1000u, GameNetRoutes.Login.Opcode);
-            Assert.AreEqual(14, GameNetProtocol.Catalog.RouteCount);
+            Assert.AreEqual(15, GameNetProtocol.Catalog.RouteCount);
             Assert.AreEqual(8192, GameNetProtocol.Catalog.MaxReliableBodyBytes);
             Assert.AreEqual(1118, GameNetProtocol.Catalog.MaxUnreliableBodyBytes);
             GameNetProtocol.Catalog.RequireRegistered(GameNetRoutes.Login);

@@ -16,6 +16,7 @@ enum ResultCode {
   InvalidWorldSession = 9;
   TooManyEntities = 10;
   InvalidInput = 11;
+  AccountAlreadyExists = 12;
 }
 
 message OperationResponse {

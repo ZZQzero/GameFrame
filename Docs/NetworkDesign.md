@@ -33,7 +33,7 @@
 | KCP | `Native/Kcp/third_party/kcp` 下已有 `ikcp.c`、`ikcp.h`、MIT LICENSE；已直接合入 #467 ACK 修复、分配失败处理及标准 offsetof 修正 | 公共目录维护唯一源码，保留迁移前源码字节及 GUID 记录；固定 ABI、UDP 集成及构建产物 |
 | KCP 版本 | 上游基线为 `b1a7a2101dcbb96017681a500d6b82bbe5a88766`，包含 `IKCPOPS`/`ikcp_setcc`；本地修正与当前 c/h hash 已锁定 | 锁定基线与本地源码 hash；不得直接按旧版 C# KCP 包的内部结构接入 |
 | 生命周期 | `GameRuntime` 已可选持有网络宿主；GameEntry 当前启动本地五子棋 | 保持离线默认，业务接入 GameNetworkSession |
-| 服务端 | `DotNet` 已拆为 Core、Server、Game.Protocol、Game.Server 四工程；WSS/KCP 共用强类型应用接口，local 账号与配置属于业务宿主 | 生产认证/世界应用接入，完整诊断和平台容量验收 |
+| 服务端 | `DotNet` 已拆为 Core、Server、Game.Protocol、Game.Server 四工程；WSS/KCP 共用强类型应用接口，PostgreSQL 注册登录与账号会话属于业务宿主 | 生产部署/跨进程会话/世界应用接入，完整诊断和平台容量验收 |
 
 MemoryPack 安装与当前验证边界见 [MemoryPack.md](MemoryPack.md)。启动、资源所有权与失败处理以 [Launch.md](Launch.md)、[Scope.md](Scope.md)、[ErrorContract.md](ErrorContract.md) 为基础；本文补充网络模块的固定策略。
 
@@ -114,7 +114,9 @@ DotNet/Game.Server/               唯一业务可执行入口、local 配置、�
 
 Game.Server 使用 Web SDK/net10.0，local 功能需显式 profile；生产未配置认证时拒绝启动。WssServer 通过 hosted lifecycle 的 StoppingAsync 阶段在 Kestrel 等 StopAsync 前 join 网络，不能仅依赖注册先后或 RunAsync 返回后的清理。不提前增加网关/账号/世界等可执行项目；第 14 节业务契约保留供后续实现。
 
-Game.Server 内按业务功能建目录：Login/ 集中账号、本地认证配置、登录/恢复/注销处理器和每连接登录状态。LobbyApplication 作为大厅组合入口显式注册模块与路由；Program 仅校验 profile 并选择 LocalWssService/LocalKcpService。启动入口负责配置校验、资源创建、运行及关闭所有权，不增加反射注册或额外生命周期管理器。配置或初始化失败停止后续步骤，已创建资源按原所有权释放。
+Game.Server 内按业务功能建目录：Login/ 集中账号、PostgreSQL 仓库、注册/登录/恢复/注销处理器和每连接登录状态。LobbyApplication 作为大厅组合入口显式注册模块与路由；Program 仅校验 profile 并选择 LocalWssService/LocalKcpService。启动入口负责配置校验、资源创建、运行及关闭所有权，不增加反射注册或额外生命周期管理器。配置或初始化失败停止后续步骤，已创建资源按原所有权释放。
+
+账号主数据库已选定 PostgreSQL，通过应用层 Npgsql 仓库接入。服务启动校验证书、数据库连接与账号表，不接收或预置玩家账号密码；客户端通过 WSS Register/Login RPC 注册、登录。LoginOptions 只保存策略与容量，AccountService 负责密码校验与有界认证并发，PostgresAccountRepository 负责参数化持久化，AccountSessions 负责单进程的账号会话与绑定。注册不自动登录；持久化账号可在重启后登录，内存 Resume 凭据不跨重启恢复。具体初始化、密码格式、单进程边界与验证见 [ServerAccounts.md](ServerAccounts.md)。
 
 Git 保留 DotNet 源码、解决方案、项目和依赖锁文件；忽略其 bin/obj、artifacts、TestResults、日志及 IDE 本地配置。Tools 下的 .NET 工程采用相同过滤，公共 Native/Kcp/build 中维护的构建脚本与已安装插件产物继续保留。
 
@@ -281,7 +283,7 @@ Reject reason：1=协议不符、2=授权无效、3=人数/资源限制。Close 
 
 ServerHello 的 hash 必须完全相等；双方限额取客户端提议与服务端策略的较小值，且不得超过 V1 硬上限，可靠限额至少 2048。不可靠只允许双方都支持时启用，非 0 限额至少 256。服务端心跳间隔第一版必须为 5000ms。sessionId 是当前传输会话的诊断标识，不是账号凭据；与第 13 节的 accountSessionId 分开。
 
-Hello 完成前仅允许当前握手所需控制包。Hello 完成后，WSS 进入未登录访问阶段，只允许 Login/ResumeLogin RPC 与 Ping/Pong/Close；KCP 已验证 grant，但仍须 EnterWorld/RestoreWorld 后才开放世界指令。重复 Hello、协商结果越界或绕过登录/入场阶段的消息均终止当前连接；具体状态与返回行为见第 13 节。
+Hello 完成前仅允许当前握手所需控制包。Hello 完成后，WSS 进入未登录访问阶段，只允许 Register/Login/ResumeLogin RPC 与 Ping/Pong/Close；KCP 已验证 grant，但仍须 EnterWorld/RestoreWorld 后才开放世界指令。重复 Hello、协商结果越界或绕过登录/入场阶段的消息均终止当前连接；具体状态与返回行为见第 13 节。
 
 客户端还须检查协商可靠上限足够容纳 catalog 中所有可靠路由声明的最大 Body+32；启用不可靠时检查其所有不可靠路由。不能接受一个无法兑现已登记路由上限的连接。WSS 允许目录包含不可靠路由，但对应能力不可用，业务不能调用这些路由。服务端按同一目录与协商限额校验输出。
 
@@ -636,7 +638,7 @@ sequenceDiagram
 ```
 
 1. 从可信启动/热更配置读取大厅 WSS 入口，建立 TLS 连接并完成无 ticket 的协议 Hello。协议不符在发送登录凭据前拒绝。
-2. Hotfix 使用 Login RPC 提交账号凭据，或显式选择 ResumeLogin RPC 提交有效恢复凭据；服务端验证后将当前 WSS connection 绑定到账号会话。所有敏感字段只在 WSS 正文中出现。
+2. 新账号先使用 Register RPC 创建 PostgreSQL 账号，注册成功仍未登录。Hotfix 使用 Login RPC 提交账号凭据，或显式选择 ResumeLogin RPC 提交有效恢复凭据；服务端验证后将当前 WSS connection 绑定到账号会话。所有敏感字段只在 WSS 正文中出现。
 3. 登录成功才开放大厅业务、选角色/世界与 RequestWorldGrant。客户端不需要为每条大厅 RPC 再携带账号 token，服务端根据连接绑定的 principal/authEpoch 校验。
 4. 世界 transport 选择 WSS 时直接复用当前已登录连接，经网关路由世界消息；不申请 KCP grant，不建立第二条 WSS，不加载 KCP native 插件。
 5. 选择 KCP 时，已登录大厅向目标网关注册新 grant，注册成功后通过 RPC 返回端点与密钥；客户端先完成 DTLS，再用 ClientHello ticket 绑定账号授权。
@@ -648,7 +650,7 @@ Login 成功响应至少包含 accountId、accountSessionId（16 字节）、aut
 
 accountSession 默认最长有效期 24 小时；resumeToken 有效期不超过该会话，到期返回明确认证失败。resumeToken 是 CSPRNG 生成的不透明凭据，服务端保存摘要，客户端只保存在账号会话内存中。ResumeLogin 成功原子消费旧凭据并返回新凭据；响应丢失时不自动复用旧 token 或退回密码登录，由调用者显式重新登录。首次登录与恢复都执行服务端账号/封禁/顶号策略，不通过客户端声明恢复旧权限。
 
-ResumeLogin 只替换大厅连接绑定并轮换恢复凭据，保持仍有效的 accountSessionId/authEpoch，不撤销同一账号会话的正常 KCP 世界连接。首次 Login 创建新账号会话；本版单账号只允许一个活跃账号会话，新 Login 按顶号策略撤销旧 epoch，而不是模拟一次 ResumeLogin。
+ResumeLogin 只替换大厅连接绑定并轮换恢复凭据，保持仍有效的 accountSessionId/authEpoch，不撤销同一账号会话的正常 KCP 世界连接。首次 Login 创建新账号会话；本版每个账号只允许一个活跃账号会话，多个账号独立，新 Login 按顶号策略撤销旧 epoch，而不是模拟一次 ResumeLogin。
 
 TLS 信任使用平台正常证书验证与可信域名配置；不能连接任意外部 WSS 再发送凭据。WSS 返回的 UDP 端点仍须满足环境允许的域名/IP/端口策略，不能将授权 RPC 变成任意地址转发接口。
 
@@ -659,6 +661,7 @@ TLS 信任使用平台正常证书验证与可信域名配置；不能连接任�
 | Opcode/路由 | 允许阶段/连接 | 主要结果与限制 |
 | --- | --- | --- |
 | 1000 Login | 未登录 WSS | 凭据验证；Request Body≤2048 字节；返回登录业务结果 |
+| 1004 Register | 未登录 WSS | 创建 PostgreSQL 账号；Request Body≤2048 字节；成功仍未登录，不延长登录期限 |
 | 1001 ResumeLogin | 未登录 WSS | accountSessionId + resumeToken；校验并轮换恢复凭据 |
 | 1002 RequestWorldGrant | 已登录 WSS | 指定角色/世界、grantRequestId、协议 hash；返回单连接授权 |
 | 1003 Logout | 已登录 WSS | 撤销账号会话及其恢复凭据、未消费 grant、已绑定世界连接 |
@@ -666,9 +669,9 @@ TLS 信任使用平台正常证书验证与可信域名配置；不能连接任�
 | 1101 RestoreWorld | 已登录 WSS / 已绑定 grant 的 KCP | 验证世界会话与 lastEventVersion，返回完整基线快照，再开放后续连续事件 |
 | 1102 LeaveWorld | 已进入世界的 WSS / KCP | 停止该世界订阅与指令准入，返回确认；不撤销账号会话 |
 
-其余路由的阶段策略在 .NET 大厅/世界服务中通过生成的类型化路由登记。Runtime 只维护传输 Connected；Hotfix 检查自身状态以避免误调用，服务端仍必须独立执行权限校验。Login/ResumeLogin 不允许从 KCP 执行，KCP 不能通过猜测账号 ID 跳过 WSS 登录。
+其余路由的阶段策略在 .NET 大厅/世界服务中通过生成的类型化路由登记。Runtime 只维护传输 Connected；Hotfix 检查自身状态以避免误调用，服务端仍必须独立执行权限校验。Register/Login/ResumeLogin 不允许从 KCP 执行，KCP 不能通过猜测账号 ID 跳过 WSS 登录。
 
-未登录 WSS 在 ServerHello 后只允许 Login/ResumeLogin 和 Ping/Pong/Close；同一连接最多一个登录请求在执行，不允许并行尝试多组凭据。默认登录等待 10 秒，从 ServerHello 移交传输起计时，Ping 不续期。未登录输入 Body 上限 2048 字节、总消息 5 条/秒、16 KiB/秒，超过即关闭；在反序列化之前按帧头与阶段拒绝。登录成功后才切换到正常消息与队列额度。
+未登录 WSS 在 ServerHello 后只允许 Register/Login/ResumeLogin 和 Ping/Pong/Close；注册不自动登录且不延长原登录期限，同一连接最多一个认证请求在执行，不允许并行尝试多组凭据。默认登录等待 10 秒，从 ServerHello 移交传输起计时，Ping 不续期。未登录输入 Body 上限 2048 字节、总消息 5 条/秒、16 KiB/秒，超过即关闭；在反序列化之前按帧头与阶段拒绝。登录成功后才切换到正常消息与队列额度。
 
 已识别且合法的越阶段 Request 可尽力返回 `StatusCode=2`、空 Body，随后 Close reason=5；Notify/非法帧直接关闭，不先解析敏感业务 DTO。凭据无效以 Login/ResumeLogin 响应 DTO 的统一拒绝结果表示，随后关闭当前登录尝试；内部故障仍按 RPC 系统错误传播，不伪装成凭据无效。登录等待超时使用 Close reason=6。返回失败响应不保证客户端一定收到，客户端仍需处理断线与未知结果。
 
@@ -1019,7 +1022,7 @@ Unity 测试按现有 `GameFrame.Tests.EditMode`/PlayMode 边界组织；若直�
 | 第一批发布平台 | Windows/macOS/Android/iOS；用户确认第一版不实现 WebGL WSS | WebGL WSS 延后，不作为第一版完成条件 |
 | UDP 安全库 | mbedTLS 4.2.0 stable + TF-PSA-Crypto 1.2.0，锁 commit 与 SHA | 影响安全 ABI/构建，不改变应用帧 |
 | 业务峰值与最低设备 | 待产品给定；以第 14 节示例作起算 | 决定 AOI、频率、分配和服务端容量门槛 |
-| 登录凭据与域名 | 已确认第一版本地联调使用账号＋密码，只在显式 local profile 启用；生产未配置认证时拒绝启动。生产账号校验、WSS/UDP 域名/端口和证书仍待服务端确定 | 决定 Login DTO、环境配置与生产联调；HTTPS 资源域名单独配置 |
+| 登录凭据与域名 | 已选定 PostgreSQL，WSS Register/Login 由客户端提交账号＋密码，服务器启动只读取数据库/证书配置。当前仅 local profile，生产部署/跨进程会话及 WSS/UDP 域名、端口和证书仍待确定 | 决定 Login DTO、环境配置与生产联调；HTTPS 资源域名单独配置 |
 
 ## 21. 参考资料与本次交付边界
 

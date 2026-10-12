@@ -23,19 +23,38 @@ using NUnit.Framework;
 namespace GameFrame.Tests
 {
 
-    [TestFixture]
+    [TestFixture(false)]
+    [TestFixture(true)]
     public sealed class WssServerTests
     {
+        private readonly bool usePostgres;
+        private PostgresTestDatabase? database;
         private WebApplication app = null!;
         private WssServer server = null!;
-        private LocalAccountSettings settings = null!;
+        private LoginOptions settings = null!;
         private AccountSessions accounts = null!;
+        private AccountService service = null!;
+        private TestAccountRepository repository = null!;
         private X509Certificate2 certificate = null!;
         private Uri endpoint = null!;
         private readonly FrameMemoryBudget memory = new FrameMemoryBudget(1024 * 1024);
         private readonly List<ConnectionContext> clients = new List<ConnectionContext>();
         private ulong correlation;
         private CancellationTokenSource timeout = null!;
+
+        public WssServerTests(bool usePostgres)
+        {
+            this.usePostgres = usePostgres;
+        }
+
+        [OneTimeSetUp]
+        public void RequireDatabase()
+        {
+            if (usePostgres && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GF_POSTGRES_TEST_CONNECTION")))
+            {
+                Assert.Ignore("PostgreSQL WSS integration requires GF_POSTGRES_TEST_CONNECTION.");
+            }
+        }
 
         [SetUp]
         public async Task Start()
@@ -49,12 +68,21 @@ namespace GameFrame.Tests
             san.AddIpAddress(IPAddress.Loopback);
             request.CertificateExtensions.Add(san.Build());
             certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
-            settings = new LocalAccountSettings("local-test", "local-secret")
+            settings = new LoginOptions()
             {
-                LoginTimeout = TimeSpan.FromMilliseconds(500)
+                LoginTimeout = TimeSpan.FromSeconds(2)
             };
+            repository = new TestAccountRepository();
+            if (usePostgres)
+            {
+                database = await PostgresTestDatabase.CreateAsync();
+            }
+
+            IAccountRepository storage = database == null ? repository : new PostgresAccountRepository(database.Database);
+            service = new AccountService(storage);
+            await service.RegisterAsync("local-test", "local-secret", timeout.Token);
             accounts = new AccountSessions(settings);
-            server = new WssServer(new LobbyApplication(accounts, settings).Application, new WssServerOptions { HelloTimeout = TimeSpan.FromMilliseconds(500) });
+            server = new WssServer(new LobbyApplication(accounts, service, settings).Application, new WssServerOptions { HelloTimeout = TimeSpan.FromMilliseconds(500) });
             WebApplicationBuilder builder = WebApplication.CreateBuilder();
             builder.Logging.ClearProviders();
             builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0, listen => listen.UseHttps(certificate)));
@@ -85,7 +113,13 @@ namespace GameFrame.Tests
             await app.DisposeAsync();
             certificate.Dispose();
             accounts.Dispose();
-            settings.Dispose();
+            service.Dispose();
+            repository.Dispose();
+            if (database != null)
+            {
+                await database.DisposeAsync();
+                database = null;
+            }
             timeout.Dispose();
             Assert.That(server.OwnedBytes, Is.Zero, "All in-flight/queued buffers must be released.");
             Assert.That(memory.OwnedBytes, Is.Zero);
@@ -170,6 +204,36 @@ namespace GameFrame.Tests
 
         private Task<LoginResponse> Login(ClientWebSocket socket) => Rpc(socket, GameNetRoutes.Login,
             new LoginRequest { Account = "local-test", Password = "local-secret" });
+
+        [Test]
+        public async Task RegisterThenLoginOnTheSameConnectionWithoutServerConfiguredPlayerCredentials()
+        {
+            using ClientWebSocket socket = await Connect();
+            await Hello(socket);
+            OperationResponse registered = await Rpc(socket, GameNetRoutes.Register,
+                new RegisterRequest { Account = "new-player", Password = "new-password" });
+            Assert.That(registered.ResultCode, Is.EqualTo(ResultCode.Success));
+            OperationResponse duplicate = await Rpc(socket, GameNetRoutes.Register,
+                new RegisterRequest { Account = "new-player", Password = "different-password" });
+            Assert.That(duplicate.ResultCode, Is.EqualTo(ResultCode.AccountAlreadyExists));
+            LoginResponse login = await Rpc(socket, GameNetRoutes.Login,
+                new LoginRequest { Account = "new-player", Password = "new-password" });
+            Assert.That(login.ResultCode, Is.EqualTo(ResultCode.Success));
+            Assert.That(login.AccountId, Is.GreaterThan(1));
+            Assert.That((await Rpc(socket, GameNetRoutes.Echo, new EchoRequest { Text = "registered" })).Text, Is.EqualTo("registered"));
+        }
+
+        [Test]
+        public async Task RegisterDoesNotAuthorizeBusinessRequests()
+        {
+            using ClientWebSocket socket = await Connect();
+            await Hello(socket);
+            Assert.That((await Rpc(socket, GameNetRoutes.Register,
+                new RegisterRequest { Account = "unbound", Password = "new-password" })).ResultCode, Is.EqualTo(ResultCode.Success));
+            await Send(socket, GameNetRoutes.Echo, new EchoRequest());
+            using OwnedFrame denied = (await Receive(socket))!;
+            Assert.That(denied.Header.StatusCode, Is.EqualTo(2));
+        }
 
         [Test]
         public async Task LoginEchoLogoutRevokesResumeAndReleasesMemory()

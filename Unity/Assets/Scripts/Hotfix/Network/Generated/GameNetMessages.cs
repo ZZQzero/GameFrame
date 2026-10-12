@@ -20,6 +20,7 @@ namespace Game.Hotfix.Network.Protocol
         InvalidWorldSession = 9,
         TooManyEntities = 10,
         InvalidInput = 11,
+        AccountAlreadyExists = 12,
     }
 
     [MemoryPackable(SerializeLayout.Explicit)]
@@ -176,6 +177,19 @@ namespace Game.Hotfix.Network.Protocol
     {
         [MemoryPackOrder(0)]
         public global::Game.Hotfix.Network.Protocol.ResultCode ResultCode { get; set; }
+
+    }
+
+    [MemoryPackable(SerializeLayout.Explicit)]
+    public sealed partial class RegisterRequest
+    {
+        [NetStringLimit(64, 256)]
+        [MemoryPackOrder(0)]
+        public string Account { get; set; } = string.Empty;
+
+        [NetStringLimit(128, 512)]
+        [MemoryPackOrder(1)]
+        public string Password { get; set; } = string.Empty;
 
     }
 

@@ -86,6 +86,7 @@ namespace Game.Server
                 return new EchoResponse { Text = request.Text };
             });
             application.Reject(GameNetRoutes.Login);
+            application.Reject(GameNetRoutes.Register);
             application.Reject(GameNetRoutes.ResumeLogin);
             application.Reject(GameNetRoutes.Logout);
             application.Reject(GameNetRoutes.RequestWorldGrant);

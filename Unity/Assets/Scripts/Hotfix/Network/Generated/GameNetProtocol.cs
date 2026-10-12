@@ -13,6 +13,7 @@ namespace Game.Hotfix.Network.Generated
         public static readonly NetRpc<ResumeLoginRequest, LoginResponse> ResumeLogin = new NetRpc<ResumeLoginRequest, LoginResponse>(1001u, 128, 256, GameNetProtocol.CodecResumeLoginRequest, GameNetProtocol.CodecLoginResponse);
         public static readonly NetRpc<RequestWorldGrantRequest, WorldGrantResponse> RequestWorldGrant = new NetRpc<RequestWorldGrantRequest, WorldGrantResponse>(1002u, 128, 2048, GameNetProtocol.CodecRequestWorldGrantRequest, GameNetProtocol.CodecWorldGrantResponse);
         public static readonly NetRpc<LogoutRequest, OperationResponse> Logout = new NetRpc<LogoutRequest, OperationResponse>(1003u, 64, 64, GameNetProtocol.CodecLogoutRequest, GameNetProtocol.CodecOperationResponse);
+        public static readonly NetRpc<RegisterRequest, OperationResponse> Register = new NetRpc<RegisterRequest, OperationResponse>(1004u, 2048, 64, GameNetProtocol.CodecRegisterRequest, GameNetProtocol.CodecOperationResponse);
         public static readonly NetRpc<EnterWorldRequest, WorldResponse> EnterWorld = new NetRpc<EnterWorldRequest, WorldResponse>(1100u, 64, 8192, GameNetProtocol.CodecEnterWorldRequest, GameNetProtocol.CodecWorldResponse);
         public static readonly NetRpc<RestoreWorldRequest, WorldResponse> RestoreWorld = new NetRpc<RestoreWorldRequest, WorldResponse>(1101u, 128, 8192, GameNetProtocol.CodecRestoreWorldRequest, GameNetProtocol.CodecWorldResponse);
         public static readonly NetRpc<LeaveWorldRequest, OperationResponse> LeaveWorld = new NetRpc<LeaveWorldRequest, OperationResponse>(1102u, 64, 64, GameNetProtocol.CodecLeaveWorldRequest, GameNetProtocol.CodecOperationResponse);
@@ -87,6 +88,12 @@ namespace Game.Hotfix.Network.Generated
             value => { int nodes = 0; CheckOperationResponse(value, false, 1, ref nodes); },
             bytes => { var reader = new NetWireReader(bytes); ReadOperationResponse(ref reader, false, 1); reader.Complete(); });
 
+        internal static readonly NetMessageCodec<RegisterRequest> CodecRegisterRequest = new NetMessageCodec<RegisterRequest>(
+            (writer, value) => MemoryPackSerializer.Serialize(writer, value, MemoryPackSerializerOptions.Utf8),
+            bytes => MemoryPackSerializer.Deserialize<RegisterRequest>(bytes, MemoryPackSerializerOptions.Utf8)!,
+            value => { int nodes = 0; CheckRegisterRequest(value, false, 1, ref nodes); },
+            bytes => { var reader = new NetWireReader(bytes); ReadRegisterRequest(ref reader, false, 1); reader.Complete(); });
+
         internal static readonly NetMessageCodec<RequestWorldGrantRequest> CodecRequestWorldGrantRequest = new NetMessageCodec<RequestWorldGrantRequest>(
             (writer, value) => MemoryPackSerializer.Serialize(writer, value, MemoryPackSerializerOptions.Utf8),
             bytes => MemoryPackSerializer.Deserialize<RequestWorldGrantRequest>(bytes, MemoryPackSerializerOptions.Utf8)!,
@@ -139,11 +146,12 @@ namespace Game.Hotfix.Network.Generated
         private static class CatalogHolder
         {
             internal static readonly NetProtocolCatalog Value = new NetProtocolCatalog(
-                new byte[] { 0x4e, 0xe5, 0x65, 0x3c, 0x59, 0x28, 0x87, 0x27, 0xdb, 0xd3, 0x8d, 0xd3, 0x7a, 0xce, 0x44, 0xbc, 0x31, 0x4e, 0x57, 0x4e, 0xed, 0x21, 0xdb, 0xf0, 0x95, 0x5c, 0xb9, 0xa0, 0x57, 0x72, 0x7e, 0x4d },
+                new byte[] { 0x3c, 0xa9, 0x89, 0x05, 0x4b, 0xfa, 0x81, 0x95, 0x25, 0x76, 0xb6, 0xee, 0xa9, 0x47, 0xa4, 0x1b, 0x56, 0x34, 0x93, 0x95, 0x0f, 0xbf, 0x47, 0x7a, 0x64, 0x92, 0x33, 0xaf, 0x4e, 0xf7, 0x1d, 0xe7 },
                 GameNetRoutes.Login,
                 GameNetRoutes.ResumeLogin,
                 GameNetRoutes.RequestWorldGrant,
                 GameNetRoutes.Logout,
+                GameNetRoutes.Register,
                 GameNetRoutes.EnterWorld,
                 GameNetRoutes.RestoreWorld,
                 GameNetRoutes.LeaveWorld,
@@ -156,7 +164,7 @@ namespace Game.Hotfix.Network.Generated
                 GameNetRoutes.Echo);
         }
 
-        private static bool IsEnumResultCode(int value) => value == 0 || value == 1 || value == 2 || value == 3 || value == 4 || value == 5 || value == 6 || value == 7 || value == 8 || value == 9 || value == 10 || value == 11;
+        private static bool IsEnumResultCode(int value) => value == 0 || value == 1 || value == 2 || value == 3 || value == 4 || value == 5 || value == 6 || value == 7 || value == 8 || value == 9 || value == 10 || value == 11 || value == 12;
         private static void ReadEnumResultCode(ref NetWireReader reader)
         {
             if (!IsEnumResultCode(reader.Int32()))
@@ -509,6 +517,34 @@ namespace Game.Hotfix.Network.Generated
                 throw new ArgumentException("Object budget exceeded.");
             }
             CheckEnumResultCode(value.@ResultCode);
+        }
+
+        private static void ReadRegisterRequest(ref NetWireReader reader, bool nullable, int depth)
+        {
+            if (!reader.Object(2, nullable, depth))
+            {
+                return;
+            }
+            reader.String(64, 256, false);
+            reader.String(128, 512, false);
+        }
+
+        private static void CheckRegisterRequest(RegisterRequest? value, bool nullable, int depth, ref int nodes)
+        {
+            if (value == null)
+            {
+                if (!nullable)
+                {
+                    throw new ArgumentException("Nonnullable DTO is null.");
+                }
+                return;
+            }
+            if (depth > NetContractLimits.MaxObjectDepth || ++nodes > NetContractLimits.MaxDtoNodes)
+            {
+                throw new ArgumentException("Object budget exceeded.");
+            }
+            NetWireReader.ValidateString(value.@Account, 64, 256, false);
+            NetWireReader.ValidateString(value.@Password, 128, 512, false);
         }
 
         private static void ReadRequestWorldGrantRequest(ref NetWireReader reader, bool nullable, int depth)

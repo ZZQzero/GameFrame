@@ -2,7 +2,7 @@
 
 审查日期：2026-10-12。拆分前结论：代码可以完成本地 WSS 登录和 KCP/DTLS 联调，但 `DotNet` 仍是框架与联调应用混合的单一程序集。通用服务端框架尚未形成可独立引用的边界。优先调整职责、公开接口和生命周期，再考虑吞吐优化。
 
-第 1～6 节记录拆分前的全量审查与证据；链接已指向迁移后的维护路径，不表示历史问题仍存在。按用户授权已实施四工程分层，现行 API 见 [服务端框架](../DotNet/GameFrame.Server/README.md)，完成项与当前验证见文末第 8 节。世界业务与 WebGL WSS 继续延后。
+第 1～6 节记录拆分前的全量审查与证据；链接已指向迁移后的维护路径，不表示历史问题仍存在。按用户授权已实施四工程分层，原固定账号 LocalAccountSettings 已由第 10 节的 LoginOptions/AccountService/PostgreSQL 仓库替代；历史源码链接指向当前维护文件。现行 API 见 [服务端框架](../DotNet/GameFrame.Server/README.md)，完成项与当前验证见文末第 8 节。世界业务与 WebGL WSS 继续延后。
 
 ## 1. 覆盖范围与调用关系
 
@@ -39,7 +39,7 @@ Protocol/*.proto → NetworkProtocol 工具 → MemoryPack DTO/codec/catalog
 
 [ServerConnection.cs](../DotNet/GameFrame.Server/ServerConnection.cs) 持有 `AccountSessions`，直接使用 `GameNetProtocol` 和生成的 Login/Resume/Logout/Echo/RequestWorldGrant 路由；`DispatchAsync` 同时处理编解码、账号提交、凭据清理、游戏结果码和传输关闭。接收阶段及心跳也直接检查账号绑定。新增应用协议需要修改通用连接类。
 
-[LocalWssService.cs](../DotNet/GameFrame.Server/WssServer.cs) 自行创建账号服务，IP 表混合连接容量、未认证数量与登录尝试额度；网络时钟通过 `AccountSessions.Now` 获取。[ServerSettings.cs](../DotNet/Game.Server/Login/LocalAccountSettings.cs) 的构造必须提供本地账号密码，同时承载队列、证书入口所用期限、账号 TTL 和登录策略。
+[LocalWssService.cs](../DotNet/GameFrame.Server/WssServer.cs) 自行创建账号服务，IP 表混合连接容量、未认证数量与登录尝试额度；网络时钟通过 `AccountSessions.Now` 获取。[ServerSettings.cs](../DotNet/Game.Server/Login/LoginOptions.cs) 的构造必须提供本地账号密码，同时承载队列、证书入口所用期限、账号 TTL 和登录策略。
 
 建议：传输连接只持有协议目录、网络参数和应用连接入口；Login/Resume、绑定/epoch、账号 TTL、阶段权限、顶号/注销及敏感 DTO 清理归应用。保留头部预检、未认证限额和反序列化前拒绝能力，通过显式应用策略提供，不删除这些约束。时钟直接复用现有 `NetworkClock`。
 
@@ -168,7 +168,7 @@ KCP 的 64 连接/16 握手/256 grant、native 256MiB 与多项队列/来源限�
 - [x] [DotNet/Game.Server/LocalKcpService.cs](../DotNet/Game.Server/LocalKcpService.cs)
 - [x] [DotNet/GameFrame.Server/WssServer.cs](../DotNet/GameFrame.Server/WssServer.cs)
 - [x] [DotNet/GameFrame.Server/ServerConnection.cs](../DotNet/GameFrame.Server/ServerConnection.cs)
-- [x] [DotNet/Game.Server/Login/LocalAccountSettings.cs](../DotNet/Game.Server/Login/LocalAccountSettings.cs)
+- [x] [DotNet/Game.Server/Login/LoginOptions.cs](../DotNet/Game.Server/Login/LoginOptions.cs)
 - [x] [DotNet/Game.Server/Program.cs](../DotNet/Game.Server/Program.cs)
 - [x] [DotNet/README.md](../DotNet/README.md)
 - [x] [DotNet/global.json](../DotNet/global.json)
@@ -333,7 +333,7 @@ Protocol/*.proto → 生成 C# → Unity Game.Hotfix 与 .NET Game.Protocol 同�
 - [x] [DotNet/Game.Server/Login/LoginSession.cs](../DotNet/Game.Server/Login/LoginSession.cs)
 - [x] [DotNet/Game.Server/LocalEnvironment.cs](../DotNet/Game.Server/LocalEnvironment.cs)
 - [x] [DotNet/Game.Server/LocalWssService.cs](../DotNet/Game.Server/LocalWssService.cs)
-- [x] [DotNet/Game.Server/Login/LocalAccountSettings.cs](../DotNet/Game.Server/Login/LocalAccountSettings.cs)
+- [x] [DotNet/Game.Server/Login/LoginOptions.cs](../DotNet/Game.Server/Login/LoginOptions.cs)
 - [x] [DotNet/Game.Server/LocalKcpService.cs](../DotNet/Game.Server/LocalKcpService.cs)
 - [x] [DotNet/Game.Server/Program.cs](../DotNet/Game.Server/Program.cs)
 - [x] [DotNet/Game.Server/packages.lock.json](../DotNet/Game.Server/packages.lock.json)
@@ -375,3 +375,236 @@ Program → LocalKcpService → KcpListenerHost → 公共 native 库
 新增验证证据：四工程 Release build 0 警告、0 错误；NetworkServer.Tests 61/61，0 跳过，使用已安装 macOS 原生库完成 WSS/DTLS 集成。6 组真实进程参数/缺失配置探针均拒绝错误配置。实际 local-wss 入口使用临时 localhost SAN 证书，正常 TLS 验证及 WebSocket 升级后，在连接等待 Hello 时 Ctrl+C，停机约 23ms、退出码 0。Release 临时发布经 install.py 安装已有匹配库，无自定义 native resolver 的 local-kcp-dtls 入口注册临时 grant、启动 listener，Ctrl+C 约 11ms、退出码 0。停机耗时仅为本机单次探针证据，不作为性能保证。
 
 临时证书、凭据与发布目录均清理，未修改系统证书信任。本次只调整 .NET 应用，不重复执行 Unity、原生构建、Windows/Linux/移动设备或 IL2CPP 验证；这些边界仍见第 8 节。
+
+
+## 10. PostgreSQL 账号接入与启动流程调整（2026-10-12）
+
+原固定测试账号要求开发者在启动阶段配置玩家凭据，只支持一个账号。局部将环境变量改成默认值仍不能满足客户端正常注册登录，也会把测试身份混入正式流程；本次调整为证书/数据库初始化与玩家请求分离。账号数据库选择PostgreSQL，应用AccountService只依赖IAccountRepository；PostgresAccountRepository拥有参数化数据访问，网络Core/Server没有数据库依赖。LocalAccountSettings删除，LoginOptions只保留策略。
+
+审查/核对范围为当前Game.Server全部应用实现、接口、工程/依赖锁和运行配置，账号表SQL、local compose，注册/结果码Proto与双端生成调用边界；相关WSS/Heartbeat/KCP应用注册、数据库测试、协议目录/向量测试与CI配置逐项核对。重点核对无玩家配置启动、注册未登录、登录前拒绝、异步数据库/密码计算、取消后的会话提交、每账号顶号与恢复、旧epoch异步结果、Logout/Detach和网络停止后释放账号/连接池。本次不是重新审计第三方数据库/密码库或复审全部native源码；第7～8节框架完整审查记录继续保留。
+
+当前链为 Program→LocalWssService→数据库/证书校验→LobbyApplication→LoginHandlers→AccountService→IAccountRepository/PostgreSQL；认证结果回到AccountSessions在锁内提交，锁外关闭旧绑定。注册增加生成路由1004，成功不提升权限或延长期限。账号持久化、不同账号会话独立，单进程内存会话最多1024；服务重启需要显式重新登录，多实例仲裁尚未实施。密码PBKDF2-SHA256600000次、随机盐和固定时间比较；认证最多4个在途，不使用无界排队或运行时内存回退。
+
+源码核对未发现此范围内未完成的接线或受阻项；生产hosting/容量、跨进程会话、密码找回/封禁/第三方登录以及世界授权仍是明确未实施范围。实际验证分别为：Release build0警告错误；协议181/181、框架10/10、服务端94/94（含真实PostgreSQL/WSS/macOS DTLS，0跳过）；实际入口Register/Login/Echo、重启持久账号与递增epoch、Ctrl+C退出0；Unity Editor错误0、相关EditMode146/146、StandaloneOSX Player脚本43程序集。Docker/CI远程运行、其他平台和IL2CPP未执行。源码核对与这些执行证据不能相互替代。
+
+新增/替换维护文件：
+
+- [x] [LoginOptions.cs](../DotNet/Game.Server/Login/LoginOptions.cs)
+- [x] [IAccountRepository.cs](../DotNet/Game.Server/Login/IAccountRepository.cs)
+- [x] [AccountService.cs](../DotNet/Game.Server/Login/AccountService.cs)
+- [x] [PasswordHasher.cs](../DotNet/Game.Server/Login/PasswordHasher.cs)
+- [x] [PostgresAccountRepository.cs](../DotNet/Game.Server/Login/PostgresAccountRepository.cs)
+- [x] [001_accounts.sql](../DotNet/Game.Server/Database/001_accounts.sql)
+- [x] [compose.yaml](../DotNet/compose.yaml)
+- [x] [PostgresAccountTests.cs](../Tools/NetworkServer.Tests/PostgresAccountTests.cs)
+- [x] [PostgresTestDatabase.cs](../Tools/NetworkServer.Tests/PostgresTestDatabase.cs)
+- [x] [TestAccountRepository.cs](../Tools/NetworkServer.Tests/TestAccountRepository.cs)
+- [x] [ServerAccounts.md](ServerAccounts.md)
+
+
+## 11. 当前服务端全量审查：启动与账号生命周期（2026-10-12）
+
+本次用户要求检查服务端是否还保留“启动即验证玩家信息/其他玩家数据”等旧联调逻辑，并检查不合理流程。本节记录当前源码状态；前面的实施与通过记录不能证明本次发现的边界已修复。本轮没有修改服务端、协议或原生运行时代码，只补充本审查记录。
+
+### 范围、调用链与启动结论
+
+本轮完整阅读 143 个仓库文件，阅读时共 26130 行；完整清单见下文。覆盖 DotNet 四工程全部维护代码、接口、配置、依赖锁与说明，直接编入服务器或回归工程的共享网络代码及调用方、账号 SQL/数据库工具、全部 .NET 网络/协议/框架测试及其链接的 Unity 协议测试、proto/生成代码/生成工具、公共 native 与仓库内 KCP 全文、构建安装及 CI 脚本和相关设计文档。没有未读或受阻的范围内仓库文件。
+
+上游 Npgsql、ASP.NET Core、MemoryPack、Roslyn、protobuf-net、mbedTLS/TF-PSA 算法实现不作为本次第三方全源码安全审计对象；覆盖其锁定版本、配置、仓库内接入与错误/资源边界。Unity 独立启动/UI/场景业务没有纳入“当前服务器”范围；共享客户端实现已读用于核对服务器和测试调用，不据此声称完成整个 Unity 项目的审查。
+
+当前调用链：
+
+```text
+Program
+  → LocalWssService
+    → 证书与运行配置
+    → PostgresDatabase.ValidateAsync：SELECT 1
+    → PostgresAccountRepository.ValidateAsync：SELECT ... FROM accounts LIMIT 0
+    → AccountService / AccountSessions / LobbyApplication
+    → WssServer → Kestrel /network → ServerConnection
+      → LoginSession 准入/派发复查/期限
+      → 强类型 Register/Login/ResumeLogin/Logout handler
+        → AccountService → IAccountRepository/PostgreSQL
+        → AccountSessions 会话提交
+  → LocalKcpService（独立传输联调入口）
+    → 显式临时 grant → KcpListenerHost → gfnet → DTLS/KCP
+```
+
+**未发现启动时校验、加载、创建或预置玩家账号/密码/角色/其他玩家数据的旧逻辑。** SELECT 1 检查连接；LIMIT 0 检查账号表列是否可访问，不取玩家记录。玩家注册与密码认证只由客户端 RPC 触发。固定账号初始化只在测试夹具中存在，生产入口没有调用测试替身。
+
+仍然存在且范围明确的开发行为：
+
+- local-kcp-dtls 启动时从 GF_LOCAL_KCP_GRANT 文件登记一个 30 秒传输 grant，只监听 loopback、提供 Echo；没有玩家认证、数据库或世界业务。这不是正常账号到世界的授权入口。
+- local WSS/Echo 支持最大 5 秒的显式请求延时；它属于联调诊断。
+- 世界授权/入场业务尚未实现，路由明确拒绝或返回 WorldUnavailable，未伪装成成功。
+- Program 只提供显式 local profile；当前拒绝的是未配置的生产 hosting，并非服务器启动时需要玩家密码。没有自动业务重试、回滚、密码回退、存储回退或传输降级。
+
+### 已确认的问题与方案比较
+
+| 优先级 | 问题、触发与后果 | 建议 |
+| --- | --- | --- |
+| P1 | AccountService 在异步数据库中分配 epoch，随后 handler 才提交 AccountSessions。后者只与当前存活 Session 比较；Logout/过期清理会删除比较依据。较新 epoch=2 会话注销后，迟到 epoch=1 结果可重新创建成功会话，恢复本应失效的旧登录。位置：AccountService.cs:67、LoginHandlers.cs:119、AccountSessions.cs:52/Remove。 | 不只给活跃 Session 加一个判断。无界保存每个历史账号最大 epoch 会引入新的常驻状态；一次数据库查询也不能消除查询与提交间的竞争。推荐由现有账号会话所有者管理有界的每账号操作生命周期，让 epoch 分配与登录提交、Resume/Logout/撤销按该账号协调；异步结果提交时校验操作资格，记录只在活跃会话或在途操作仍需要时保留，按引用/完成状态回收。不同账号不共用等待数据库的全局锁。 |
+| P2 | AccountService 并发 4 满额、AccountSessions 容量满额、账号限频均把过载写成 StatusCode=3，设计第7.1节规定过载=1。尤其 Login 并发满额时既不清除 loginInFlight，也不安排关闭：本次请求收到错误，下一次认证被拒绝，空闲则等原 10 秒期限。Register 的 finally 会释放资格，Login 没有对应收尾。 | 统一“认证请求完成后的阶段转换”。按现有失败登录结束本次连接的契约，推荐过载返回 status1 后通过发送 owner 关闭；Register 若明确允许同连接再次请求，则释放其资格但不延长原登录期限。不要让部分异常路径留在“处理中”，也不加自动重试。 |
+| P2 | Login/Resume 替换旧绑定调用 connection.Disconnect，直接取消/Abort，没有发送设计的 Close reason2。LoginSession.CheckDeadline 对过期/撤销统一返回5，与设计的4/7不符。客户端因此难以正确区分顶号、到期与认证失败。 | 会话所有者保留终止原因，框架发送 owner 接受外部有原因的关闭命令，有界发送 Close 后释放。不要在账号锁中等待网络，也不要将仅在 handler 回复后消费的 CloseAfterResponse 当作外部关闭入口。这个调整应统一 WSS/KCP 框架关闭语义，无需业务补偿计时器。 |
+| P2 | 实际 LocalWssService 和 LocalKcpService 构造网络 host 时未传 ILogger，框架默认为 NullLogger。数据库/handler/清理异常虽被框架捕获并按协议处理，具体失败日志在当前服务入口被丢弃；现有 Kestrel HTTP 日志不能解释这些异常。 | 在应用组合入口把现有 host ILoggerFactory/ILogger 传入网络框架；KCP 联调入口同样配置标准 logging。沿用框架已有日志边界，不新增日志管理系统，不记录密码/token/连接串。 |
+| P3 | NetworkDesign 第18节仍引用删除的 DotNet.csproj；第4节及 DotNet README 部分“生产认证/provider 未配置”措辞与当前 Program 的 hosting 门禁不一致。 | 更新当前使用示例与现行认证/hosting 的区分，保留标明历史的实施记录。 |
+
+按整体流程核对，服务端 Core/Server 未引用账号、数据库或游戏 DTO；账号/注册/恢复/顶号/注销均在 Game.Server。分层方向正确，以上问题集中在账号操作提交、失败收尾、关闭原因和启动组合接线，建议沿现有所有者修正，而非增加新的通用管理层。
+
+### 本轮执行证据
+
+- 四工程 locked restore 与 Release build 成功：0 警告、0 错误。
+- 生成器 check --artifacts 退出0。
+- 协议/生成测试 181/181、独立框架测试 10/10、服务端测试 97/97，通过且0跳过；服务端包含真实 PostgreSQL、Kestrel/WSS 和 macOS KCP/DTLS。
+- 数据库测试使用本轮独立临时 PostgreSQL18 cluster/随机端口，结束已停止并删除；未使用或修改开发账号数据库。DTLS 显式使用 shared-macos-universal-release 的 mbedTLS4.2.0 库，逐项核对清单中维护源码 hash 与库 hash 匹配；未重新构建 native。
+- 临时 friend-assembly 探针直接调用当前实现，确定性复现两项：epoch2 Login→Logout→epoch1 Login 输出 Success、epoch1、current=True；4 个阻塞仓库操作占满认证配额后，第5个 Login 经真实 ServerApplication dispatcher 输出 status3、scheduledClose0、nextLoginAllowed=False、nextLoginClose5。探针帧预留最终为0。这是会话/应用派发复现，不冒充完整客户端端到端竞争实跑。
+- 关闭原因及 logger 问题依据完整源码/调用链核验，本轮没有新增针对它们的线级关闭/日志探针。既有测试全部通过不覆盖上述两种新复现顺序，不能据此判定它们正确。
+- 没有执行新的 Unity Editor/Player/IL2CPP、Windows/Linux/移动设备、远端CI、生产多实例或容量/长时间测试；用户正在运行的 Rider 服务、开发 PostgreSQL 和 Unity 设置未操作。临时探针与测试 cluster/日志结束后清理。
+
+### 本轮完整阅读清单
+
+下列勾选仅代表源码/文档阅读与调用核对，不代表对应平台已经实跑。
+
+- [x] [.github/workflows/network.yml](../.github/workflows/network.yml)
+- [x] [.gitignore](../.gitignore)
+- [x] [Docs/ErrorContract.md](../Docs/ErrorContract.md)
+- [x] [Docs/Network.md](../Docs/Network.md)
+- [x] [Docs/NetworkDesign.md](../Docs/NetworkDesign.md)
+- [x] [Docs/NetworkImplementation.md](../Docs/NetworkImplementation.md)
+- [x] [Docs/NetworkNativeDesign.md](../Docs/NetworkNativeDesign.md)
+- [x] [Docs/NetworkReview.md](../Docs/NetworkReview.md)
+- [x] [Docs/NetworkServerReview.md](../Docs/NetworkServerReview.md)
+- [x] [Docs/Scope.md](../Docs/Scope.md)
+- [x] [Docs/ServerAccounts.md](../Docs/ServerAccounts.md)
+- [x] [DotNet/Directory.Build.props](../DotNet/Directory.Build.props)
+- [x] [DotNet/DotNet.sln](../DotNet/DotNet.sln)
+- [x] [DotNet/Game.Protocol/Game.Protocol.csproj](../DotNet/Game.Protocol/Game.Protocol.csproj)
+- [x] [DotNet/Game.Protocol/packages.lock.json](../DotNet/Game.Protocol/packages.lock.json)
+- [x] [DotNet/Game.Server/AssemblyInfo.cs](../DotNet/Game.Server/AssemblyInfo.cs)
+- [x] [DotNet/Game.Server/Database/001_accounts.sql](../DotNet/Game.Server/Database/001_accounts.sql)
+- [x] [DotNet/Game.Server/Database/PostgresDatabase.cs](../DotNet/Game.Server/Database/PostgresDatabase.cs)
+- [x] [DotNet/Game.Server/Game.Server.csproj](../DotNet/Game.Server/Game.Server.csproj)
+- [x] [DotNet/Game.Server/LobbyApplication.cs](../DotNet/Game.Server/LobbyApplication.cs)
+- [x] [DotNet/Game.Server/LocalEnvironment.cs](../DotNet/Game.Server/LocalEnvironment.cs)
+- [x] [DotNet/Game.Server/LocalKcpService.cs](../DotNet/Game.Server/LocalKcpService.cs)
+- [x] [DotNet/Game.Server/LocalWssService.cs](../DotNet/Game.Server/LocalWssService.cs)
+- [x] [DotNet/Game.Server/Login/AccountService.cs](../DotNet/Game.Server/Login/AccountService.cs)
+- [x] [DotNet/Game.Server/Login/AccountSessions.cs](../DotNet/Game.Server/Login/AccountSessions.cs)
+- [x] [DotNet/Game.Server/Login/IAccountRepository.cs](../DotNet/Game.Server/Login/IAccountRepository.cs)
+- [x] [DotNet/Game.Server/Login/LoginHandlers.cs](../DotNet/Game.Server/Login/LoginHandlers.cs)
+- [x] [DotNet/Game.Server/Login/LoginOptions.cs](../DotNet/Game.Server/Login/LoginOptions.cs)
+- [x] [DotNet/Game.Server/Login/LoginSession.cs](../DotNet/Game.Server/Login/LoginSession.cs)
+- [x] [DotNet/Game.Server/Login/PasswordHasher.cs](../DotNet/Game.Server/Login/PasswordHasher.cs)
+- [x] [DotNet/Game.Server/Login/PostgresAccountRepository.cs](../DotNet/Game.Server/Login/PostgresAccountRepository.cs)
+- [x] [DotNet/Game.Server/Program.cs](../DotNet/Game.Server/Program.cs)
+- [x] [DotNet/Game.Server/Properties/launchSettings.json](../DotNet/Game.Server/Properties/launchSettings.json)
+- [x] [DotNet/Game.Server/packages.lock.json](../DotNet/Game.Server/packages.lock.json)
+- [x] [DotNet/GameFrame.Network.Core/AssemblyInfo.cs](../DotNet/GameFrame.Network.Core/AssemblyInfo.cs)
+- [x] [DotNet/GameFrame.Network.Core/GameFrame.Network.Core.csproj](../DotNet/GameFrame.Network.Core/GameFrame.Network.Core.csproj)
+- [x] [DotNet/GameFrame.Network.Core/packages.lock.json](../DotNet/GameFrame.Network.Core/packages.lock.json)
+- [x] [DotNet/GameFrame.Server/AssemblyInfo.cs](../DotNet/GameFrame.Server/AssemblyInfo.cs)
+- [x] [DotNet/GameFrame.Server/GameFrame.Server.csproj](../DotNet/GameFrame.Server/GameFrame.Server.csproj)
+- [x] [DotNet/GameFrame.Server/KcpListenerHost.cs](../DotNet/GameFrame.Server/KcpListenerHost.cs)
+- [x] [DotNet/GameFrame.Server/KcpServerOptions.cs](../DotNet/GameFrame.Server/KcpServerOptions.cs)
+- [x] [DotNet/GameFrame.Server/README.md](../DotNet/GameFrame.Server/README.md)
+- [x] [DotNet/GameFrame.Server/ServerApplication.cs](../DotNet/GameFrame.Server/ServerApplication.cs)
+- [x] [DotNet/GameFrame.Server/ServerConnection.cs](../DotNet/GameFrame.Server/ServerConnection.cs)
+- [x] [DotNet/GameFrame.Server/WssServer.cs](../DotNet/GameFrame.Server/WssServer.cs)
+- [x] [DotNet/GameFrame.Server/WssServerOptions.cs](../DotNet/GameFrame.Server/WssServerOptions.cs)
+- [x] [DotNet/GameFrame.Server/packages.lock.json](../DotNet/GameFrame.Server/packages.lock.json)
+- [x] [DotNet/README.md](../DotNet/README.md)
+- [x] [DotNet/compose.yaml](../DotNet/compose.yaml)
+- [x] [DotNet/global.json](../DotNet/global.json)
+- [x] [Native/Kcp/ABI.md](../Native/Kcp/ABI.md)
+- [x] [Native/Kcp/CMakeLists.txt](../Native/Kcp/CMakeLists.txt)
+- [x] [Native/Kcp/README.md](../Native/Kcp/README.md)
+- [x] [Native/Kcp/build/build.py](../Native/Kcp/build/build.py)
+- [x] [Native/Kcp/build/install.py](../Native/Kcp/build/install.py)
+- [x] [Native/Kcp/build/prepare_kcp.py](../Native/Kcp/build/prepare_kcp.py)
+- [x] [Native/Kcp/build/prepare_mbedtls.py](../Native/Kcp/build/prepare_mbedtls.py)
+- [x] [Native/Kcp/build/verify_windows.py](../Native/Kcp/build/verify_windows.py)
+- [x] [Native/Kcp/build/windows-llvm-mingw.cmake](../Native/Kcp/build/windows-llvm-mingw.cmake)
+- [x] [Native/Kcp/config/crypto_config.h](../Native/Kcp/config/crypto_config.h)
+- [x] [Native/Kcp/config/mbedtls_config.h](../Native/Kcp/config/mbedtls_config.h)
+- [x] [Native/Kcp/config/threading_alt.h](../Native/Kcp/config/threading_alt.h)
+- [x] [Native/Kcp/include/gfnet.h](../Native/Kcp/include/gfnet.h)
+- [x] [Native/Kcp/src/gfnet_connection.c](../Native/Kcp/src/gfnet_connection.c)
+- [x] [Native/Kcp/src/gfnet_internal.h](../Native/Kcp/src/gfnet_internal.h)
+- [x] [Native/Kcp/src/gfnet_listener.c](../Native/Kcp/src/gfnet_listener.c)
+- [x] [Native/Kcp/src/gfnet_memory.c](../Native/Kcp/src/gfnet_memory.c)
+- [x] [Native/Kcp/tests/allocation_safety.c](../Native/Kcp/tests/allocation_safety.c)
+- [x] [Native/Kcp/tests/fastack_regression.cpp](../Native/Kcp/tests/fastack_regression.cpp)
+- [x] [Native/Kcp/tests/gfnet_regression.c](../Native/Kcp/tests/gfnet_regression.c)
+- [x] [Native/Kcp/tests/verify_allocation_safety.py](../Native/Kcp/tests/verify_allocation_safety.py)
+- [x] [Native/Kcp/tests/verify_fastack.py](../Native/Kcp/tests/verify_fastack.py)
+- [x] [Native/Kcp/third_party/kcp/LICENSE](../Native/Kcp/third_party/kcp/LICENSE)
+- [x] [Native/Kcp/third_party/kcp/ikcp.c](../Native/Kcp/third_party/kcp/ikcp.c)
+- [x] [Native/Kcp/third_party/kcp/ikcp.h](../Native/Kcp/third_party/kcp/ikcp.h)
+- [x] [Native/Kcp/third_party/mbedtls.lock.json](../Native/Kcp/third_party/mbedtls.lock.json)
+- [x] [Protocol/Common/ResultProto.proto](../Protocol/Common/ResultProto.proto)
+- [x] [Protocol/Common/net_options.proto](../Protocol/Common/net_options.proto)
+- [x] [Protocol/Diagnostics/DiagnosticsProto.proto](../Protocol/Diagnostics/DiagnosticsProto.proto)
+- [x] [Protocol/Diagnostics/DiagnosticsService.proto](../Protocol/Diagnostics/DiagnosticsService.proto)
+- [x] [Protocol/GameFrame.Protocol.projitems](../Protocol/GameFrame.Protocol.projitems)
+- [x] [Protocol/Generated/golden-vectors.json](../Protocol/Generated/golden-vectors.json)
+- [x] [Protocol/Generated/protocol.manifest.json](../Protocol/Generated/protocol.manifest.json)
+- [x] [Protocol/Generated/protocol.sha256](../Protocol/Generated/protocol.sha256)
+- [x] [Protocol/README.md](../Protocol/README.md)
+- [x] [Protocol/Session/SessionProto.proto](../Protocol/Session/SessionProto.proto)
+- [x] [Protocol/Session/SessionService.proto](../Protocol/Session/SessionService.proto)
+- [x] [Protocol/World/WorldProto.proto](../Protocol/World/WorldProto.proto)
+- [x] [Protocol/World/WorldService.proto](../Protocol/World/WorldService.proto)
+- [x] [Tools/NetworkFramework.Tests/FrameworkBoundaryTests.cs](../Tools/NetworkFramework.Tests/FrameworkBoundaryTests.cs)
+- [x] [Tools/NetworkFramework.Tests/NetworkFramework.Tests.csproj](../Tools/NetworkFramework.Tests/NetworkFramework.Tests.csproj)
+- [x] [Tools/NetworkFramework.Tests/packages.lock.json](../Tools/NetworkFramework.Tests/packages.lock.json)
+- [x] [Tools/NetworkProtocol.Tests/GeneratorTests.cs](../Tools/NetworkProtocol.Tests/GeneratorTests.cs)
+- [x] [Tools/NetworkProtocol.Tests/NetworkOptionsTests.cs](../Tools/NetworkProtocol.Tests/NetworkOptionsTests.cs)
+- [x] [Tools/NetworkProtocol.Tests/NetworkProtocol.Tests.csproj](../Tools/NetworkProtocol.Tests/NetworkProtocol.Tests.csproj)
+- [x] [Tools/NetworkProtocol.Tests/ProtoGenerationTests.cs](../Tools/NetworkProtocol.Tests/ProtoGenerationTests.cs)
+- [x] [Tools/NetworkProtocol.Tests/packages.lock.json](../Tools/NetworkProtocol.Tests/packages.lock.json)
+- [x] [Tools/NetworkProtocol/AssemblyInfo.cs](../Tools/NetworkProtocol/AssemblyInfo.cs)
+- [x] [Tools/NetworkProtocol/MemoryPackProtocolGenerator.cs](../Tools/NetworkProtocol/MemoryPackProtocolGenerator.cs)
+- [x] [Tools/NetworkProtocol/NetworkProtocol.csproj](../Tools/NetworkProtocol/NetworkProtocol.csproj)
+- [x] [Tools/NetworkProtocol/Program.cs](../Tools/NetworkProtocol/Program.cs)
+- [x] [Tools/NetworkProtocol/ProtoProtocolGenerator.cs](../Tools/NetworkProtocol/ProtoProtocolGenerator.cs)
+- [x] [Tools/NetworkProtocol/ProtocolRouteDefinition.cs](../Tools/NetworkProtocol/ProtocolRouteDefinition.cs)
+- [x] [Tools/NetworkProtocol/ProtocolSamples.cs](../Tools/NetworkProtocol/ProtocolSamples.cs)
+- [x] [Tools/NetworkProtocol/packages.lock.json](../Tools/NetworkProtocol/packages.lock.json)
+- [x] [Tools/NetworkServer.Tests/ConnectionRaceTests.cs](../Tools/NetworkServer.Tests/ConnectionRaceTests.cs)
+- [x] [Tools/NetworkServer.Tests/KcpLoopbackTests.cs](../Tools/NetworkServer.Tests/KcpLoopbackTests.cs)
+- [x] [Tools/NetworkServer.Tests/KcpSourceBudgetTests.cs](../Tools/NetworkServer.Tests/KcpSourceBudgetTests.cs)
+- [x] [Tools/NetworkServer.Tests/NetworkServer.Tests.csproj](../Tools/NetworkServer.Tests/NetworkServer.Tests.csproj)
+- [x] [Tools/NetworkServer.Tests/PostgresAccountTests.cs](../Tools/NetworkServer.Tests/PostgresAccountTests.cs)
+- [x] [Tools/NetworkServer.Tests/PostgresTestDatabase.cs](../Tools/NetworkServer.Tests/PostgresTestDatabase.cs)
+- [x] [Tools/NetworkServer.Tests/ServerHeartbeatTests.cs](../Tools/NetworkServer.Tests/ServerHeartbeatTests.cs)
+- [x] [Tools/NetworkServer.Tests/TestAccountRepository.cs](../Tools/NetworkServer.Tests/TestAccountRepository.cs)
+- [x] [Tools/NetworkServer.Tests/WssServerTests.cs](../Tools/NetworkServer.Tests/WssServerTests.cs)
+- [x] [Tools/NetworkServer.Tests/packages.lock.json](../Tools/NetworkServer.Tests/packages.lock.json)
+- [x] [Tools/README.md](../Tools/README.md)
+- [x] [Tools/global.json](../Tools/global.json)
+- [x] [Tools/postgres.py](../Tools/postgres.py)
+- [x] [Unity/Assets/Scripts/Hotfix/Network/Generated/GameNetMessages.cs](../Unity/Assets/Scripts/Hotfix/Network/Generated/GameNetMessages.cs)
+- [x] [Unity/Assets/Scripts/Hotfix/Network/Generated/GameNetProtocol.cs](../Unity/Assets/Scripts/Hotfix/Network/Generated/GameNetProtocol.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/Connection/ConnectionContext.cs](../Unity/Assets/Scripts/Runtime/Network/Connection/ConnectionContext.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/Connection/PendingDeadlineHeap.cs](../Unity/Assets/Scripts/Runtime/Network/Connection/PendingDeadlineHeap.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/Messaging/NetProtocolCatalog.cs](../Unity/Assets/Scripts/Runtime/Network/Messaging/NetProtocolCatalog.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/NetworkClient.cs](../Unity/Assets/Scripts/Runtime/Network/NetworkClient.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/NetworkClock.cs](../Unity/Assets/Scripts/Runtime/Network/NetworkClock.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/NetworkConnectOptions.cs](../Unity/Assets/Scripts/Runtime/Network/NetworkConnectOptions.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/NetworkDiagnostics.cs](../Unity/Assets/Scripts/Runtime/Network/NetworkDiagnostics.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/NetworkException.cs](../Unity/Assets/Scripts/Runtime/Network/NetworkException.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/NetworkOptions.cs](../Unity/Assets/Scripts/Runtime/Network/NetworkOptions.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/NetworkRuntime.cs](../Unity/Assets/Scripts/Runtime/Network/NetworkRuntime.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/Protocol/ControlCodec.cs](../Unity/Assets/Scripts/Runtime/Network/Protocol/ControlCodec.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/Protocol/FrameCodec.cs](../Unity/Assets/Scripts/Runtime/Network/Protocol/FrameCodec.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/ProtocolContracts/NetProtocolContracts.cs](../Unity/Assets/Scripts/Runtime/Network/ProtocolContracts/NetProtocolContracts.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/ProtocolContracts/NetWireReader.cs](../Unity/Assets/Scripts/Runtime/Network/ProtocolContracts/NetWireReader.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/Transport/IFrameTransport.cs](../Unity/Assets/Scripts/Runtime/Network/Transport/IFrameTransport.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/KcpNative.cs](../Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/KcpNative.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/KcpTransport.cs](../Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/KcpTransport.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/KcpWorker.cs](../Unity/Assets/Scripts/Runtime/Network/Transport/Kcp/KcpWorker.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/Transport/OwnedFrame.cs](../Unity/Assets/Scripts/Runtime/Network/Transport/OwnedFrame.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/Transport/WebSocketFrameTransport.cs](../Unity/Assets/Scripts/Runtime/Network/Transport/WebSocketFrameTransport.cs)
+- [x] [Unity/Assets/Scripts/Runtime/Network/Transport/WebSocketTransport.cs](../Unity/Assets/Scripts/Runtime/Network/Transport/WebSocketTransport.cs)
+- [x] [Unity/Assets/Scripts/Tests/EditMode/Network/NetworkMemoryPackTests.cs](../Unity/Assets/Scripts/Tests/EditMode/Network/NetworkMemoryPackTests.cs)
+- [x] [Unity/Assets/Scripts/Tests/EditMode/Network/NetworkProtocolTests.cs](../Unity/Assets/Scripts/Tests/EditMode/Network/NetworkProtocolTests.cs)

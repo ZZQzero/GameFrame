@@ -14,7 +14,7 @@ namespace Game.Server
                     await LocalKcpService.RunAsync();
                     break;
                 default:
-                    throw new InvalidOperationException("Production authentication is not configured. Only explicit local profiles are available.");
+                    throw new InvalidOperationException("Production hosting is not configured. Only explicit local profiles are available.");
             }
         }
 
@@ -22,9 +22,9 @@ namespace Game.Server
         {
             if (args.Length == 0)
             {
-                throw new InvalidOperationException("Production authentication is not configured. Only explicit local profiles are available. " +
+                throw new InvalidOperationException("Production hosting is not configured. Only explicit local profiles are available. " +
                     "For local development, select the local-wss/local-kcp-dtls launch profile or pass --profile local-wss|local-kcp-dtls, " +
-                    "and configure the required GF_LOCAL_* variables documented in DotNet/README.md.");
+                    "and configure the selected profile as documented in DotNet/README.md.");
             }
 
             if (args.Length != 2 || args[0] != "--profile")

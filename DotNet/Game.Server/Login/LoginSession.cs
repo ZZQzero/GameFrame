@@ -8,7 +8,7 @@ namespace Game.Server.Login
     internal sealed class LoginSession : ServerSession
     {
         private readonly AccountSessions accounts;
-        private readonly LocalAccountSettings settings;
+        private readonly LoginOptions options;
         private readonly Func<IPAddress, bool> admitLogin;
         private readonly ServerConnectionContext connection;
         private long deadline;
@@ -18,23 +18,23 @@ namespace Game.Server.Login
         public override bool RequiresRestrictedTraffic => true;
         internal long Binding => Interlocked.Read(ref binding);
 
-        internal LoginSession(ServerConnectionContext connection, AccountSessions accounts, LocalAccountSettings settings, Func<IPAddress, bool> admitLogin)
+        internal LoginSession(ServerConnectionContext connection, AccountSessions accounts, LoginOptions options, Func<IPAddress, bool> admitLogin)
         {
             this.accounts = accounts;
-            this.settings = settings;
+            this.options = options;
             this.admitLogin = admitLogin;
             this.connection = connection;
         }
 
         public override ValueTask ConnectedAsync(ServerConnectionContext context)
         {
-            deadline = NetworkClock.GetMilliseconds() + (long)settings.LoginTimeout.TotalMilliseconds;
+            deadline = NetworkClock.GetMilliseconds() + (long)options.LoginTimeout.TotalMilliseconds;
             return ValueTask.CompletedTask;
         }
 
         public override ServerAdmission Admit(ServerMessageHeader header)
         {
-            bool login = header.Opcode == GameNetRoutes.Login.Opcode || header.Opcode == GameNetRoutes.ResumeLogin.Opcode;
+            bool login = IsAuthentication(header.Opcode);
             long current = Binding;
             bool allowed = current == 0 ? login && header.BodyLength <= 2048 &&
                 Interlocked.CompareExchange(ref loginInFlight, 1, 0) == 0 && admitLogin(connection.RemoteEndpoint.Address) :
@@ -44,7 +44,7 @@ namespace Game.Server.Login
 
         public override ServerAdmission CheckDispatch(ServerMessageHeader header)
         {
-            bool login = header.Opcode == GameNetRoutes.Login.Opcode || header.Opcode == GameNetRoutes.ResumeLogin.Opcode;
+            bool login = IsAuthentication(header.Opcode);
             return Binding == 0 && login || accounts.IsCurrent(Binding) ? ServerAdmission.Allow : ServerAdmission.Deny();
         }
 
@@ -76,6 +76,11 @@ namespace Game.Server.Login
                 connection.EnableFullTraffic();
             }
         }
+
+        private static bool IsAuthentication(uint opcode) => opcode == GameNetRoutes.Login.Opcode ||
+            opcode == GameNetRoutes.ResumeLogin.Opcode || opcode == GameNetRoutes.Register.Opcode;
+
+        internal void FinishRegistration() => Interlocked.Exchange(ref loginInFlight, 0);
 
         internal void BeginLogout() => Volatile.Write(ref closing, 1);
 

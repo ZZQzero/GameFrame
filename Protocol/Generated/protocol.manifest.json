@@ -53,6 +53,10 @@
         {
           "name": "InvalidInput",
           "value": 11
+        },
+        {
+          "name": "AccountAlreadyExists",
+          "value": 12
         }
       ]
     }
@@ -109,6 +113,17 @@
       "responseType": "Game.Hotfix.Network.Protocol.OperationResponse",
       "rootNullable": false,
       "type": "Game.Hotfix.Network.Protocol.LogoutRequest"
+    },
+    {
+      "delivery": "Reliable",
+      "kind": "Rpc",
+      "maxBodyBytes": 2048,
+      "opcode": 1004,
+      "name": "Register",
+      "responseMaxBodyBytes": 64,
+      "responseType": "Game.Hotfix.Network.Protocol.OperationResponse",
+      "rootNullable": false,
+      "type": "Game.Hotfix.Network.Protocol.RegisterRequest"
     },
     {
       "delivery": "Reliable",
@@ -473,6 +488,27 @@
         }
       ],
       "name": "Game.Hotfix.Network.Protocol.OperationResponse"
+    },
+    {
+      "fields": [
+        {
+          "name": "Account",
+          "nullable": false,
+          "order": 0,
+          "stringUtf16Units": 64,
+          "stringUtf8Bytes": 256,
+          "type": "System.String"
+        },
+        {
+          "name": "Password",
+          "nullable": false,
+          "order": 1,
+          "stringUtf16Units": 128,
+          "stringUtf8Bytes": 512,
+          "type": "System.String"
+        }
+      ],
+      "name": "Game.Hotfix.Network.Protocol.RegisterRequest"
     },
     {
       "fields": [

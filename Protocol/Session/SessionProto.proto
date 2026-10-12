@@ -4,7 +4,12 @@ option csharp_namespace = "Game.Hotfix.Network.Protocol";
 import "Common/net_options.proto";
 import "Common/ResultProto.proto";
 
-// Account/password is accepted only by an explicitly enabled local profile.
+// Credentials are submitted by the client over WSS, never configured as a server identity.
+message RegisterRequest {
+  string account = 1 [(game.net.max_utf16) = 64, (game.net.max_utf8) = 256];
+  string password = 2 [(game.net.max_utf16) = 128, (game.net.max_utf8) = 512];
+}
+
 message LoginRequest {
   string account = 1 [(game.net.max_utf16) = 64, (game.net.max_utf8) = 256];
   string password = 2 [(game.net.max_utf16) = 128, (game.net.max_utf8) = 512];

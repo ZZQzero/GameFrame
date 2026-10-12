@@ -1,0 +1,91 @@
+using System.Security.Cryptography;
+using Game.Hotfix.Network.Protocol;
+using GameFrame.Server.Network;
+
+namespace Game.Server.Login
+{
+    internal sealed class AccountService : IDisposable
+    {
+        private readonly IAccountRepository repository;
+        private readonly SemaphoreSlim operations = new SemaphoreSlim(4, 4);
+
+        internal AccountService(IAccountRepository repository)
+        {
+            this.repository = repository;
+        }
+
+        internal async Task<ResultCode> RegisterAsync(string account, string password, CancellationToken cancellation)
+        {
+            if (!PasswordHasher.Valid(account, password))
+            {
+                return ResultCode.InvalidInput;
+            }
+
+            await AdmitAsync(cancellation);
+            byte[] salt = Array.Empty<byte>();
+            byte[] hash = Array.Empty<byte>();
+            try
+            {
+                salt = RandomNumberGenerator.GetBytes(16);
+                hash = await Task.Run(() => PasswordHasher.Hash(password, salt, PasswordHasher.Iterations), cancellation);
+                return await repository.CreateAsync(account, salt, hash, PasswordHasher.Iterations, cancellation) ?
+                    ResultCode.Success : ResultCode.AccountAlreadyExists;
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(salt);
+                CryptographicOperations.ZeroMemory(hash);
+                operations.Release();
+            }
+        }
+
+        internal async Task<AuthenticatedAccount?> LoginAsync(string account, string password, CancellationToken cancellation)
+        {
+            if (!PasswordHasher.Valid(account, password))
+            {
+                return null;
+            }
+
+            await AdmitAsync(cancellation);
+            try
+            {
+                using StoredAccount? stored = await repository.FindAsync(account, cancellation);
+                if (stored != null && (stored.Id <= 0 || stored.PasswordHash.Length != 32))
+                {
+                    throw new InvalidOperationException("Invalid stored account credentials.");
+                }
+                // Unknown names still perform the same password derivation before uniform rejection.
+                byte[] salt = stored?.Salt ?? new byte[16];
+                byte[] hash = await Task.Run(() => PasswordHasher.Hash(password, salt, stored?.Iterations ?? PasswordHasher.Iterations), cancellation);
+                try
+                {
+                    if (stored == null || !CryptographicOperations.FixedTimeEquals(hash, stored.PasswordHash))
+                    {
+                        return null;
+                    }
+
+                    ulong epoch = await repository.AdvanceEpochAsync(stored.Id, cancellation);
+                    return new AuthenticatedAccount(checked((ulong)stored.Id), epoch);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(hash);
+                }
+            }
+            finally
+            {
+                operations.Release();
+            }
+        }
+
+        private async Task AdmitAsync(CancellationToken cancellation)
+        {
+            if (!await operations.WaitAsync(0, cancellation))
+            {
+                throw new ServerRequestException(3);
+            }
+        }
+
+        public void Dispose() => operations.Dispose();
+    }
+}

@@ -10,22 +10,26 @@ namespace Game.Server.Login
     internal sealed class LoginHandlers
     {
         private readonly AccountSessions accounts;
-        private readonly LocalAccountSettings settings;
+        private readonly AccountService service;
+        private readonly LoginOptions options;
         private readonly object gate = new object();
         private readonly Dictionary<IPAddress, (long Window, int Attempts)> attempts = new Dictionary<IPAddress, (long, int)>();
+        private readonly Dictionary<string, (long Window, int Attempts)> accountAttempts = new Dictionary<string, (long, int)>(StringComparer.Ordinal);
 
-        internal LoginHandlers(AccountSessions accounts, LocalAccountSettings settings)
+        internal LoginHandlers(AccountSessions accounts, AccountService service, LoginOptions options)
         {
-            settings.Validate();
+            options.Validate();
             this.accounts = accounts;
-            this.settings = settings;
+            this.service = service;
+            this.options = options;
         }
 
-        internal ServerSession CreateSession(ServerConnectionContext connection) => new LoginSession(connection, accounts, settings, AdmitLogin);
+        internal ServerSession CreateSession(ServerConnectionContext connection) => new LoginSession(connection, accounts, options, AdmitLogin);
 
         internal void Register(ServerApplication application)
         {
-            application.Rpc(GameNetRoutes.Login, Login, ClearLoginResponse);
+            application.Rpc(GameNetRoutes.Register, RegisterAccountAsync);
+            application.Rpc(GameNetRoutes.Login, LoginAsync, ClearLoginResponse);
             application.Rpc(GameNetRoutes.ResumeLogin, Resume, ClearLoginResponse);
             application.Rpc(GameNetRoutes.Logout, Logout);
         }
@@ -53,19 +57,73 @@ namespace Game.Server.Login
 
                 int count = value.Window == window ? value.Attempts + 1 : 1;
                 attempts[ip] = (window, count);
-                return count <= settings.MaxLoginAttemptsPerSecond;
+                return count <= options.MaxLoginAttemptsPerSecond;
             }
         }
 
-        private Task<LoginResponse> Login(ServerConnectionContext connection, LoginRequest request, CancellationToken token)
+        private bool AdmitAccount(string account)
+        {
+            lock (gate)
+            {
+                long window = NetworkClock.GetMilliseconds() / 1000;
+                if (!accountAttempts.TryGetValue(account, out var value))
+                {
+                    if (accountAttempts.Count >= 128)
+                    {
+                        foreach (string expired in accountAttempts.Where(pair => window - pair.Value.Window > 10).Select(pair => pair.Key).ToArray())
+                        {
+                            accountAttempts.Remove(expired);
+                        }
+
+                        if (accountAttempts.Count >= 128)
+                        {
+                            return false;
+                        }
+                    }
+                }
+
+                int count = value.Window == window ? value.Attempts + 1 : 1;
+                accountAttempts[account] = (window, count);
+                return count <= options.MaxLoginAttemptsPerSecond;
+            }
+        }
+
+        private async Task<OperationResponse> RegisterAccountAsync(ServerConnectionContext connection, RegisterRequest request, CancellationToken token)
         {
             try
             {
-                var result = accounts.Login(request, connection.Disconnect);
+                if (!AdmitAccount(request.Account))
+                {
+                    throw new ServerRequestException(3);
+                }
+
+                ResultCode result = await service.RegisterAsync(request.Account, request.Password, token);
+                return new OperationResponse { ResultCode = result };
+            }
+            finally
+            {
+                request.Password = string.Empty;
+                ((LoginSession)connection.Session).FinishRegistration();
+            }
+        }
+
+        private async Task<LoginResponse> LoginAsync(ServerConnectionContext connection, LoginRequest request, CancellationToken token)
+        {
+            try
+            {
+                if (!AdmitAccount(request.Account))
+                {
+                    throw new ServerRequestException(3, 5);
+                }
+
+                AuthenticatedAccount? account = await service.LoginAsync(request.Account, request.Password, token);
+                token.ThrowIfCancellationRequested();
+                var result = account.HasValue ? accounts.Login(account.Value, connection.Disconnect, token) :
+                    (Response: new LoginResponse { ResultCode = ResultCode.InvalidCredentials }, Binding: 0L);
                 try
                 {
                     ((LoginSession)connection.Session).Bind(result.Binding);
-                    return Task.FromResult(result.Response);
+                    return result.Response;
                 }
                 catch
                 {

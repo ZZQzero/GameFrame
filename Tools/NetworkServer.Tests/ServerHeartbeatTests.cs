@@ -15,8 +15,10 @@ namespace GameFrame.Tests
     [TestFixture]
     public sealed class ServerHeartbeatTests
     {
-        private LocalAccountSettings settings = null!;
+        private LoginOptions settings = null!;
         private AccountSessions accounts = null!;
+        private AccountService service = null!;
+        private TestAccountRepository repository = null!;
         private FrameMemoryBudget memory = null!;
         private ServerConnection server = null!;
         private ConnectionRaceTests.ControlledSocket socket = null!;
@@ -29,11 +31,14 @@ namespace GameFrame.Tests
         {
             now = 1000;
             guard = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            settings = new LocalAccountSettings("test", "secret");
+            settings = new LoginOptions();
+            repository = new TestAccountRepository();
+            service = new AccountService(repository);
+            await service.RegisterAsync("test", "test-secret", guard.Token);
             accounts = new AccountSessions(settings);
             memory = new FrameMemoryBudget(64 * 1024 * 1024);
             socket = new ConnectionRaceTests.ControlledSocket(FrameDirection.ServerToClient);
-            server = new ServerConnection(new WssServerOptions(), new LobbyApplication(accounts, settings).Application, memory, () => { }, guard.Token,
+            server = new ServerConnection(new WssServerOptions(), new LobbyApplication(accounts, service, settings).Application, memory, () => { }, guard.Token,
                 NullLogger.Instance, 1, new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 1234), () => Interlocked.Read(ref now), (_, token) => Task.Delay(Timeout.Infinite, token));
             byte[] hello = new byte[80];
             FrameCodec.WriteHeader(hello, new FrameHeader(FrameKind.Control, (uint)ControlOpcode.ClientHello, 0, 48));
@@ -44,7 +49,7 @@ namespace GameFrame.Tests
             await socket.NextSend(guard.Token);
             await socket.NextCompletedSend(guard.Token);
             var writer = new ArrayBufferWriter<byte>();
-            GameNetRoutes.Login.RequestCodec.Encode(writer, new LoginRequest { Account = "test", Password = "secret" });
+            GameNetRoutes.Login.RequestCodec.Encode(writer, new LoginRequest { Account = "test", Password = "test-secret" });
             byte[] login = new byte[32 + writer.WrittenCount];
             FrameCodec.WriteHeader(login, new FrameHeader(FrameKind.Request, GameNetRoutes.Login.Opcode, 1, writer.WrittenCount));
             writer.WrittenSpan.CopyTo(login.AsSpan(32));
@@ -62,7 +67,8 @@ namespace GameFrame.Tests
             server.Finish();
             socket.Dispose();
             accounts.Dispose();
-            settings.Dispose();
+            service.Dispose();
+            repository.Dispose();
             guard.Dispose();
             Assert.That(memory.OwnedBytes, Is.Zero);
         }

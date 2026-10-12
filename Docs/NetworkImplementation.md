@@ -2,7 +2,7 @@
 
 设计契约见 [NetworkDesign.md](NetworkDesign.md)。本记录区分已实现代码、已执行验证和待实现项，不将协议单元测试视为完整网络验收。
 
-最新状态见文末“应用启动封装与登录功能目录”。ABI2 五平台产物已更新到 mbedTLS 4.2.0 + TF-PSA-Crypto 1.2.0；服务端已拆为四工程，协议178/178、独立框架10/10、网络61/61与 Unity 相关编译/测试通过。应用启动与登录目录调整后再次通过 Release build、网络61/61及真实入口启动/停止验证。此前版本和数量属于历史；全量审查、当前完成项与验证限制见 [NetworkServerReview.md](NetworkServerReview.md) 第 8～9 节。
+最新状态见文末“PostgreSQL 注册登录与正常服务启动”。当前服务启动不再要求预置玩家账号，数据库接入位于应用层；新增 Register 的双端 MemoryPack 协议已生成，账号与哈希持久化、会话按账号隔离。历史版本和数量保留在原记录；当前证据与边界见 [ServerAccounts.md](ServerAccounts.md) 和 [服务端审查第 10 节](NetworkServerReview.md#10-postgresql-账号接入与启动流程调整2026-10-12)。
 
 ## 初次底层实现记录（2026-10-12）
 
@@ -377,3 +377,18 @@ Game.Server/Login 集中 LoginHandlers、LoginSession、AccountSessions、LocalA
 用户直接运行 Debug Game.Server 时未提供 --profile，触发生产认证未配置的拒绝；先前入口验证使用显式 local 参数，未覆盖 IDE 默认项目运行配置。新增 Game.Server/Properties/launchSettings.json，分别提供 local-wss/local-kcp-dtls commandLineArgs；不包含凭据，Debug 和发布程序均不会因无参数自动启用本地认证。无参数错误增加启动指引。DotNet README 补充 Rider/Visual Studio profile、普通项目运行参数、必填环境变量和直接可执行文件不读取 launchSettings 的区别。本机 Rider 原有 Game.Server 配置的空程序参数已改为 --profile local-wss；其他本机设置未变，IDE 可能需重新载入以读取磁盘改动。
 
 本次证据：Debug build 0警告/错误；使用用户给出的 Debug apphost 路径复现无参数拒绝；两个 dotnet run --launch-profile 均正确传参、缺失配置时明确拒绝；临时配置下 Debug local-wss 实际 TLS 验证/WebSocket 升级成功，活动连接 Ctrl+C 退出0；既有 ProductionWithoutAuthenticationProviderRefusesStartup 测试1/1通过。临时证书、凭据和探针目录已清理。没有在 IDE 界面实点运行，没有重复执行整套网络/Unity/native测试。本机真实账号、密码和PFX仍需开发者显式配置，未创建默认测试凭据或更改系统证书信任。
+
+
+## PostgreSQL 注册登录与正常服务启动（2026-10-12）
+
+用户确定 PostgreSQL 后完成应用层 Npgsql 10.0.3 接入。移除 LocalAccountSettings 与 GF_LOCAL_ACCOUNT/PASSWORD 的启动依赖，LoginOptions 仅保留登录策略。LocalWssService 校验证书、GF_DATABASE_CONNECTION 和账号表后启动监听；显式 SQL 初始化文件与 local compose 入口交付，启动不自动迁移或创建玩家。数据库错误停止初始化，生产 hosting 仍需单独配置。
+
+Proto 增加 RegisterRequest/可靠 Register(opcode1004)，ResultCode 增加 AccountAlreadyExists，重新生成双端 DTO/catalog 与开发辅助产物，协议 hash 随之更新。注册只创建账号，成功后客户端再 Login；数据库唯一约束保证并发重复只成功一次。密码采用16字节随机盐、PBKDF2-SHA256 600000次与32字节哈希，SQL全部参数化。认证并发最多4、池最多16；网络/native owner 不等待数据库。
+
+AccountSessions 从固定单账号改为有界多账号状态：每个账号一个当前会话，顶号/恢复轮换/注销仅影响该账号。数据库原子分配递增 authEpoch，进程内拒绝过期异步结果；账号重启可登录，内存 Resume 凭据不跨重启保留。生产多实例仲裁与世界业务继续延后，未新增重试、密码回退、数据库回退或自动重建。
+
+本次验证：四工程 Release build 0警告/错误，solution及NetworkServer.Tests locked restore通过；生成 check --artifacts退出0；协议181/181、独立框架10/10、服务端94/94，0跳过（含两套WSS仓库测试、真实PostgreSQL及已安装macOS DTLS）。PostgreSQL数据库测试验证落库及服务重建后登录、并发重名、不同账号隔离、乱序epoch、SQL字面量、取消与错误传播；存储替身只用于测试，不是运行时降级。
+
+实际 Debug Game.Server 入口在临时PostgreSQL数据库上启动，未设置玩家账号环境变量；真实TLS/GFNP Hello→Register→Login→Echo通过，活动连接Ctrl+C退出0。服务重启后同账号再次Login/Echo成功、accountId保留、authEpoch递增，正常退出0。临时数据库、证书和探针文件清理，系统证书信任未修改。
+
+Unity 6000.3.19f1 Editor脚本编译及Console错误0；网络相关EditMode146/146；StandaloneOSX Player脚本编译43程序集通过。Launch场景、播放状态、目标平台和序列化EditorSettings无变更，Player临时输出已清理。为验证安装了本机PostgreSQL18工具，只运行独立临时cluster，未启用brew开机服务；测试cluster停止后删除。compose与CI配置未实际运行，Windows/Linux/移动设备、IL2CPP原生构建与生产容量/多实例未验收。

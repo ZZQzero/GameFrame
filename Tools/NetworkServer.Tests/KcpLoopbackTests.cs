@@ -47,6 +47,7 @@ namespace GameFrame.Tests
             application.Notify(GameNetRoutes.MoveInput, move ?? ((_, _, _) => Task.CompletedTask));
             application.Notify(GameNetRoutes.MoveInputReliable, move ?? ((_, _, _) => Task.CompletedTask));
             application.Reject(GameNetRoutes.Login);
+            application.Reject(GameNetRoutes.Register);
             application.Reject(GameNetRoutes.ResumeLogin);
             application.Reject(GameNetRoutes.Logout);
             application.Reject(GameNetRoutes.RequestWorldGrant);

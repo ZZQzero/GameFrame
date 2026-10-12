@@ -10,10 +10,10 @@ namespace Game.Server
         private readonly AccountSessions accounts;
         internal ServerApplication Application { get; }
 
-        internal LobbyApplication(AccountSessions accounts, LocalAccountSettings settings)
+        internal LobbyApplication(AccountSessions accounts, AccountService service, LoginOptions options)
         {
             this.accounts = accounts;
-            var login = new LoginHandlers(accounts, settings);
+            var login = new LoginHandlers(accounts, service, options);
             Application = new ServerApplication(GameNetProtocol.Catalog, login.CreateSession);
             login.Register(Application);
             Application.Rpc(GameNetRoutes.Echo, Echo);

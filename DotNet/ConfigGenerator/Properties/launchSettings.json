@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "Generate Server": {
+      "commandName": "Project",
+      "commandLineArgs": "generate --target server",
+      "launchBrowser": false
+    },
+    "Generate All": {
+      "commandName": "Project",
+      "commandLineArgs": "generate --target all",
+      "launchBrowser": false
+    },
+    "Check": {
+      "commandName": "Project",
+      "commandLineArgs": "check --target all",
+      "launchBrowser": false
+    }
+  }
+}

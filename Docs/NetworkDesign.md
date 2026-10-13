@@ -35,7 +35,7 @@
 | KCP | `Native/Kcp/third_party/kcp` 下已有 `ikcp.c`、`ikcp.h`、MIT LICENSE；已直接合入 #467 ACK 修复、分配失败处理及标准 offsetof 修正 | ABI2、UDP 集成与平台构建产物已落地；继续核对依赖锁，完成发布平台实跑验收 |
 | KCP 版本 | 上游基线为 `b1a7a2101dcbb96017681a500d6b82bbe5a88766`，包含 `IKCPOPS`/`ikcp_setcc`；本地修正与当前 c/h hash 已锁定 | 锁定基线与本地源码 hash；不得直接按旧版 C# KCP 包的内部结构接入 |
 | 生命周期 | `GameRuntime` 已可选持有网络宿主；GameEntry 当前启动本地五子棋 | 保持离线默认，业务接入 GameNetworkSession |
-| 服务端 | `DotNet` 已拆为 Core、Server、Game.Protocol、Game.Config、Game.Server 与离线 NetworkProtocol 工程；WSS/KCP 共用强类型应用接口，PostgreSQL 注册登录与账号会话属于业务宿主 | 生产部署/跨进程会话/世界应用接入，完整诊断和平台容量验收 |
+| 服务端 | `DotNet` 已拆为 Core、Server、Game.Protocol、Game.Config、Game.Server 与离线 NetworkProtocol/ConfigGenerator 工程；WSS/KCP 共用强类型应用接口，PostgreSQL 注册登录与账号会话属于业务宿主 | 生产部署/跨进程会话/世界应用接入，完整诊断和平台容量验收 |
 
 MemoryPack 安装与当前验证边界见 [客户端依赖维护](ClientNetworkUsage.md#7-协议与依赖维护)。启动、资源所有权与失败处理以 [Launch.md](Launch.md)、[Scope.md](Scope.md)、[ErrorContract.md](ErrorContract.md) 为基础；本文补充网络模块的固定策略。
 
@@ -103,6 +103,7 @@ Unity/Assets/Plugins/GameFrame/Native/Kcp/<platform>
                                 gameframe_kcp 原生安装产物
 Protocol/                        唯一手写 .proto 协议源、共享 MSBuild 引用与编写说明
 DotNet/NetworkProtocol/          Proto → MemoryPack .NET 生成/校验工具
+DotNet/ConfigGenerator/          Luban 双端生成/产物检查工具与 IDE 启动项
 DotNet/DotNet.sln                 已有服务端解决方案，与 Unity/ 同级
 DotNet/GameFrame.Network.Core/    共享 wire、路由/codec 契约、缓冲预算与 native ABI
 DotNet/GameFrame.Server/          通用 WSS/KCP 服务端与强类型应用接口
@@ -310,7 +311,7 @@ Hello 完成前仅允许当前握手所需控制包。Hello 完成后，WSS 进�
 
 协议按 Common、Session、World、Diagnostics 分域并分别组织 message/service 文件，仍生成同一目录与 catalog，不因此新增程序集、部署进程或 Runtime 管理器。Common 定义唯一 ResultCode 与简单操作响应；Session 只处理账号登录/恢复、世界授权与注销，World 定义世界业务，Diagnostics 只由 local profile 注册。业务结果使用生成的 ResultCode（Success=0），帧头 StatusCode 仍用于系统错误。当前项目未部署，本轮直接更新字段和 opcode，不保留旧协议兼容入口。
 
-服务端、协议工具与联调测试工程统一使用 `TargetFramework=net10.0`。实施时分别在 `DotNet/` 与 `Tools/` 下通过 `global.json` 锁定同一 .NET 10 SDK 补丁版本，构建命令从对应目录执行，避免影响 `Unity/Config` 的 .NET 8 生成环境；已锁定 SDK 10.0.401。共享生成 DTO/约束属性源码仍限制在当前 Unity 支持的 C# 语法与 API 范围；服务端独有代码可使用 .NET 10 能力。Unity 保持 MemoryPack.Core 的 `.NET Standard 2.1` 版本，不因服务端升级而替换为 .NET 10 DLL。MemoryPack 继续固定 1.21.4，实际互通以 Unity/.NET 10 golden vectors 和 IL2CPP 测试为准。
+服务端、离线生成工具与联调测试工程统一使用 `TargetFramework=net10.0`。分别在 `DotNet/` 与 `Tools/` 下通过 `global.json` 锁定 SDK 10.0.401，构建命令从对应目录执行。ConfigGenerator 以外部进程调用 Unity/Config 中固定的 Luban 5.0.0，仍需要 .NET 8 运行时，不升级 Luban 或将 .NET 10 DLL 加载进 Unity。共享生成 DTO/约束属性源码仍限制在当前 Unity 支持的 C# 语法与 API 范围；服务端独有代码可使用 .NET 10 能力。Unity 保持 MemoryPack.Core 的 `.NET Standard 2.1` 版本，不因服务端升级而替换为 .NET 10 DLL。MemoryPack 继续固定 1.21.4，实际互通以 Unity/.NET 10 golden vectors 和 IL2CPP 测试为准。
 
 字段号必须从 1 连续编号，生成 `[MemoryPackOrder(n - 1)]` 与 `[MemoryPackable(SerializeLayout.Explicit)]`。字段名称使用 snake_case，生成 C# PascalCase 属性；字符串、数组限额与引用可空性以自定义 FieldOptions 声明。路由 opcode、类型、通道与正文上限以 service method 的 MethodOptions 声明；完整规则和命令见 [共享协议规范](DotNetDevelopment.md#6-共享-protomemorypack-编写规则) 和 [生成命令](DotNetUsage.md#协议生成与验证)。例如：
 

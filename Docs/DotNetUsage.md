@@ -78,26 +78,48 @@ dotnet dev-certs https --trust
 
 ### Luban 配置生成与读取
 
-两端共用 `Unity/Config/Excel` 和 `luban.conf`。macOS/Linux 从仓库根目录运行：
+两端共用 `Unity/Config/Excel` 和 `luban.conf`，统一通过解决方案中的 `DotNet/ConfigGenerator` 调用现有 Luban 5.0.0 可执行文件。工具不引用 Game.Config，既有生成产物缺失时也能独立生成；不将 Luban 源码工程或生成器依赖带入游戏服务器。
+
+Rider/Visual Studio 选择 ConfigGenerator 的以下启动项，然后直接运行：
+
+| 启动项 | 行为 |
+| --- | --- |
+| Generate Server | 只生成服务端代码和数据 |
+| Generate All | 依次生成客户端、服务端代码和数据 |
+| Check | 临时生成双端产物，与正式目录比较，不修改正式文件 |
+
+对应命令：
+
+```sh
+(cd DotNet && dotnet run --project ConfigGenerator --launch-profile "Generate Server")
+(cd DotNet && dotnet run --project ConfigGenerator --launch-profile "Generate All")
+(cd DotNet && dotnet run --project ConfigGenerator --launch-profile Check)
+```
+
+IDE 不读取 launchSettings 时，显式填写 `generate --target server`、`generate --target all` 或 `check --target all`。CLI 为 `generate|check [--target client|server|all] [--root repository-path]`，默认双端；工具的 `all` 表示分别执行 client/server，不是 Luban 的全组 all target。根目录默认从工具所在目录向上定位，不依赖工作目录；工具复制到仓库外时使用 `--root`。
+
+macOS/Linux 从仓库根目录也可运行：
 
 ```sh
 bash Unity/Config/gen.sh
 ```
 
-Windows 可在任意目录运行 `Unity\Config\gen.bat`。Unity 菜单 `Tools/GameFrame/Excel/ExcelExporter` 调用同一脚本，一次生成客户端和服务端；Windows 脚本无 pause，失败退出码会传回编辑器。需要安装 .NET 8 运行时，必要时用 `DOTNET_EXECUTABLE` 指定 dotnet 绝对路径，与服务端 SDK 10.0.401 分开。
+Windows 可在任意目录运行 `Unity\Config\gen.bat`。Unity 菜单 `Tools/GameFrame/Excel/ExcelExporter` 调用同一脚本；脚本从 DotNet 工作目录运行 ConfigGenerator 的双端生成命令。Windows 脚本无 pause，失败退出码会传回编辑器。统一入口需要 SDK 10.0.401 和 .NET 8 运行时（用于固定版本 Luban）；Unity/Hub 的 PATH 可能不同，必要时设置 `DOTNET_EXECUTABLE` 为绝对路径。工具优先使用该变量，其次 DOTNET_HOST_PATH，否则使用当前 .NET 运行时对应的 host，不自动切换版本或重试。
 
 | target | 命名空间 | 代码输出 | 数据输出 |
 | --- | --- | --- | --- |
 | client（c） | Game.Hotfix.TableConfig | Unity/Assets/Scripts/Hotfix/TableConfig/Generated | Unity/Assets/Config/Excel/Bytes |
 | server（s） | Game.Config.TableConfig | DotNet/Game.Config/Generated | DotNet/Game.Config/Bytes |
 
-两次生成均启用 `--strict`；任一步失败，整个命令失败，不发布部分更新。输出目录只放生成内容，Luban 默认清理过时文件并保留 `.meta`；删除 Unity 表资产时还须检查对应 `.meta`。运行库固定在 `Game.Config/Luban`，不从 Unity 缓存引用。当前共享表为 GlobalConst、AIRobot，Language、GameScene 仅客户端导出。
+两次生成均启用 `--strict`；任一步失败即停止后续目标并保留 Luban 退出码。Generate All 的两个目标顺序写入，失败不会回滚已生成目标。输出目录只放生成内容，Luban 默认清理过时文件并保留 `.meta`；删除 Unity 表资产时还须检查对应 `.meta`。运行库固定在 `Game.Config/Luban`，不从 Unity 缓存引用。当前共享表为 GlobalConst、AIRobot，Language、GameScene 仅客户端导出。
+
+Check 比较文件集合与二进制内容，忽略 `.meta/.uid`；缺失、多余或变化的产物返回 1，参数错误返回 2，Ctrl+C 返回 130。成功、失败或取消均清理临时输出；取消时先终止并等待 Luban 子进程退出。Check 可用于提交前或 CI 校验。
 
 服务端通过 `Game.Server.Configuration.TableConfigLoader.Load` 构造一个 `Game.Config.TableConfig.Tables`，使用生成器维护的表名读取文件并解析引用。两个 local profile 都在监听前完成加载，缺失或损坏文件终止启动。WSS 的业务服务可注入该 Tables 单例，或在应用组合处通过构造参数接收同一个实例；不重新加载、维护表名清单或修改其集合。
 
 `dotnet build/publish Game.Server` 自动复制服务端数据到执行目录的 `Config/Bytes`，许可证到 `Licenses/Luban/LICENSE`，运行时不需要 Excel、生成器或 Unity。默认目录与当前工作目录无关；`GF_CONFIG_DIR` 可指定外部目录。第一版通过重启应用配置更新：仅数据变化部署匹配 bytes，表结构变化则同时生成代码/数据并重新编译发布。
 
-验证生成时可将四个环境变量 `LUBAN_OUTPUT_CODE_DIR`、`LUBAN_OUTPUT_DATA_DIR`、`LUBAN_SERVER_OUTPUT_CODE_DIR`、`LUBAN_SERVER_OUTPUT_DATA_DIR` 全部指向独立临时目录，运行脚本后分别对比两端 `.cs/.bytes`；不要只覆盖客户端目录，否则仍会写正式服务端产物。加载与部署回归测试：
+常规只读核验使用 Check。需要自定义输出时可设置 `LUBAN_OUTPUT_CODE_DIR`、`LUBAN_OUTPUT_DATA_DIR`、`LUBAN_SERVER_OUTPUT_CODE_DIR`、`LUBAN_SERVER_OUTPUT_DATA_DIR`，相对路径基于 Unity/Config；仅所选目标的变量生效。验证双端生成时四个变量应全部指向独立临时目录，否则仍会写未覆盖的正式产物。加载与部署回归测试：
 
 ```sh
 (cd Tools && dotnet test NetworkServer.Tests --filter 'TableConfigTests|WssLifecycleTests')
@@ -282,6 +304,7 @@ grant 注册后 30 秒内完成 DTLS+GFNP Hello 单次绑定，过期不自动�
 ```sh
 (cd Tools && dotnet test NetworkFramework.Tests -c Release)
 (cd Tools && dotnet test NetworkProtocol.Tests -c Release)
+(cd Tools && dotnet test ConfigGenerator.Tests -c Release)
 GF_POSTGRES_TEST_CONNECTION='Host=127.0.0.1;Database=独立测试库;Username=测试角色;Password=测试密码' GF_KCP_NATIVE_LIBRARY=/absolute/path/libgameframe_kcp.dylib dotnet test Tools/NetworkServer.Tests -c Release
 python3 Native/Kcp/tests/verify_fastack.py
 python3 Native/Kcp/tests/verify_allocation_safety.py
@@ -293,6 +316,7 @@ PG 测试角色需能创建 schema，测试创建随机 schema 并只删除自�
 
 | 日期与范围 | 证据 | 限制 |
 | --- | --- | --- |
+| 2026-10-13 配置生成统一入口，macOS/.NET 10.0.401、Unity 6000.3.19f1 | 七工程 Release 编译 0 警告/错误；解决方案及 ConfigGenerator.Tests locked restore 通过；工具测试 15/15、0 跳过（双管道、退出码、取消与清理）；dotnet run 三个 launch profile 成功；脚本从其他工作目录向带空格路径导出 9+5 个 C#、4+2 个 bytes，与正式产物一致；真实 Check 成功及缺失/多余/变化失败返回 1，文件内容与 mtime 不变；空产物 checkout 可生成服务端配置；Unity ExcelExporter 成功，相关 EditMode 1/1、Console 无错误，场景/设置保持原值 | 未实测 Rider/Visual Studio UI、Windows/Linux 脚本或服务端、Player/IL2CPP/真机；未重跑 PG/native、运行时 PlayMode 或远端 CI |
 | 2026-10-13 Luban 双端接入，macOS/.NET 10.0.401、Unity 6000.3.19f1 | 六工程 Release 编译 0 警告/错误；locked restore 通过；Config/WssLifecycle10/10；双端临时生成 9+5 个 C#、4+2 个 bytes 与正式产物一致；发布目录数据/许可证一致；两个 profile 在不同工作目录加载成功，缺配置先于网络依赖失败；Unity Editor 编译、ExcelExporter 菜单双端生成成功、EditMode5/5、配置 PlayMode9/9 | PlayMode 首次受到前一轮 EditMode 的 Test Runner 状态残留影响，重新加载脚本域后通过；场景、运行设置恢复；未重跑 PG/native、Windows 脚本实跑、Player/IL2CPP/真机或远端 CI |
 | 2026-10-13 协议生成入口迁移，macOS/.NET 10.0.401 | 五工程 Release 编译 0 警告/错误；Protocol182/182、0 跳过；Generate/Check launch profile 均成功处理 5 文件；锁定依赖还原通过 | 生成 C# 仅路径注释变化，manifest/hash/vector 未变；本轮未重跑 WSS/PG/native，未执行远端 CI |
 | 2026-10-13 .NET Release | 四工程 0 警告/错误；Server136、Framework13、Protocol182 共 331 项全通过、0 跳过；check --artifacts 通过 | 独立 PG18 和 macOS native，不能代表其他平台 |

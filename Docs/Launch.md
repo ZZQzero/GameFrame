@@ -19,7 +19,7 @@ Launch 没有单例或对外接口，也不调用 Hotfix 入口。DLL 必须在�
 `TableConfigManager.Init` 使用 `new Tables(resources.LoadConfigByte)` 同类的加载回调，
 表名由生成代码维护。生成配置通过 Luban 的 topModule 统一到 `Game.Hotfix.TableConfig`。
 业务通过 `Game.Hotfix.TableConfig.TableConfigManager.Tables` 访问配置。
-`Unity/Config/gen.sh/gen.bat` 分别生成 client（c）和 server（s）配置；Unity 保持现有代码/数据输出与 YooAsset 加载链，服务端独立输出到 `DotNet/Game.Config`，见 [服务端配置接入](DotNetUsage.md)。
+`Unity/Config/gen.sh/gen.bat` 与 Unity ExcelExporter 菜单统一通过 `DotNet/ConfigGenerator` 分别生成 client（c）和 server（s）配置；IDE 可选择 Generate Server、Generate All、Check。Unity 保持现有代码/数据输出与 YooAsset 加载链，服务端独立输出到 `DotNet/Game.Config`，见 [服务端配置接入](DotNetUsage.md)。
 语言服务在 Launch 中先用空表初始化，读取已保存的语言设置。
 GameEntry 将热更语言表转换后通过 LanguageManager.AddTable 补入，保留当前语言并刷新已注册的文本。
 

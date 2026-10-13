@@ -64,6 +64,7 @@
 - 程序集改名后需要重新生成对应的热更 DLL；不要仅重命名旧 DLL 来替代重新编译。
 - Luban 输入位于 `Unity/Config/Excel`，配置为 `Unity/Config/luban.conf`；代码输出为 `Unity/Assets/Scripts/Hotfix/TableConfig/Generated`，数据输出为 `Unity/Assets/Config/Excel/Bytes`。
 - Luban 从同源 Excel 分别生成 client/server（`cs-bin + bin --strict`）。Unity 表类型使用 `Game.Hotfix.TableConfig`，加载复用现有 `TableConfigManager` 和 `ResourceLoadManager`；服务端生成代码/数据位于 `DotNet/Game.Config/Generated`、`DotNet/Game.Config/Bytes`，类型使用 `Game.Config.TableConfig`，Game.Server 在监听前加载 Tables，随构建/发布复制数据，不另外维护表名列表。
+- Luban 统一入口为 `DotNet/ConfigGenerator`，IDE 提供 Generate Server、Generate All、Check；脚本与 Unity 菜单调用同一工具。Check 临时生成并只读比较正式产物；工具的 all 表示分别生成 client/server，不使用 Luban 全组 all 发布。
 - 不将手写代码放入生成目录，不手动修改生成文件，也不修改 Unity 缓存来代替修复源文件。
 - Sqlite/Backup 的原生库名和 ABI 不是程序集名，不因框架改名顺带修改；插件构建和安装遵循 [原生插件说明](Tools/README.md)。
 
@@ -129,7 +130,7 @@ if (config.Enabled) { Initialize(config); }
 - EditMode 测试位于 `Unity/Assets/Scripts/Tests/EditMode`，程序集为 `GameFrame.Tests.EditMode`；PlayMode 对应 `GameFrame.Tests.PlayMode`。按影响选择已有测试，必要时再全量运行，不为简单格式修改新增测试。
 - 程序集边界或条件编译变更需检查 Player 脚本编译；启动流程变更还需验证 `Unity/Assets/Scenes/Launch.unity`、GameEntry 就绪和相机 Stack。
 - 记录测试前的场景和 EditorSettings，结束后恢复工具造成的变化，保留用户设置与已有修改。
-- macOS/Linux 从仓库根目录运行 `bash Unity/Config/gen.sh`；Windows 在 `Unity/Config` 目录运行 `gen.bat`。生成依赖 .NET 8，Unity/Hub 启动环境可能与终端 PATH 不同；优先使用脚本现有的路径配置。
+- macOS/Linux 从仓库根目录运行 `bash Unity/Config/gen.sh`；Windows 在 `Unity/Config` 目录运行 `gen.bat`。统一生成入口需要 SDK 10.0.401 和 .NET 8 运行时（Luban）；Unity/Hub 启动环境可能与终端 PATH 不同，优先使用脚本现有的路径配置。
 - 原生插件的 `build.py`、`install.py`：Sqlite/MediaBackup 位于各模块的 `Native~/build`，KCP 位于仓库公共目录 `Native/Kcp/build`。执行前查看参数和目标平台；先构建安装 Sqlite，再让 MediaBackup 使用同一核心产物。替换已加载的原生库后需重启 Unity 才能有效验证。
 - `python3 Tools/migrate_native_layout.py` 用于核验既有迁移产物，不是通用构建入口；不要为普通构建调用其 `--apply`。
 - 汇报明确说明改了什么、验证了什么及未验证部分；区分源码检查、Editor 编译、Player 脚本编译、原生 IL2CPP 构建和真机验证，不将其中一项当作其余项完成。

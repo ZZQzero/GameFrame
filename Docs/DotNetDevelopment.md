@@ -17,7 +17,7 @@
 
 ## 2. 工程、功能目录与依赖边界
 
-SDK 由 `DotNet/global.json`、`Tools/global.json` 锁定为 10.0.401，工程目标 `net10.0`。Unity 共用源码保持 Unity 支持的语言/API，不把 .NET 10 DLL 放入 Unity；Luban 仍按自己的 .NET 8 环境生成。
+SDK 由 `DotNet/global.json`、`Tools/global.json` 锁定为 10.0.401，工程目标 `net10.0`。Unity 共用源码保持 Unity 支持的语言/API，不把 .NET 10 DLL 放入 Unity；ConfigGenerator 使用 SDK 10，调用的 Luban 仍需要 .NET 8 运行时。
 
 | 工程/目录 | 职责 | 依赖边界 |
 | --- | --- | --- |
@@ -25,6 +25,7 @@ SDK 由 `DotNet/global.json`、`Tools/global.json` 锁定为 10.0.401，工程�
 | `DotNet/GameFrame.Server` | WSS/KCP host、连接与队列、强类型派发、Push、关闭 | 只引用 Core 与 ASP.NET Core，不引用 Game.Protocol/Game.Server/Npgsql |
 | `DotNet/Game.Protocol` | 编译双端同源的生成 DTO/catalog | 引用 Core、MemoryPack，导入 `Protocol/GameFrame.Protocol.projitems` |
 | `DotNet/Game.Config` | 服务端 Luban 生成表与固定版本的二进制运行库 | 不依赖 Unity、网络框架或游戏协议 |
+| `DotNet/ConfigGenerator` | Luban 离线生成与产物检查，提供 IDE 启动项 | 仅启动固定版本 Luban 进程，不引用 Game.Config 或其他运行时工程 |
 | `DotNet/Game.Server` | 单业务可执行入口、应用组合、认证、数据库、配置加载、部署 | 引用 Server、Protocol、Config；玩家与玩法规则在这里实现 |
 | `Protocol`、`DotNet/NetworkProtocol` | 唯一手写 IDL 与离线生成/检查工具 | 不新增第二套手写 DTO/opcode，不依赖已有生成产物才能生成 |
 | `Native/Kcp` | 双端唯一 C 源码、依赖锁、ABI、构建安装与回归 | C 处理字节、KCP/DTLS，不解析 MemoryPack 游戏 DTO |
@@ -70,7 +71,9 @@ WssServer 作为 hosted lifecycle service，在所有 hosted StopAsync（包括 
 
 ### Luban 游戏配置
 
-Excel 与 Schema 唯一来源仍为 `Unity/Config/Excel`。`gen.sh/gen.bat` 顺序执行 `client` 与 `server` target，均使用 `cs-bin + bin --strict`；客户端命名空间为 `Game.Hotfix.TableConfig`，服务端为 `Game.Config.TableConfig`。表/字段通过 `c/s/e` 分组控制，空表分组遵循 luban.conf 的 default group，不能将服务端专用配置写到客户端输出。`all` 仅保留用于全组检查。
+Excel 与 Schema 唯一来源仍为 `Unity/Config/Excel`。`ConfigGenerator` 提供 Generate Server、Generate All、Check IDE 启动项；gen.sh/gen.bat 与 Unity 菜单统一调用该工具。双端生成依次执行 Luban 的 client/server target，均使用 `cs-bin + bin --strict`；客户端命名空间为 `Game.Hotfix.TableConfig`，服务端为 `Game.Config.TableConfig`。表/字段通过 `c/s/e` 分组控制，空表分组遵循 luban.conf 的 default group，不能将服务端专用配置写到客户端输出。工具 `--target all` 表示双端分别生成，Luban 自身的 all target 仅用于全组检查。
+
+Check 在系统临时目录生成并逐文件比较正式代码/数据，忽略 `.meta/.uid`，不写正式资产；临时目录在成功、失败与取消后清理。生成进程同时读取 stdout/stderr，任一目标失败停止后续目标并原样返回退出码；取消终止并等待子进程。双端生成不提供失败回滚。命令、输出变量与环境要求见 [使用说明](DotNetUsage.md#luban-配置生成与读取)。
 
 `Game.Config/Generated`、`Game.Config/Bytes` 只放生成产物；手写运行库放 `Game.Config/Luban`，来源与许可证固定在目录说明中，与当前 Unity 包相同。不得访问 Unity Library/PackageCache 构建，也不将生成器依赖带入服务端运行时。当前生成器保持 Luban 5.0.0，升级时同时验证两端代码、数据与运行库。
 
@@ -373,7 +376,7 @@ OwnedBytes 包含可控帧实际容量与保守 reservation，不是精确托管
 
 ### 当前范围与待完成项（2026-10-13）
 
-已实现：五个运行时工程与离线协议工具分层、Luban 双端生成和服务端加载、强类型框架接口、WSS/KCP 底层、Proto→MemoryPack、PostgreSQL 账号、local 启动、原生构建安装和主要生命周期回归；已修复慢 Connected 阻塞传输、未订阅 Push 漏校验、KCP 容量越界，以及账号迟到 epoch/认证收尾/关闭原因/logger 问题。
+已实现：五个运行时工程与离线协议/配置工具分层、Luban 双端生成和服务端加载、配置 IDE 启动项与只读产物检查、强类型框架接口、WSS/KCP 底层、Proto→MemoryPack、PostgreSQL 账号、local 启动、原生构建安装和主要生命周期回归；已修复慢 Connected 阻塞传输、未订阅 Push 漏校验、KCP 容量越界，以及账号迟到 epoch/认证收尾/关闭原因/logger 问题。
 
 未完成：生产 hosting/跨进程账号仲裁，账号到世界 grant 注册及撤销链路、世界/角色/AOI/移动/恢复业务，完整元数据计账、RPC 分阶段/分位耗时与统一服务端诊断、精细期限调度、帧池化/零逐包分配目标、构建输入指纹拆分、生产容量与 soak。先补测量再决定池化、编码长度预计算、采样或锁/调度调整。
 

@@ -280,7 +280,7 @@ namespace GameFrame.ProtocolTools
         {
             var code = new StringBuilder();
             void Line(string value = "") => code.Append(value).Append('\n');
-            Line("// Generated from Protocol/*.proto by Tools/NetworkProtocol. Do not edit.");
+            Line("// Generated from Protocol/*.proto by DotNet/NetworkProtocol. Do not edit.");
             Line("#nullable enable");
             Line("using System;");
             Line("using GameFrame.Network;");

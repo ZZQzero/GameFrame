@@ -21,7 +21,7 @@
   <ItemGroup>
     <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/NetworkOptions.cs" Link="Contracts/NetworkOptions.cs" />
     <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/NetworkConnectOptions.cs" Link="Contracts/NetworkConnectOptions.cs" />
-    <ProjectReference Include="../NetworkProtocol/NetworkProtocol.csproj" />
+    <ProjectReference Include="../../DotNet/NetworkProtocol/NetworkProtocol.csproj" />
     <Compile Include="../../Unity/Assets/Scripts/Tests/EditMode/Network/NetworkProtocolTests.cs" Link="NetworkProtocolTests.cs" />
     <Compile Include="../../Unity/Assets/Scripts/Tests/EditMode/Network/NetworkMemoryPackTests.cs" Link="NetworkMemoryPackTests.cs" />
   </ItemGroup>

@@ -1,4 +1,4 @@
-// Generated from Protocol/*.proto by Tools/NetworkProtocol. Do not edit.
+// Generated from Protocol/*.proto by DotNet/NetworkProtocol. Do not edit.
 #nullable enable
 using System;
 using GameFrame.Network;

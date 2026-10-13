@@ -43,7 +43,7 @@ and the exact allowed source transformations. It replaces the macOS binary
 atomically rather than modifying an inode that Unity may have loaded.
 
 
-Network generation/check is in `NetworkProtocol`; the real Kestrel/WSS and pure client-core integration tests are in `NetworkServer.Tests`. Run `(cd Tools && dotnet test NetworkServer.Tests)` from the repository root. This project references Game.Server and links the same connection-core sources without a Unity/UniTask shim; runtime usage and remaining platform gates are documented in [client usage](../Docs/ClientNetworkUsage.md) and [server usage](../Docs/DotNetUsage.md#验证与现有证据).
+Network generation/check is in `DotNet/NetworkProtocol` (included in `DotNet/DotNet.sln`); the real Kestrel/WSS and pure client-core integration tests are in `NetworkServer.Tests`. Run `(cd Tools && dotnet test NetworkServer.Tests)` from the repository root. This project references Game.Server and links the same connection-core sources without a Unity/UniTask shim; runtime usage and remaining platform gates are documented in [client usage](../Docs/ClientNetworkUsage.md) and [server usage](../Docs/DotNetUsage.md#验证与现有证据).
 
 `.github/workflows/network.yml` checks locked dependency restoration, generated protocol drift, .NET protocol/WSS tests and native KCP regressions on network changes. Native safety verification runs both assertions/NDEBUG and ASan/UBSan with sanitizer errors treated as failures. Unity Editor, Player/IL2CPP and device gates remain separate.
 

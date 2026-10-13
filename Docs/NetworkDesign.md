@@ -102,7 +102,7 @@ Native/Kcp/third_party/kcp/       KCP 源码与 LICENSE，已合入 #467 与分�
 Unity/Assets/Plugins/GameFrame/Native/Kcp/<platform>
                                 gameframe_kcp 原生安装产物
 Protocol/                        唯一手写 .proto 协议源、共享 MSBuild 引用与编写说明
-Tools/NetworkProtocol/            Proto → MemoryPack .NET 生成/校验工具
+DotNet/NetworkProtocol/          Proto → MemoryPack .NET 生成/校验工具
 DotNet/DotNet.sln                 已有服务端解决方案，与 Unity/ 同级
 DotNet/GameFrame.Network.Core/    共享 wire、路由/codec 契约、缓冲预算与 native ABI
 DotNet/GameFrame.Server/          通用 WSS/KCP 服务端与强类型应用接口
@@ -303,7 +303,7 @@ Hello 完成前仅允许当前握手所需控制包。Hello 完成后，WSS 进�
 
 ### 8.1 唯一协议源
 
-用户确认采用 `.proto` 作为唯一手写协议源，位于仓库根 `Protocol/`，参考 `gameprotomessage` 的 message/service 分离方式；Proto 仅用于书写，不使用 Protobuf Binary。`Tools/NetworkProtocol` 生成纯 C# MemoryPack DTO、强类型路由与校验器到 `Game.Hotfix/Network/Generated`，不引用 Unity/Hotfix 其他业务模块。系统固定帧协议仍放在 Runtime。服务器通过 `Protocol/GameFrame.Protocol.projitems` 链接同一份生成源码，引用 NuGet MemoryPack 1.21.4；不能直接拿 Unity 编译出的 DTO DLL 当作 .NET 10 的通用协议 DLL。
+用户确认采用 `.proto` 作为唯一手写协议源，位于仓库根 `Protocol/`，参考 `gameprotomessage` 的 message/service 分离方式；Proto 仅用于书写，不使用 Protobuf Binary。`DotNet/NetworkProtocol` 生成纯 C# MemoryPack DTO、强类型路由与校验器到 `Game.Hotfix/Network/Generated`，不引用 Unity/Hotfix 其他业务模块。系统固定帧协议仍放在 Runtime。服务器通过 `Protocol/GameFrame.Protocol.projitems` 链接同一份生成源码，引用 NuGet MemoryPack 1.21.4；不能直接拿 Unity 编译出的 DTO DLL 当作 .NET 10 的通用协议 DLL。
 
 协议按 Common、Session、World、Diagnostics 分域并分别组织 message/service 文件，仍生成同一目录与 catalog，不因此新增程序集、部署进程或 Runtime 管理器。Common 定义唯一 ResultCode 与简单操作响应；Session 只处理账号登录/恢复、世界授权与注销，World 定义世界业务，Diagnostics 只由 local profile 注册。业务结果使用生成的 ResultCode（Success=0），帧头 StatusCode 仍用于系统错误。当前项目未部署，本轮直接更新字段和 opcode，不保留旧协议兼容入口。
 
@@ -335,7 +335,9 @@ message MoveInput {
 
 ### 8.2 生成工具与协议哈希
 
-`Tools/NetworkProtocol` 读取 `Protocol/**/*.proto`，通过 Proto 解析库处理声明和 import，先生成 DTO，再用 MemoryPack 1.21.4 自带的 Roslyn generator 编译，分析实际序列化成员并核对 serialization-info。生成器不依赖既有生成文件，可从缺失产物的 checkout 运行；完整生成源码编译通过后才写入。默认生成以下正式 C# 内容到 `Unity/Assets/Scripts/Hotfix/Network/Generated/`，禁止再维护第二份 opcode 表：
+生成工具纳入 `DotNet.sln`，通过 Generate/Check 启动项支持服务端 IDE 一键运行；Unity 的对应 Editor 菜单从 `DotNet/` 工作目录启动同一 .NET 进程。两端入口使用相同 `.proto`、生成规则与输出，菜单及 IDE 启动项同时生成/检查开发辅助产物；不把 net10.0 生成器或 Roslyn DLL 加载进 Unity Editor。
+
+`DotNet/NetworkProtocol` 读取 `Protocol/**/*.proto`，通过 Proto 解析库处理声明和 import，先生成 DTO，再用 MemoryPack 1.21.4 自带的 Roslyn generator 编译，分析实际序列化成员并核对 serialization-info。生成器不依赖既有生成文件，可从缺失产物的 checkout 运行；完整生成源码编译通过后才写入。默认生成以下正式 C# 内容到 `Unity/Assets/Scripts/Hotfix/Network/Generated/`，禁止再维护第二份 opcode 表：
 
 0. 显式顺序 MemoryPack DTO 与字段约束；它们是产物，不是手写协议源。
 
@@ -947,10 +949,10 @@ P1 阶段的临时测试 DTO 不能绕过 P2 直接投产；当前双方正式�
 命令入口如下，从仓库根目录进入对应目录执行。协议工具已实现，默认仅生成或检查正式 C#；`--artifacts` 额外生成或检查仓库根 `Protocol/Generated/` 下的 manifest/hash/vector，供开发验证与 CI 使用。辅助文件不进入正式运行资源，协议指纹始终内嵌于 C# catalog。DotNet 的 `local-wss`、`local-kcp-dtls` 与 gfnet 构建/安装脚本均已实现（配置见 [服务端使用说明](DotNetUsage.md)）。KCP profile 仍是显式凭据的底层联调入口，账号到世界的业务授权延后；实际平台验证与剩余门禁见 [服务端验证范围](DotNetUsage.md#验证与现有证据) 和 [客户端验证范围](ClientNetworkUsage.md#验证与现有证据)，以下命令示例不表示所有平台已执行：
 
 ```sh
-(cd Tools && dotnet run --project NetworkProtocol -- generate)
-(cd Tools && dotnet run --project NetworkProtocol -- check)
-(cd Tools && dotnet run --project NetworkProtocol -- generate --artifacts)
-(cd Tools && dotnet run --project NetworkProtocol -- check --artifacts)
+(cd DotNet && dotnet run --project NetworkProtocol --no-launch-profile -- generate)
+(cd DotNet && dotnet run --project NetworkProtocol --no-launch-profile -- check)
+(cd DotNet && dotnet run --project NetworkProtocol --no-launch-profile -- generate --artifacts)
+(cd DotNet && dotnet run --project NetworkProtocol --no-launch-profile -- check --artifacts)
 (cd Tools && dotnet test NetworkProtocol.Tests)
 (cd DotNet && dotnet run --project Game.Server -- --profile local-wss)
 (cd DotNet && dotnet run --project Game.Server -- --profile local-kcp-dtls)

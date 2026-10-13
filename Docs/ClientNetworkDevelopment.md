@@ -11,7 +11,7 @@
 | GameFrame.Runtime / GameFrame.Network | NetworkRuntime/Client/Context、传输、帧/RPC/队列/期限/诊断，业务无关 |
 | Game.AOT | 安装包启动、DLL 与资源准备；不引用 Hotfix 或初始化账号/世界业务 |
 | Game.Hotfix | 游戏网络配置、生成 DTO/catalog、业务状态、凭据、订阅与显式恢复 |
-| Protocol / Tools/NetworkProtocol | 唯一.proto 真源和双端同源生成，不在 Unity 另写 DTO/opcode |
+| Protocol / DotNet/NetworkProtocol | 唯一.proto 真源和双端同源生成，不在 Unity 另写 DTO/opcode |
 | Native/Kcp | 双端唯一 C 源码、依赖锁和构建；Unity Plugins 目录只放安装产物 |
 
 Runtime 不引用 Hotfix/Editor；Hotfix 通过冻结 NetProtocolCatalog 提供 codec，系统控制包固定编码不依赖业务 DTO。不要复制第二套 RPC、计时器或事件总线，不让 Runtime 修改 Transform 或维护账号、背包、房间和世界状态。
@@ -151,6 +151,8 @@ Connect 后显式 Register/Login/Resume；先检查 ResultCode，再校验成功
 ## 8. MemoryPack、HybridCLR 与平台验收
 
 共享消息只能改.proto，再运行工具同步双端；字段/枚举/类型/上限/hash 规则见 [共享协议规范](DotNetDevelopment.md#6-共享-protomemorypack-编写规则)，命令见 [生成说明](DotNetUsage.md#协议生成与验证)。不要手工写网络 MemoryPack DTO、UnityEngine 字段、Nullable 数值、自定义 formatter/回调或启用 VersionTolerant 兼容。
+
+Editor 的 Generate Messages/Check Messages 菜单调用 `DotNet/NetworkProtocol` 外部进程，异步排空 stdout/stderr，并以退出码判定成功。工具执行时禁止重复启动，保持域重载与资产刷新锁的成对释放；具体 SDK 定位与本机设置见客户端使用说明。生成器 DLL 及 Roslyn 依赖不导入 Unity 程序集。
 
 Unity MemoryPack 固定 1.21.4、Core 为.NET Standard2.1，Generator 保留 RoslynAnalyzer 标签且不作为普通 Editor/Player 插件加载。NuGetForUnity/UPM 及配置、依赖 meta/GUID 同步维护，恢复步骤见客户端使用说明，不用.NET10 DLL 替换 Unity 依赖。
 

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "Generate": {
+      "commandName": "Project",
+      "commandLineArgs": "generate --artifacts",
+      "launchBrowser": false
+    },
+    "Check": {
+      "commandName": "Project",
+      "commandLineArgs": "check --artifacts",
+      "launchBrowser": false
+    }
+  }
+}

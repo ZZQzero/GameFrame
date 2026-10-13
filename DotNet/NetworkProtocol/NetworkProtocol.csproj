@@ -15,6 +15,6 @@
     <Reference Include="MemoryPack.Generator" HintPath="$(PkgMemoryPack_Generator)/analyzers/dotnet/cs/MemoryPack.Generator.dll" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../../DotNet/GameFrame.Network.Core/GameFrame.Network.Core.csproj" />
+    <ProjectReference Include="../GameFrame.Network.Core/GameFrame.Network.Core.csproj" />
   </ItemGroup>
 </Project>

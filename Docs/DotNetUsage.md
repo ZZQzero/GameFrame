@@ -185,15 +185,19 @@ await repository.ValidateAsync(cancellation);
 
 输入是 `Protocol/Common`、`Session`、`World`、`Diagnostics` 下的.proto；字段/路由规则见 [共享协议规范](DotNetDevelopment.md#6-共享-protomemorypack-编写规则)。修改.proto 后：
 
+`DotNet/NetworkProtocol` 已加入 `DotNet.sln`，是独立的开发工具，不由 Game.Server 运行时引用。在 IDE 中将 NetworkProtocol 设为启动工程，选择 `Generate` 后点击运行即可生成消息；选择 `Check` 检查产物是否与协议源一致。两个启动项均包含 `--artifacts`。命令行也可以运行 `(cd DotNet && dotnet run --project NetworkProtocol --launch-profile Generate)` 或 `--launch-profile Check`。
+
 ```sh
-(cd Tools && dotnet restore NetworkProtocol --locked-mode)
-(cd Tools && dotnet run --project NetworkProtocol -- generate --artifacts)
-(cd Tools && dotnet run --project NetworkProtocol -- check --artifacts)
+(cd DotNet && dotnet restore NetworkProtocol --locked-mode)
+(cd DotNet && dotnet run --project NetworkProtocol --no-launch-profile -- generate --artifacts)
+(cd DotNet && dotnet run --project NetworkProtocol --no-launch-profile -- check --artifacts)
 (cd Tools && dotnet test NetworkProtocol.Tests)
 (cd DotNet && dotnet build DotNet.sln)
 ```
 
 正式 C#只生成 GameNetMessages.cs/GameNetProtocol.cs 到 `Unity/Assets/Scripts/Hotfix/Network/Generated`，.NET Game.Protocol 链接同一源码。默认 generate/check 只处理这两个文件；--artifacts 额外处理 `Protocol/Generated/protocol.manifest.json`、protocol.sha256、golden-vectors.json，仅开发/CI 使用，不进入 Unity 资产、正式资源或运行时。
+
+Unity 菜单 `Tools/GameFrame/Network/Generate Messages`、`Check Messages` 从 `DotNet/` 工作目录调用同一个生成器，均包含 `--artifacts`；环境与使用步骤见 [客户端协议维护](ClientNetworkUsage.md#7-协议与依赖维护)。生成器和 Roslyn 等依赖由外部 .NET 进程加载，不安装进 Unity Assets 或 Player。测试工程仍在 `Tools/NetworkProtocol.Tests`，CI 从新工程路径执行只读检查。
 
 check 不写文件，缺失、字节差异、多余 C#返回非零。generate 不覆盖字节相同文件，也不自动删除多余 C#，移除过时 Unity 资产须同时处理.meta 并保留有效 GUID。生成 C#/辅助文件/NuGet 锁纳入版本库；CI 只 check，不自动 generate 掩盖漏生成。
 
@@ -257,10 +261,11 @@ python3 Native/Kcp/tests/verify_allocation_safety.py
 
 PG 测试角色需能创建 schema，测试创建随机 schema 并只删除自身 schema。未设数据库/native 变量时对应测试明确跳过；不能将跳过作为 PG/DTLS 验收。框架测试不引用游戏协议，服务端测试含真实 Kestrel/WSS、客户端核心、账号、数据库与 UDP。native 脚本在临时目录验证 hash、ACK 对照、分配失败和 sanitizer，不安装插件；只有工具链不支持时显式--no-sanitizers，并注明未验。
 
-以下为既有实际结果，不是本次文档整理重跑：
+以下按实际执行范围记录，各次验证独立，不用旧数量代表新验证：
 
 | 日期与范围 | 证据 | 限制 |
 | --- | --- | --- |
+| 2026-10-13 协议生成入口迁移，macOS/.NET 10.0.401 | 五工程 Release 编译 0 警告/错误；Protocol182/182、0 跳过；Generate/Check launch profile 均成功处理 5 文件；锁定依赖还原通过 | 生成 C# 仅路径注释变化，manifest/hash/vector 未变；本轮未重跑 WSS/PG/native，未执行远端 CI |
 | 2026-10-13 .NET Release | 四工程 0 警告/错误；Server136、Framework13、Protocol182 共 331 项全通过、0 跳过；check --artifacts 通过 | 独立 PG18 和 macOS native，不能代表其他平台 |
 | 2026-10-12 mbedTLS4.2 迁移后 native | macOS Release/ASan/UBSan 回归通过，动态 live bytes 归零；五组已安装库来源/二进制 hash 一致 | Windows 仅交叉编译/PE，Android/iOS 仅构建安装 |
 | 2026-10-12 实际进程 | WSS 注册→登录→Echo、重启后账号仍可登录；发布目录加载 KCP 库/监听/关闭，Ctrl+C 退出 0 | 本地实跑，非生产多实例/容量验收 |

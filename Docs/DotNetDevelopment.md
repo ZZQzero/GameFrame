@@ -25,8 +25,10 @@ SDK 由 `DotNet/global.json`、`Tools/global.json` 锁定为 10.0.401，工程�
 | `DotNet/GameFrame.Server` | WSS/KCP host、连接与队列、强类型派发、Push、关闭 | 只引用 Core 与 ASP.NET Core，不引用 Game.Protocol/Game.Server/Npgsql |
 | `DotNet/Game.Protocol` | 编译双端同源的生成 DTO/catalog | 引用 Core、MemoryPack，导入 `Protocol/GameFrame.Protocol.projitems` |
 | `DotNet/Game.Server` | 单业务可执行入口、应用组合、认证、数据库、部署 | 引用 Server、Protocol；玩家与玩法规则在这里实现 |
-| `Protocol`、`Tools/NetworkProtocol` | 唯一手写 IDL 与离线生成/检查工具 | 不新增第二套手写 DTO/opcode，不依赖已有生成产物才能生成 |
+| `Protocol`、`DotNet/NetworkProtocol` | 唯一手写 IDL 与离线生成/检查工具 | 不新增第二套手写 DTO/opcode，不依赖已有生成产物才能生成 |
 | `Native/Kcp` | 双端唯一 C 源码、依赖锁、ABI、构建安装与回归 | C 处理字节、KCP/DTLS，不解析 MemoryPack 游戏 DTO |
+
+`DotNet/NetworkProtocol` 加入服务端解决方案，提供 Generate/Check IDE 启动项；Unity Editor 菜单通过外部 .NET 进程调用同一工具。生成器只依赖 Core 和生成/编译库，不引用 Game.Protocol，保持缺失既有生成文件时仍能运行。协议源、正式生成文件与共享源码引用位置保持一致，详见双方使用说明。
 
 `Game.Server/Program.cs` 只验证 profile 并选择启动入口；`LocalWssService`、`LocalKcpService` 持有各自配置和资源。`LobbyApplication` 显式组合功能路由。按功能建目录，例如 `Login/` 放账号服务、仓库、会话、注册/登录/恢复/注销处理器及策略；后续背包、房间等沿用此方式。通用数据库连接池在 `Game.Server/Database/`，不是网络框架能力。不为尚未实现的网关、世界、账号再创建多个可执行项目。
 

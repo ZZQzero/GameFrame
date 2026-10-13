@@ -16,7 +16,13 @@ namespace GameFrame.ProtocolTools
 
                 string root = FindRoot();
                 IReadOnlyDictionary<string, byte[]> outputs = ProtoProtocolGenerator.Generate(Path.Combine(root, "Protocol"), args.Length == 2);
-                return WriteOutputs(root, outputs, args[0] == "check");
+                int result = WriteOutputs(root, outputs, args[0] == "check");
+                if (result == 0)
+                {
+                    Console.WriteLine($"Protocol {args[0]} succeeded ({outputs.Count} files): {root}");
+                }
+
+                return result;
             }
             catch (Exception exception)
             {

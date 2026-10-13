@@ -2,11 +2,13 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using GameFrame.Audio;
 using GameFrame.Input;
 using GameFrame.Localization;
+using GameFrame.Network;
 using GameFrame.Timing;
 using GameFrame.UI;
 using NUnit.Framework;
@@ -93,6 +95,34 @@ namespace GameFrame.Tests
             GameInput.Init(root.transform, actions);
             Assert.IsTrue(GameInput.IsInited);
         }
+
+        [UnityTest]
+        public IEnumerator DisablingTimerWhileRunningStillFailsPendingDelays() => UniTask.ToCoroutine(async () =>
+        {
+            await GameRuntime.InitAsync(new GameRuntimeConfig
+            {
+                EnableUI = false,
+                NetworkOptions = new NetworkRuntimeOptions()
+            });
+            var pending = GameTimer.DelayAsync(10000).AsTask();
+            var timerObject = GameRuntime.PersistRoot.Find("[GameTimer]").gameObject;
+            LogAssert.Expect(LogType.Exception, new Regex("UnityTimerRunner 被外部禁用"));
+            timerObject.SetActive(false);
+            Exception failure = null;
+            try
+            {
+                await pending;
+            }
+            catch (Exception error)
+            {
+                failure = error;
+            }
+
+            Assert.IsInstanceOf<TimerStateException>(failure);
+            await GameRuntime.ShutdownAsync();
+            Assert.IsFalse(GameTimer.IsInited);
+            Assert.IsFalse(GameRuntime.IsInited);
+        });
 
         [UnityTest]
         public IEnumerator StartsSelectedSystemsAndPreservesBorrowedRoot() => UniTask.ToCoroutine(async () =>

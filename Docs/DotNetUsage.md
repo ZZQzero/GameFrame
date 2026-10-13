@@ -165,12 +165,14 @@ DotNet/Game.Server/bin/Debug/net10.0/Game.Server --profile local-wss
 
 ```text
 TLS + ClientHello(hash, 空ticket) → ServerHello（仍未登录）
-→ Register（可选，成功仍未登录）→ Login → 已认证Echo
+→ Login（已有账号验密；不存在则建号）→ 保存账号会话 → 已认证Echo
 断线后显式新建WSS → ResumeLogin → 轮换恢复token、替换大厅绑定
 Logout → 撤销会话/token → 成功响应 → Close1
 ```
 
-首次 Hello 期限 5 秒，Hello 成功后登录等待 10 秒；Ping、Register 不续期。先等待注册响应再登录，同连接最多一个认证请求执行。已识别越阶段请求在 DTO 解码前拒绝。
+首次 Hello 期限 5 秒，Hello 成功后登录等待 10 秒；Ping、Register 不续期。同连接最多一个认证请求执行。已识别越阶段请求在 DTO 解码前拒绝。Unity 登录按钮只提交 Login，不需要先查账号或 Register。独立 Register 仍可用，成功后需另发 Login。
+
+首次 Login 使用参数化查询和唯一账号索引；并发创建时读取最终账号并验证保存的密码。建号与会话创建分开提交，超时/取消后账号可能已存在，下一次显式 Login 使用相同密码即可；不会回滚账号、覆盖密码或自动重放。数据库错误作为系统失败传播。
 
 账号区分大小写，最多 64 个 UTF-16 字符，拒绝空白/首尾空白/控制字符；密码 8～128、不裁剪。Register 重复返回 AccountAlreadyExists，无效输入 InvalidInput。凭据错误统一 InvalidCredentials 并 Close5。认证过载用系统 status1；具体策略与并发提交规则见 [开发规范账号章节](DotNetDevelopment.md#4-数据库与账号业务)。
 
@@ -332,6 +334,7 @@ PG 测试角色需能创建 schema，测试创建随机 schema 并只删除自�
 
 | 日期与范围 | 证据 | 限制 |
 | --- | --- | --- |
+| 2026-10-13 Login 自动建号与客户端接入，macOS/.NET 10.0.401 | 七工程 Release 编译 0 警告/错误；四测试工程 locked restore 通过；Server156、Framework13、Protocol182、ConfigGenerator15 共 366/366、0 跳过，使用独立 PG18.6 与现有 macOS Release native；新增真实 PG 首次建号、同名并发同/不同密码、保存密码复验与无效/取消输入测试，真实 WSS 一次 Login 后 Echo；协议 check --artifacts 通过；实际 Game.Server + Unity 登录/断线闭环通过 | 本地单实例；未验证生产部署、远端 CI、其他服务端平台、容量/soak；Unity 证据及临时开发证书信任范围见客户端说明 |
 | 2026-10-13 服务端传输修正与测量，macOS/.NET 10.0.401 | 七工程 Release 编译 0 警告/错误，解决方案与四测试工程 locked restore 通过；Server150、Framework13、Protocol182、ConfigGenerator15 共 360/360、0 跳过，使用独立 PG18 与本机 Release native；真实 UDP/DTLS 验证 21.5 秒初始化期间心跳/准入、业务 FIFO、factory 发布、失败/主动关闭取消与正常关闭排空，完成后 owned 归零；WSS33,824 最小额度接收最大帧及双 lease 清理通过；协议 check --artifacts 与 Luban check --target all 通过；CI YAML 解析、路径/检查入口与 setup-dotnet 双版本安装语义核对通过 | 未执行远端 CI、Unity/Player/IL2CPP/真机、Windows/Linux 服务端实跑、新 native 构建/sanitizer、容量或 soak；新增指标不是完整服务端诊断 |
 | 2026-10-13 KCP 单连接低负载样本，同上环境 | 16 次 Echo 预热后 128 次串行小消息；owner 工作 P95=0.244ms、循环间隔 P95=11.262ms、owner 分配 P95=1,256By/轮、发送排队 P95=11ms、派发排队 P95=1ms；含客户端 Pump 的 RPC RTT P95=57.581ms | 开启 MeterListener 的 loopback 功能样本，非容量/生产延迟门禁；包含采集开销，不代表纯框架分配或 WAN 性能；保留现有调度与内存策略 |
 | 2026-10-13 配置生成统一入口，macOS/.NET 10.0.401、Unity 6000.3.19f1 | 七工程 Release 编译 0 警告/错误；解决方案及 ConfigGenerator.Tests locked restore 通过；工具测试 15/15、0 跳过（双管道、退出码、取消与清理）；dotnet run 三个 launch profile 成功；脚本从其他工作目录向带空格路径导出 9+5 个 C#、4+2 个 bytes，与正式产物一致；真实 Check 成功及缺失/多余/变化失败返回 1，文件内容与 mtime 不变；空产物 checkout 可生成服务端配置；Unity ExcelExporter 成功，相关 EditMode 1/1、Console 无错误，场景/设置保持原值 | 未实测 Rider/Visual Studio UI、Windows/Linux 脚本或服务端、Player/IL2CPP/真机；未重跑 PG/native、运行时 PlayMode 或远端 CI |

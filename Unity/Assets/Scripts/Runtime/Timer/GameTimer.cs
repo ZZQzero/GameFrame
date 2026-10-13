@@ -321,6 +321,7 @@ namespace GameFrame.Timing
     internal sealed class UnityTimerRunner : MonoBehaviour
     {
         private TimerScheduler scheduler;
+        private bool quitting;
 
         internal void Initialize(TimerScheduler value)
         {
@@ -370,9 +371,14 @@ namespace GameFrame.Timing
             }
         }
 
+        private void OnApplicationQuit()
+        {
+            quitting = true;
+        }
+
         private void OnDestroy()
         {
-            if (scheduler != null)
+            if (scheduler != null && !quitting)
             {
                 GameTimer.NotifyRunnerUnavailable(this, "被外部销毁");
             }
@@ -382,7 +388,7 @@ namespace GameFrame.Timing
 
         private void OnDisable()
         {
-            if (scheduler != null)
+            if (scheduler != null && !quitting)
             {
                 GameTimer.NotifyRunnerUnavailable(this, "被外部禁用");
             }

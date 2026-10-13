@@ -52,27 +52,55 @@ namespace Game.Server.Login
             await AdmitAsync(cancellation);
             try
             {
-                using StoredAccount? stored = await repository.FindAsync(account, cancellation);
-                if (stored != null && (stored.Id <= 0 || stored.PasswordHash.Length != 32))
+                StoredAccount? stored = await repository.FindAsync(account, cancellation);
+                bool created = false;
+                if (stored == null)
                 {
-                    throw new InvalidOperationException("Invalid stored account credentials.");
-                }
-                // Unknown names still perform the same password derivation before uniform rejection.
-                byte[] salt = stored?.Salt ?? new byte[16];
-                byte[] hash = await Task.Run(() => PasswordHasher.Hash(password, salt, stored?.Iterations ?? PasswordHasher.Iterations), cancellation);
-                try
-                {
-                    if (stored == null || !CryptographicOperations.FixedTimeEquals(hash, stored.PasswordHash))
+                    byte[] salt = RandomNumberGenerator.GetBytes(16);
+                    byte[] hash = Array.Empty<byte>();
+                    try
                     {
-                        return (new LoginResponse { ResultCode = ResultCode.InvalidCredentials }, null);
+                        hash = await Task.Run(() => PasswordHasher.Hash(password, salt, PasswordHasher.Iterations), cancellation);
+                        created = await repository.CreateAsync(account, salt, hash, PasswordHasher.Iterations, cancellation);
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(salt);
+                        CryptographicOperations.ZeroMemory(hash);
+                    }
+
+                    // The unique account name decides concurrent creation. A losing request must
+                    // authenticate against the winner's credentials, never overwrite its password.
+                    stored = await repository.FindAsync(account, cancellation) ??
+                        throw new InvalidOperationException("Account missing after creation was resolved.");
+                }
+
+                using (stored)
+                {
+                    if (stored.Id <= 0 || stored.Salt.Length != 16 || stored.PasswordHash.Length != 32 ||
+                        stored.Iterations != PasswordHasher.Iterations)
+                    {
+                        throw new InvalidOperationException("Invalid stored account credentials.");
+                    }
+
+                    if (!created)
+                    {
+                        byte[] hash = await Task.Run(() => PasswordHasher.Hash(password, stored.Salt, stored.Iterations), cancellation);
+                        try
+                        {
+                            if (!CryptographicOperations.FixedTimeEquals(hash, stored.PasswordHash))
+                            {
+                                return (new LoginResponse { ResultCode = ResultCode.InvalidCredentials }, null);
+                            }
+                        }
+                        finally
+                        {
+                            CryptographicOperations.ZeroMemory(hash);
+                        }
                     }
 
                     return await sessions.LoginAsync(checked((ulong)stored.Id),
                         token => repository.AdvanceEpochAsync(stored.Id, token), disconnect, cancellation);
-                }
-                finally
-                {
-                    CryptographicOperations.ZeroMemory(hash);
                 }
             }
             finally

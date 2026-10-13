@@ -5,6 +5,7 @@ using GameFrame;
 using GameFrame.Audio;
 using GameFrame.Input;
 using GameFrame.Localization;
+using GameFrame.Network;
 using GameFrame.UI;
 using UnityEngine;
 using GameEvents = GameFrame.Event.EventSystem;
@@ -55,6 +56,7 @@ namespace Game.AOT
                 AudioConfig = audioConfig,
                 EnablePool = true,
                 EnableScene = true,
+                NetworkOptions = new NetworkRuntimeOptions(),
                 EnableUI = false
             }, token);
             await resources.LoadHotUpdateDllAsync(globalConfig, token);

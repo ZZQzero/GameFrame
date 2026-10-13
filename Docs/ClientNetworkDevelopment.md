@@ -126,11 +126,17 @@ KCP ACK/重传/探测/DTLS 握手不经业务桶，wire 带宽可高于业务速
 
 端点必须来自可信环境配置；正式 WSS 使用 wss 并正常验证证书，不信任任意返回的 URL/IP/端口。Editor/Development 显式 allowDevelopmentWebSocket 才能 ws，正式构建禁用；本地服务仍只开放 WSS。WebGL 当前建连明确 PlatformNotSupported，不进入桌面 socket/native 路径。
 
+本地 Editor 可通过 `LocalDevelopmentCertificate` 显式配置 localhost 公开开发证书。路径及 SHA-256 指纹按项目保存到本机 EditorPrefs；不把私钥或证书信任配置放进运行资源。播放前验证路径、有效期、DNS 名及固定指纹，失败阻止本次播放；BeforeSceneLoad 在业务初始化前将证书追加到 Mono TLS 信任锚，保留已有锚和默认验证器。停止播放、域重载及退出 Editor 恢复原设置；没有配置时不改变 TLS。工具仅存在于 GameFrame.Editor，不影响正式 Player，证书轮换须显式重新选择。
+
 KCP 凭据通过未来已认证 WSS 授权取得：ticket、非零 conv、16 字节 identity、32 字节 PSK 与有效单调 deadline；当前 local 仅注入受控测试 grant。调用者在 Connect 完成前不修改数组，结束后清零临时副本；native 自己复制并清零密钥。PSK 不进安装包/版本库/日志，认证不可用 conv 或 generation 代替。
 
-Connect 后显式 Register/Login/Resume；先检查 ResultCode，再校验成功 accountId/authEpoch 非零、accountSessionId 恰好 16 字节、resumeToken 恰好 32 字节及 TTL，才提交 Authenticated。TTL=RPC admission 单调时间+返回剩余时间，不从响应收到时续期，UTC 只显示/诊断。失败载荷不当成功，结构验证器不能代替权限语义。
+Connect 后显式 Login/Resume，独立 Register 可选；Login 自动创建不存在的账号。先检查 ResultCode，再校验成功 accountId/authEpoch 非零、accountSessionId 恰好 16 字节、resumeToken 恰好 32 字节及 TTL，才提交 Authenticated。TTL=RPC admission 单调时间+返回剩余时间，不从响应收到时续期，UTC 只显示/诊断。失败载荷不当成功，结构验证器不能代替权限语义。
 
 心跳单调时间：间隔 5 秒、一个未确认 nonce，移交后 15 秒 Pong 期限、控制入队后独立 15 秒发送期限；匹配 Pong 必须严格早于 deadline。总 Connect10 秒、KCP 不超过 grant 期限。TimeScale=0 不影响后台期限，不能用 Time.time 或依赖帧的 Timer 替代 IO 时钟；系统挂起后不承诺线程持续保活，恢复显式检查状态。
+
+当前 `GameLoginSession` 是 Hotfix 的普通实例，拥有一个 WSS 大厅客户端、私有认证响应、只读 GameUser、任务与生命周期 CTS。GameEntry 只创建/注入/停止它，LoginPanel 通过 LoginPanelArgs 借用；后续业务通过构造参数或面板参数接收同一个实例，不查询入口或新增静态 Current。只有校验成功结果/TTL 且连接仍有效后，才原子提交用户与凭据；密码不进入 GameUser。面板关闭只取消该次操作，成功关闭面板不注销会话。
+
+登录/注销串行准入，重复操作拒绝；失败、超时或取消等待 Close 清理后释放操作资格。DisposeAsync 先发布共享关闭任务、取消并等待在途操作，再释放观察者/客户端和清零凭据，重复释放等待同一任务。断线/顶号/注销使 CurrentUser 为 null 并通知入口回到登录。当前不提供 Resume 或自动重连，不持久化凭据；只读用户快照不能作为权限依据，每次业务准入检查 IsAuthenticated。
 
 后续 GameNetworkSession 放 Hotfix，拥有大厅、独占 KCP 世界客户端、账号/世界 epoch、凭据、CTS 与分别的状态机；不由临时 UI 面板创建销毁。一个 opcode 一个权威订阅，先更新业务模型再经已有 EventSystem 通知 UI。OpenScope/LifetimeScope 可拥有订阅和请求取消，但同步 Dispose 不能 await 连接关闭。
 

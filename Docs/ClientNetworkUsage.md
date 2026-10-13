@@ -10,7 +10,7 @@
 NetworkOptions = new NetworkRuntimeOptions()
 ```
 
-随后走现有 GameRuntime.InitAsync 与 GameEntry 启动流程。默认 null 禁用网络，不自动连服；未启用时访问 GameRuntime.Network 抛状态异常。不要在登录按钮里重复初始化 GameRuntime 或新建持久根。
+随后走现有 GameRuntime.InitAsync 与 GameEntry 启动流程。框架默认 null 禁用网络；当前项目 Launch 显式启用，GameEntry 创建 GameLoginSession，但直到玩家点击登录才连接。未启用时访问 GameRuntime.Network 抛状态异常。不要在登录按钮里重复初始化 GameRuntime 或新建持久根。
 
 业务会话持有客户端，端点来自可信环境配置：
 
@@ -35,7 +35,37 @@ Connect 完成仅代表传输和 Hello 成功。全部 API、State/Generation、
 
 ## 2. 注册、登录、恢复与注销
 
-新账号按顺序 Register，再 Login；已有账号直接 Login：
+项目启动后打开现有 LoginPanel。GameEntry prefab 的 `Login Endpoint` 默认 `wss://localhost:7443/network`，先按服务端说明准备 PostgreSQL、账号表与可信证书，启动 local-wss，再播放 Launch。正式环境替换为可信 WSS 地址；不关闭证书校验。
+
+如果 Editor 提示 `UNITYTLS_X509VERIFY_FLAG_NOT_TRUSTED`，通过 `Tools/GameFrame/Network/Set Local Development Certificate` 选择服务端 PFX 对应的公开 `.cer` 或 `.pem`。文件保留在项目外；仅接受有效期内、DNS 名为 localhost 且无私钥的证书。工具保存本机路径/指纹，每次播放初始化自动加载，停止后恢复 TLS 信任，不需要改 Launch 或 GameEntry。`Show Local Development Certificate` 查看当前配置，`Clear Local Development Certificate` 清除。文件删除、过期或内容更换会阻止播放并报告原因；轮换证书后重新选择。其他开发者各自选择自己的证书，正式玩家无需配置。
+
+从已有服务端 PFX 导出公开 DER 证书（第一条命令交互输入 PFX 密码）：
+
+```sh
+openssl pkcs12 -in /absolute/path/localhost.pfx -clcerts -nokeys -out /absolute/path/localhost.pem
+openssl x509 -in /absolute/path/localhost.pem -outform DER -out /absolute/path/localhost.cer
+```
+
+不要将 PFX 或私钥导入 Unity；正式服务使用对应域名的可信 CA 证书，Editor 工具不进入 Player。
+
+登录按钮校验账号（1～64 个 UTF-16 字符，无首尾空白/控制字符）、密码（8～128，不裁剪），禁用控件并提交一次 Login。已有账号验密，不存在则建号并认证；错误密码显示拒绝，失败收尾清空密码并恢复输入。成功后关闭登录面板并打开现有五子棋主界面，账号连接继续存活；五子棋仍是本地玩法，没有新增服务器对局。
+
+会话是普通实例，由入口创建、注入、释放，后续业务接收同一个实例：
+
+```csharp
+await GameUI.Push<LoginPanel, LoginPanelArgs>(new LoginPanelArgs(session, onLoggedIn));
+GameUser user = session.CurrentUser; // 未登录、断线或到期时为 null。
+if (user == null)
+{
+    return;
+}
+ulong accountId = user.AccountId;
+// session.LobbyClient 是已认证客户端的借用引用，业务不关闭或释放它。
+```
+
+GameUser 只包含账号 ID、输入账号名、认证 epoch 和单调到期时间；私有 sessionId/token 不暴露给 UI，不持久化密码或凭据。断线、顶号或显式注销清空认证并回到登录，无自动重连或 Resume。`await session.LogoutAsync(token)` 请求远端注销并清理本地状态；生命周期结束使用 `await session.DisposeAsync()`。运行中关闭整个应用先 `await entry.StopAsync()`，再关闭 GameUI、GameRuntime 和资源服务。
+
+下面展示底层 RPC，已有 GameLoginSession 的业务直接调用它，不再重复维护一份认证状态。独立注册仍可选择 Register，再 Login：
 
 ```csharp
 OperationResponse registered = await client.RequestAsync(
@@ -86,7 +116,7 @@ if (NetworkClock.GetMilliseconds() >= resumeDeadline)
 // 此时业务才能保存账号/epoch/token/deadline并提交Authenticated。
 ```
 
-示例 timeout 为单次 RPC 上限，调用者还须限制注册/登录整体流程，服务器登录硬期限不会因新 RPC 重置。业务层负责成功载荷/TTL 校验；当前尚未封装统一 GameNetworkSession。Login 失败、超时或取消先结束该次认证流程并 await Close/Dispose，不能认为服务端一定未认证；清理失败按错误契约保留主因。
+示例 timeout 为单次 RPC 上限，服务器登录硬期限不会因新 RPC 重置。GameLoginSession 先等待 Connect（上限 10 秒），随后立即提交 Login（上限 5 秒），校验成功载荷/TTL；失败、超时或取消先 await Close，不能认为服务端一定未建号或未认证，清理失败保留主因。完整世界 GameNetworkSession 仍延后。
 
 登录后用 local Echo 确认实际往返：
 
@@ -98,7 +128,7 @@ EchoResponse echo = await client.RequestAsync(
     cancellationToken);
 ```
 
-显式恢复时先完成旧客户端 Close，再连接 WSS，用保存的 accountSessionId/resumeToken 调用 GameNetRoutes.ResumeLogin。检查 ResultCode 及与 Login 相同的成功载荷/期限，成功原子替换 token；旧 token 只成功一次，响应丢失不自动复用或密码登录。服务器重启后 Resume 失效，玩家显式重新 Login。
+底层 Resume RPC 已提供，当前 GameLoginSession 不暴露恢复操作。后续显式恢复时先完成旧客户端 Close，再连接 WSS，用保存的 accountSessionId/resumeToken 调用 GameNetRoutes.ResumeLogin。检查 ResultCode 及与 Login 相同的成功载荷/期限，成功原子替换 token；旧 token 只成功一次，响应丢失不自动复用或密码登录。服务器重启后 Resume 失效，玩家显式重新 Login。
 
 已登录时显式 Logout：
 
@@ -223,15 +253,20 @@ Unity 依赖固定 MemoryPack1.21.4，NuGetForUnity4.5.0 与 MemoryPack.Unity Gi
 | 共享协议/codec/生成产物 | NetworkProtocolTests、NetworkMemoryPackTests EditMode，.NET Protocol.Tests 及 check --artifacts |
 | 协议编辑器工具 | NetworkProtocolToolTests EditMode（macOS/Linux 进程管道与错误路径）、实际 Generate/Check 菜单 |
 | 网络宿主、订阅、关闭和异步生命周期 | NetworkLifecycleTests PlayMode 及相关.NET 连接/框架回归 |
+| 登录面板、账号会话与入口 | GameLoginSessionTests、ResourceLoadManagerTests PlayMode，实际 Launch 登录；前者使用 GF_LOGIN_TEST_ENDPOINT 指向已准备的 WSS/PostgreSQL 服务，未配置时明确跳过联调用例 |
 | KCP/socket/native | native 回归、.NET KcpLoopbackTests、Unity NetworkKcpLoopbackTests |
 | 程序集/平台条件 | Editor 编译、实际目标 Player 脚本；native 链接另做 IL2CPP 包与实跑 |
 
 Unity 实际 UDP 测试使用 GF_KCP_LOOPBACK_CREDENTIALS 临时 JSON（服务端 grant 字段另加 Port），连接已运行 local listener，不自动启动服务或保留凭据。记录测试前场景/EditorSettings，结束恢复，不操作用户正在运行的服务/数据库。替换已加载 native 后先重启 Unity。
 
+Unity TLS 在部分 Editor 平台不继承 `dotnet dev-certs` 的信任。登录联调测试可额外设置 `GF_LOGIN_TEST_CERTIFICATE` 为已核验开发证书的公开 DER 文件；测试仅在执行期间设置 Mono TLS 信任锚，保留证书链、域名和有效期校验，结束恢复原值，不修改正式客户端或系统证书存储。实际环境应为 Unity/目标平台准备可信服务证书。
+
 以下按实际执行范围记录，各次验证独立，Editor 与 Player 脚本编译不能替代 IL2CPP 或真机验证：
 
 | 日期/实际范围 | 结果 | 不证明的部分 |
 | --- | --- | --- |
+| 2026-10-13 Editor 开发证书配置，Unity6000.3.19f1/macOS | Editor 编译及实际菜单对应配置成功；播放初始化自动追加已核验 localhost 公开证书，实际 WSS TLS/Hello 成功，关闭后 ownedBytes=0；默认验证回调未变，错误 TLS 目标仍被拒绝；正常 Domain Reload 与关闭 Domain Reload 均检查自动应用/停止恢复；无效路径和指纹更换拒绝且保留原配置；StandaloneOSX Player 脚本 43 程序集通过，GameFrame.Editor 排除 | 只验证本机 Mono TLS，不是其他 Editor 平台、IL2CPP 或真机验收；握手验证未提交玩家账号，不修改现有服务器/数据库；本机证书配置按用户要求保留 |
+| 2026-10-13 登录接入，Unity6000.3.19f1/macOS | Editor 编译通过；真实 Game.Server/WSS/PG 登录测试 6/6、生命周期与资源回归 32/32、UI/根节点 14/14，均零跳过；实际 Launch 首次建号→主界面、服务停止→清空用户并回到登录、保持登录时停止播放均通过，Console 无新增错误，Camera Stack 恰好一个 UI 相机；最终 StandaloneOSX Player 脚本 43 程序集通过 | 首轮 3 项受 Unity 不信任已有 localhost 开发证书阻断；测试临时设置已核验公开证书为进程信任锚后复验通过，证书校验未关闭。发现并修正退出时 Timer 驱动误报，运行中禁用仍使等待失败；验证后恢复场景/EditorSettings、字体自动生成内容、证书与环境设置，停止独立临时服务/数据库。未构建 IL2CPP、正式热更包或验证真机/其他平台 |
 | 2026-10-13 协议生成入口，Unity6000.3.19f1/macOS | Editor 编译通过；既有协议/MemoryPack144项、新工具3项分别通过；Generate/Check 菜单均实跑成功、运行时菜单禁用；StandaloneOSX Player 脚本43程序集通过，未包含 Editor 工具 | 进程测试覆盖空格路径、大量双管道输出和非零退出；未实跑 Windows/Linux 菜单，未构建 IL2CPP；Launch 场景及 EditorSettings 保持原值 |
 | 2026-10-13 Unity6000.3.19f1 | Editor 编译；网络协议/MemoryPack EditMode144/144；生命周期 PlayMode11/11 | 首次 PlayMode 在 TearDown/运行器空引用中断，恢复状态后单项与整组复跑通过；未改运行器或削弱断言 |
 | 2026-10-12 重启后 Unity Mono | 新 mbedTLS4.2/ABI2 实际 UDP Hello/Echo/关闭通过，自有缓冲与 native 预留归零 | 非 IL2CPP、移动真机或 Windows 执行 |

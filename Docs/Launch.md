@@ -7,8 +7,10 @@
 GameUI.SetPackage → 下载 boot 资源 → 启动其余框架系统 →
 加载 AOT 元数据与 Hotfix DLL → 实例化 GameEntry prefab → 读取热更配置并补入翻译 → 启动热更业务。
 Launch 负责框架初始化、选择相机和准备资源。GameEntry 在 Awake 中初始化 Hotfix 配置，
-并调用 `GameUIRegistration.RegisterAll()` 统一注册业务面板，完成后 IsReady 为 true，
-再在 Start 中打开五子棋主面板。Launch 启动 GameRuntime 时 EnableUI 为 false，语言服务也不重复初始化。
+并调用 `GameUIRegistration.RegisterAll()` 统一注册业务面板、创建并注入 Hotfix 的 `GameLoginSession`，完成后 IsReady 为 true。
+Start 中打开登录面板，登录成功后进入五子棋主面板。
+GameEntry 只组合、调用和释放业务对象，不保存账号字段或实现认证；会话实例持有用户信息、凭据和连接。
+Launch 启动 GameRuntime 时 EnableUI 为 false，语言服务也不重复初始化，并通过 NetworkOptions 启用网络宿主。
 任一步失败直接抛出并终止后续启动，不重试、不回退旧资源、不自动回滚。
 
 `Game.AOT` 程序集使用 `Game.AOT` 命名空间，引用框架、UniTask、YooAsset、HybridCLR 和 Luban.Runtime，不引用 Hotfix。
@@ -56,7 +58,10 @@ Launch 引用 `Assets/Resources/GlobalConfig.asset`，该 ScriptableObject 随�
 
 语言服务、事件派发器和 UI 在资源初始化前启动；Timer、Pool、Scene 在 boot 下载完成后由 Launch 启动。
 Input / Audio 在 Launch 的 Inspector 绑定配置后才启用。GameEntry 在 Awake 中自动初始化热更配置和业务。
-启动完成后在 Launch 场景打开 `GomokuMainPanel`，无需额外切换内容场景。
+启动完成后在 Launch 场景打开 `LoginPanel`，用户输入账号和密码后才连接 WSS；不存在的账号由服务端创建并登录。
+成功后关闭登录面板并打开 `GomokuMainPanel`，无需额外切换内容场景；连接失效回到登录。
+GameEntry prefab 的 `Login Endpoint` 是可信环境端点，当前开发值为 `wss://localhost:7443/network`，生产资源需替换为实际服务地址。
+本地开发证书可在 `Tools/GameFrame/Network/Set Local Development Certificate` 配置；Editor 在 BeforeSceneLoad 读取本机配置并启用信任，先于 Launch/GameEntry 初始化，停止播放后恢复。工具不进入 Player，也不为入口增加 Editor 依赖，详见 [客户端网络使用说明](ClientNetworkUsage.md)。
 `DefaultPackage` 的 `Gomoku` 组采集 `Assets/Prefab/Gomoku`、`Assets/ArtRes/Gomoku/Image` 和 `Assets/ArtRes/Gomoku/Audio`，
 标签为 `gomoku;boot`。字体通过 prefab 依赖采集，本地对局和配置见 [Gomoku.md](Gomoku.md)。
 木鱼面板仍保留注册，`WoodenFish` 组采集 prefab 与 Audio 目录，标签为 `fish`。
@@ -141,16 +146,16 @@ UnityEngine.Application.Quit();
 正式包不拦截退出，也不等待初始化或异步关闭，不逐项释放资源包；进程结束后由系统回收资源。
 入口按每个进程启动一次设计，不通过销毁 GameEntry 来重启框架。
 
-运行期间需要主动关闭时，先停止业务任务、释放业务持有的资源，
+运行期间需要主动关闭时，先 `await entry.StopAsync()` 停止业务并等待登录请求、连接与凭据释放，再释放其他业务资源，
 调用 `GameUI.Shutdown()`，再等待 `GameRuntime.ShutdownAsync()`；随后关闭语言服务、清空配置和事件，最后按需调用
 `ResourceLoadManager.Instance.ShutdownAsync()`。这些接口不属于进程退出流程。
 
 Launch.OnApplicationQuit / OnDestroy 负责关闭 UI、发起其余框架系统关闭、关闭语言服务并清空事件；不等待异步完成。
-GameEntry.OnApplicationQuit / OnDestroy 仅清空自己初始化的热更配置，不关闭框架。
+GameEntry.OnApplicationQuit / OnDestroy 发起幂等 StopAsync，关闭业务面板、清理会话及自己初始化的热更配置，不等待、不关闭框架。
 Editor 与正式包共用这些简单清理，两次生命周期回调不会重复清理。
 Editor 停止播放时，资源系统由 YooAsset 自己的 Editor 驱动关闭。
 GameEntry 创建之前启动失败时，不执行额外的退出回滚；正式包退出由系统回收资源，
 Editor 重新播放使用默认 Domain Reload 重置静态状态。
 
 
-网络是 `GameRuntimeConfig.NetworkOptions` 控制的可选模块，默认 null，不自动创建客户端或连服。启用时驱动挂在既有持久根上；Hotfix 先停止业务并 await 客户端 Dispose，框架 Shutdown 再等待网络宿主关闭，最后释放 Timer/root 与资源包。网络业务初始化不增加 Launch 反射入口。API 与当前平台范围见 [客户端网络使用说明](ClientNetworkUsage.md)。
+网络是 `GameRuntimeConfig.NetworkOptions` 控制的可选模块，框架默认 null；项目 Launch 显式启用，GameEntry 创建账号客户端，点击登录才连服。启用时驱动挂在既有持久根上；Hotfix 先停止业务并 await 客户端 Dispose，框架 Shutdown 再等待网络宿主关闭，最后释放 Timer/root 与资源包。网络业务初始化不增加 Launch 反射入口。API 与当前平台范围见 [客户端网络使用说明](ClientNetworkUsage.md)。

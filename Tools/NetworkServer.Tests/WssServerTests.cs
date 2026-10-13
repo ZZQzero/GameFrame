@@ -216,6 +216,22 @@ namespace GameFrame.Tests
         }
 
         [Test]
+        public async Task FirstLoginCreatesAndAuthenticatesTheAccountInOneRpc()
+        {
+            using ClientWebSocket socket = await Connect();
+            await Hello(socket);
+            LoginResponse login = await Rpc(socket, GameNetRoutes.Login,
+                new LoginRequest { Account = "one-click", Password = "new-password" });
+            Assert.That(login.ResultCode, Is.EqualTo(ResultCode.Success));
+            Assert.That(login.AccountId, Is.GreaterThan(1));
+            Assert.That(login.AccountSessionId.Length, Is.EqualTo(16));
+            Assert.That(login.ResumeToken.Length, Is.EqualTo(32));
+            Assert.That((await Rpc(socket, GameNetRoutes.Echo, new EchoRequest { Text = "authenticated" })).Text,
+                Is.EqualTo("authenticated"));
+            AccountSessions.ClearResponse(login);
+        }
+
+        [Test]
         public async Task RegisterThenLoginOnTheSameConnectionWithoutServerConfiguredPlayerCredentials()
         {
             using ClientWebSocket socket = await Connect();

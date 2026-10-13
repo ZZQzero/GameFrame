@@ -1,19 +1,35 @@
+using System;
+using System.Threading;
+using Cysharp.Threading.Tasks;
+using Game.Hotfix.Network.Protocol;
+using GameFrame.Network;
 using GameFrame.UI;
+using UnityEngine;
 
 namespace Game.Hotfix
 {
-    public partial class LoginPanel : UIPanel<UINone>
+    public partial class LoginPanel : UIPanel<LoginPanelArgs>
     {
+        private bool submitting;
+
         protected override void OnCreate()
         {
             confirmLoginButton.onClick.AddListener(ConfirmLogin);
             LifetimeScope.Register(() => confirmLoginButton.onClick.RemoveListener(ConfirmLogin));
         }
 
-        protected override void OnOpen(UINone args)
+        protected override void OnOpen(LoginPanelArgs args)
         {
+            submitting = false;
+            accountInput.characterLimit = 64;
+            passwordInput.characterLimit = 128;
             passwordInput.SetTextWithoutNotify(string.Empty);
-            statusText.text = string.Empty;
+            statusText.text = args.Message;
+            SetInteractable(!args.Session.IsBusy);
+            if (args.Session.IsBusy)
+            {
+                WaitForPreviousOperationAsync(args.Session, OpenCancellationToken).Forget();
+            }
         }
 
         protected override void OnClose()
@@ -23,22 +39,93 @@ namespace Game.Hotfix
 
         private void ConfirmLogin()
         {
-            if (string.IsNullOrWhiteSpace(accountInput.text))
+            if (submitting || Args.Session.IsBusy)
             {
-                statusText.text = "请输入账号";
+                return;
+            }
+
+            if (!GameLoginSession.IsValidAccount(accountInput.text))
+            {
+                statusText.text = "账号需为 1～64 个字符，不能包含首尾空白或控制字符";
                 accountInput.ActivateInputField();
                 return;
             }
 
-            if (string.IsNullOrEmpty(passwordInput.text))
+            if (!GameLoginSession.IsValidPassword(passwordInput.text))
             {
-                statusText.text = "请输入密码";
+                statusText.text = "密码需为 8～128 个字符";
                 passwordInput.ActivateInputField();
                 return;
             }
 
-            // 当前仅提供登录界面；接入认证服务后在这里提交账号和密码。
-            statusText.text = "登录服务尚未接入";
+            submitting = true;
+            SetInteractable(false);
+            statusText.text = "正在登录…";
+            SubmitAsync(Args, OpenCancellationToken).Forget();
+        }
+
+        private async UniTask SubmitAsync(LoginPanelArgs args, CancellationToken token)
+        {
+            try
+            {
+                ResultCode result = await args.Session.LoginAsync(accountInput.text, passwordInput.text, token);
+                token.ThrowIfCancellationRequested();
+                if (result != ResultCode.Success)
+                {
+                    statusText.text = result == ResultCode.InvalidCredentials ? "账号或密码错误" : "登录被拒绝，请重新登录";
+                    return;
+                }
+
+                statusText.text = "登录成功";
+                passwordInput.SetTextWithoutNotify(string.Empty);
+                await args.LoggedIn();
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+            }
+            catch (Exception error)
+            {
+                if (!token.IsCancellationRequested)
+                {
+                    statusText.text = error is NetworkRequestTimeoutException ? "登录超时，请再次点击确定" :
+                        error is NetworkRemoteException || error is NetworkBackpressureException ? "服务繁忙，请稍后再试" :
+                        "连接或登录失败，请检查网络与服务端";
+                }
+
+                // Credential failures are normal results; unexpected transport/cleanup faults
+                // are recorded without account names, passwords or response credentials.
+                Debug.LogException(error);
+            }
+            finally
+            {
+                // A cached panel can reopen while the old request is finishing its cleanup.
+                if (!token.IsCancellationRequested)
+                {
+                    submitting = false;
+                    passwordInput.SetTextWithoutNotify(string.Empty);
+                    SetInteractable(true);
+                }
+            }
+        }
+
+        private void SetInteractable(bool value)
+        {
+            accountInput.interactable = value;
+            passwordInput.interactable = value;
+            confirmLoginButton.interactable = value;
+        }
+
+        private async UniTask WaitForPreviousOperationAsync(GameLoginSession session, CancellationToken token)
+        {
+            try
+            {
+                await UniTask.WaitUntil(() => !session.IsBusy, cancellationToken: token);
+                token.ThrowIfCancellationRequested();
+                SetInteractable(true);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+            }
         }
     }
 }

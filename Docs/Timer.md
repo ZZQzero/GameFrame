@@ -764,8 +764,9 @@ LanguageManager.Shutdown
 销毁统一入口创建的持久根节点
 ```
 
-退出前先停止业务任务、释放业务 Media / 数据库实例，再等待 `GameRuntime.ShutdownAsync`。
+运行中主动关闭时，先停止业务任务、释放业务 Media / 数据库实例，再等待 `GameRuntime.ShutdownAsync`。
 完成后释放资源包。事件系统由业务单独管理，应在 Timer 关闭后清理事件及 Dispatcher。
+进程退出不等待异步关闭；UnityTimerRunner 在 OnApplicationQuit 标记退出，不把随后的宿主停用/销毁误报为驱动故障。运行中直接禁用或销毁 Runner 仍按驱动故障处理，不自动恢复。
 先关闭 UI 和 Pool，使它们有机会取消自己的 Timer。默认 Scheduler 的 Shutdown 应：
 
 1. 停止 Runner；

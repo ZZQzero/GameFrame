@@ -9,6 +9,7 @@ using Game.AOT;
 using Game.Hotfix;
 using Game.Hotfix.TableConfig;
 using GameFrame.Localization;
+using GameFrame.Network;
 using GameFrame.UI;
 using NUnit.Framework;
 using UnityEngine;
@@ -36,6 +37,11 @@ namespace GameFrame.Tests
         [UnityTearDown]
         public IEnumerator TearDown() => UniTask.ToCoroutine(async () =>
         {
+            if (entry != null)
+            {
+                await entry.StopAsync();
+            }
+
             GameUI.Shutdown();
             if (GameRuntime.IsInited)
             {
@@ -96,7 +102,8 @@ namespace GameFrame.Tests
                     Package = resources.Package,
                     EnablePool = true,
                     EnableScene = true,
-                    EnableUI = false
+                    EnableUI = false,
+                    NetworkOptions = new NetworkRuntimeOptions()
                 });
             }
             await resources.LoadHotUpdateDllAsync(config);
@@ -137,6 +144,7 @@ namespace GameFrame.Tests
 
             await resources.UnloadUnusedAssetsAsync();
             Assert.IsTrue(instance != null, "入口实例存活期间必须保留资源句柄。");
+            await entry.StopAsync();
             await GameRuntime.ShutdownAsync();
             await resources.ReleaseGameObjectAsync(instance);
             Assert.IsNull(TableConfigManager.Tables);
@@ -165,7 +173,7 @@ namespace GameFrame.Tests
         });
 
         [UnityTest]
-        public IEnumerator EntryDestructionOnlyClearsHotfixConfiguration() => UniTask.ToCoroutine(async () =>
+        public IEnumerator EntryDestructionOnlyStopsHotfixBusiness() => UniTask.ToCoroutine(async () =>
         {
             await PrepareAsync(true);
             instance = await resources.LoadGameObjectAsync(config.GameEntryLocation, null);

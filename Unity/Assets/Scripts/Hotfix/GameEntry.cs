@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using Game.AOT;
 using Game.Hotfix.TableConfig;
@@ -15,6 +16,9 @@ namespace Game.Hotfix
     public sealed class GameEntry : MonoBehaviour
     {
         bool ownsTables;
+        [SerializeField] string loginEndpoint = "wss://localhost:7443/network";
+        GameLoginSession loginSession;
+        Task stopping;
 
         public bool IsReady { get; private set; }
 
@@ -31,7 +35,7 @@ namespace Game.Hotfix
                 return;
             }
 
-            GameUI.Push<GomokuMainPanel>().Forget();
+            OpenLoginAsync().Forget();
         }
 
         void Initialize()
@@ -56,6 +60,8 @@ namespace Game.Hotfix
 
             LanguageManager.AddTable(languages);
             GameUIRegistration.RegisterAll();
+            loginSession = new GameLoginSession(GameRuntime.Network, new Uri(loginEndpoint));
+            loginSession.AuthenticationLost += OnAuthenticationLost;
             IsReady = true;
             Debug.Log("[GameEntry] Hotfix 初始化完成。");
         }
@@ -72,13 +78,123 @@ namespace Game.Hotfix
 
         void Cleanup()
         {
-            if (!ownsTables)
+            StopAsync().Forget();
+        }
+
+        async UniTask OpenLoginAsync(string message = "")
+        {
+            if (!IsReady)
             {
                 return;
             }
-            ownsTables = false;
+
+            await GameUI.Push<LoginPanel, LoginPanelArgs>(new LoginPanelArgs(loginSession, OpenMainAsync, message));
+            if (!IsReady && GameUI.IsInited)
+            {
+                GameUI.Close<LoginPanel>();
+            }
+        }
+
+        async UniTask OpenMainAsync()
+        {
+            if (!IsReady || !loginSession.IsAuthenticated)
+            {
+                throw new InvalidOperationException("[GameEntry] 账号会话已失效，不能进入主界面。");
+            }
+
+            GameUI.Close<LoginPanel>();
+            await GameUI.Push<GomokuMainPanel>();
+            if (!IsReady || !loginSession.IsAuthenticated)
+            {
+                if (GameUI.IsInited)
+                {
+                    GameUI.Close<GomokuMainPanel>();
+                }
+            }
+        }
+
+        void OnAuthenticationLost()
+        {
+            if (!IsReady)
+            {
+                return;
+            }
+
+            GameUI.Close<GomokuMainPanel>();
+            OpenLoginAsync("会话已结束，请重新登录").Forget();
+        }
+
+        /// <summary>运行中主动停止业务时等待本方法，再关闭 GameRuntime 和资源包。</summary>
+        public UniTask StopAsync()
+        {
+            if (stopping == null)
+            {
+                var completed = new TaskCompletionSource<bool>();
+                stopping = completed.Task;
+                _ = StopCoreAsync(completed);
+            }
+
+            return stopping.AsUniTask();
+        }
+
+        async Task StopCoreAsync(TaskCompletionSource<bool> completed)
+        {
             IsReady = false;
-            TableConfigManager.Shutdown();
+            Exception failure = null;
+            try
+            {
+                if (loginSession != null)
+                {
+                    loginSession.AuthenticationLost -= OnAuthenticationLost;
+                }
+
+                if (GameUI.IsInited)
+                {
+                    GameUI.Close<LoginPanel>();
+                    GameUI.Close<GomokuMainPanel>();
+                }
+            }
+            catch (Exception error)
+            {
+                failure = error;
+            }
+
+            try
+            {
+                if (loginSession != null)
+                {
+                    await loginSession.DisposeAsync();
+                }
+            }
+            catch (Exception error)
+            {
+                if (failure == null)
+                {
+                    failure = error;
+                }
+                else
+                {
+                    Debug.LogException(error);
+                }
+            }
+            finally
+            {
+                loginSession = null;
+                if (ownsTables)
+                {
+                    ownsTables = false;
+                    TableConfigManager.Shutdown();
+                }
+            }
+
+            if (failure == null)
+            {
+                completed.TrySetResult(true);
+            }
+            else
+            {
+                completed.TrySetException(failure);
+            }
         }
     }
 }

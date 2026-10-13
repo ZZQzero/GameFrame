@@ -10,7 +10,7 @@
 
 建立可用于大厅、房间、即时战斗和大型在线游戏客户端的网络模块，交付内容包括 Unity Runtime、Hotfix 接入示例、协议工具、原生插件、.NET 联调服务和自动化验证。实现优先保证协议正确、资源可回收、失败可观察、内存有上限，再依据测量优化分配和吞吐。
 
-当前开发阶段按用户要求只实现框架底层：传输、原生桥接与构建安装、协议/RPC、资源预算、诊断及验证。游戏世界会话、角色权限、AOI/移动和入场/恢复等业务实现延后；本文保留业务接入契约供后续使用。WebGL WSS 也不在第一版范围内。
+当前已实现框架底层：传输、原生桥接与构建安装、协议/RPC、资源预算、诊断及验证，并接入账号登录 UI 与 Hotfix 账号会话。游戏世界会话、角色权限、AOI/移动和入场/恢复等业务实现延后；本文保留业务接入契约供后续使用。WebGL WSS 也不在第一版范围内。
 
 第一版必须提供：
 
@@ -34,7 +34,7 @@
 | MemoryPack | 已安装 1.21.4；Editor 和 StandaloneOSX Player 脚本编译通过 | 已有同源 DTO/生成检查/跨端向量；补齐 HybridCLR 实机测试 |
 | KCP | `Native/Kcp/third_party/kcp` 下已有 `ikcp.c`、`ikcp.h`、MIT LICENSE；已直接合入 #467 ACK 修复、分配失败处理及标准 offsetof 修正 | ABI2、UDP 集成与平台构建产物已落地；继续核对依赖锁，完成发布平台实跑验收 |
 | KCP 版本 | 上游基线为 `b1a7a2101dcbb96017681a500d6b82bbe5a88766`，包含 `IKCPOPS`/`ikcp_setcc`；本地修正与当前 c/h hash 已锁定 | 锁定基线与本地源码 hash；不得直接按旧版 C# KCP 包的内部结构接入 |
-| 生命周期 | `GameRuntime` 已可选持有网络宿主；GameEntry 当前启动本地五子棋 | 保持离线默认，业务接入 GameNetworkSession |
+| 生命周期 | `GameRuntime` 默认禁用网络；项目 Launch 启用，GameEntry 创建/注入 GameLoginSession，登录后进入本地五子棋 | 完整世界 GameNetworkSession 延后；入口不保存用户字段或实现认证 |
 | 服务端 | `DotNet` 已拆为 Core、Server、Game.Protocol、Game.Config、Game.Server 与离线 NetworkProtocol/ConfigGenerator 工程；WSS/KCP 共用强类型应用接口，PostgreSQL 注册登录与账号会话属于业务宿主 | 生产部署/跨进程会话/世界应用接入，完整诊断和平台容量验收 |
 
 MemoryPack 安装与当前验证边界见 [客户端依赖维护](ClientNetworkUsage.md#7-协议与依赖维护)。启动、资源所有权与失败处理以 [Launch.md](Launch.md)、[Scope.md](Scope.md)、[ErrorContract.md](ErrorContract.md) 为基础；本文补充网络模块的固定策略。
@@ -674,7 +674,7 @@ TLS 信任使用平台正常证书验证与可信域名配置；不能连接任�
 
 | Opcode/路由 | 允许阶段/连接 | 主要结果与限制 |
 | --- | --- | --- |
-| 1000 Login | 未登录 WSS | 凭据验证；Request Body≤2048 字节；返回登录业务结果 |
+| 1000 Login | 未登录 WSS | 已有账号验密，不存在则创建并认证；Request Body≤2048 字节；返回登录业务结果 |
 | 1004 Register | 未登录 WSS | 创建 PostgreSQL 账号；Request Body≤2048 字节；成功仍未登录，不延长登录期限 |
 | 1001 ResumeLogin | 未登录 WSS | accountSessionId + resumeToken；校验并轮换恢复凭据 |
 | 1002 RequestWorldGrant | 已登录 WSS | 指定角色/世界、grantRequestId、协议 hash；返回单连接授权 |
@@ -719,7 +719,7 @@ Logout RPC 只有在权威撤销提交、相关网关停止该 epoch 的新业�
 
 收到任何包不自动当成 Pong；匹配的 Pong 必须在单调时钟严格早于 deadline 时才可清除等待，等于或超过期限不能抢在 watchdog 前延长存活。匹配的 Pong 先在 IO 层更新存活/RTT，再触发主线程指标更新。KCP ACK 是传输状态，不能证明游戏逻辑可响应。服务端需明确 Ping 由网关还是业务进程回应，指标区分 gateway RTT 与应用 RPC 延迟，不把网关活着当成世界服健康。
 
-登录 RPC 默认 timeout=10 秒；客户端从 ClientHello 移交传输起记录 10 秒登录总预算，实际请求 timeout 取默认值与该预算剩余时间的较小值，不能在收到 ServerHello 后重置。服务端仍从 ServerHello 移交传输起执行自己的 10 秒硬期限，客户端更早开始预算以保守覆盖网络耗时。RequestWorldGrant 默认 timeout=5 秒，新 KCP Connect 仍使用 10 秒总期限且不得超过 grant 剩余时间。
+完整会话设计的登录 RPC 默认 timeout=10 秒；客户端从 ClientHello 移交传输起记录 10 秒登录总预算，实际请求 timeout 取默认值与该预算剩余时间的较小值，不能在收到 ServerHello 后重置。当前账号 UI 在 Connect（最多 10 秒）完成后立即提交一次 Login（上限 5 秒），没有注册等待；服务端仍从 ServerHello 移交传输起执行自己的 10 秒硬期限。后续完整会话接入再统一客户端总预算。RequestWorldGrant 默认 timeout=5 秒，新 KCP Connect 仍使用 10 秒总期限且不得超过 grant 剩余时间。
 
 服务端在编码响应时计算剩余 TTL；客户端以该 RPC 的本地 admission 单调时间 + 返回 TTL 作为保守 deadline，不能从收到响应起重新获得完整有效期。账号与 grant 是否过期最终以服务端时钟和状态判定，不以客户端 UTC 声明放行。
 
@@ -881,7 +881,7 @@ StopSessionAsync(requestLogout)
   5. 最后传播主异常
 ```
 
-上述 GameNetworkSession、世界入场/恢复/离场与快照处理是后续 Hotfix/.NET 业务接入流程。当前已生成相关路由，并实现服务端 Register/Login/ResumeLogin/Logout；RequestWorldGrant 返回 WorldUnavailable，其余世界入站路由显式拒绝，尚无世界处理器和客户端业务会话封装。启动/恢复失败停止当前流程；调用者显式清理已获得的资源。KCP 世界启动失败不隐式注销账号或关闭独立大厅。
+上述 GameNetworkSession、世界入场/恢复/离场与快照处理是后续 Hotfix/.NET 业务接入流程。当前已生成相关路由，并实现服务端 Register/Login/ResumeLogin/Logout；RequestWorldGrant 返回 WorldUnavailable，其余世界入站路由显式拒绝，尚无世界处理器或完整世界会话。客户端已实现普通实例 GameLoginSession、只读 GameUser 和登录面板参数注入，当前仅 WSS 账号登录/注销，断线清空并回到登录，不自动 Resume。启动/恢复失败停止当前流程；调用者显式清理已获得的资源。KCP 世界启动失败不隐式注销账号或关闭独立大厅。
 
 WSS 共享连接的状态流不能假装独立：EnterWorld/LeaveWorld 超时、取消或处理器失败导致世界状态不确定时，不能先注销处理器再继续使用大厅 socket；该次共享 WSS 必须停止业务并关闭，大厅可通过显式 ResumeLogin 恢复账号。业务明确拒绝入场且尚未改变状态时可保留大厅。StopSession 将关闭全部连接，不重复发 LeaveWorld；所有失败均保留原异常，不自动执行恢复或入场回滚。
 

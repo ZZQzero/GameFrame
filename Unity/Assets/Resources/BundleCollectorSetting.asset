@@ -95,7 +95,7 @@ MonoBehaviour:
         UserData: 
     - GroupName: Scenes
       GroupDesc: 
-      AssetTags: 
+      AssetTags: boot
       ActiveRuleName: EnableGroup
       Collectors:
       - CollectPath: Assets/Scenes/MainScene

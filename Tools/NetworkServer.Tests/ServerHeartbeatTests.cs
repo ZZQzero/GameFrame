@@ -7,6 +7,7 @@ using GameFrame.Network.Transport;
 using GameFrame.Server.Network;
 using Game.Server;
 using Game.Server.Login;
+using Game.Server.Sessions;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 
@@ -17,7 +18,7 @@ namespace GameFrame.Tests
     {
         private LoginOptions settings = null!;
         private AccountSessions accounts = null!;
-        private AccountService service = null!;
+        private AuthenticationService service = null!;
         private TestAccountRepository repository = null!;
         private FrameMemoryBudget memory = null!;
         private ServerConnection server = null!;
@@ -34,11 +35,11 @@ namespace GameFrame.Tests
             settings = new LoginOptions();
             repository = new TestAccountRepository();
             accounts = new AccountSessions(settings);
-            service = new AccountService(repository, accounts);
+            service = new AuthenticationService(repository, accounts, settings);
             await service.RegisterAsync("test", "test-secret", guard.Token);
             memory = new FrameMemoryBudget(64 * 1024 * 1024);
             socket = new ConnectionRaceTests.ControlledSocket(FrameDirection.ServerToClient);
-            server = new ServerConnection(new WssServerOptions(), new LobbyApplication(accounts, service, settings).Application, memory, () => { }, guard.Token,
+            server = new ServerConnection(new WssServerOptions(), new LobbyApplication(new LoginModule(accounts, service, settings)).Application, memory, () => { }, guard.Token,
                 NullLogger.Instance, 1, new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 1234), () => Interlocked.Read(ref now), (_, token) => Task.Delay(Timeout.Infinite, token));
             byte[] hello = new byte[80];
             FrameCodec.WriteHeader(hello, new FrameHeader(FrameKind.Control, (uint)ControlOpcode.ClientHello, 0, 48));
@@ -78,7 +79,7 @@ namespace GameFrame.Tests
         [Test]
         public async Task TransportCloseDrainsPreviouslyAdmittedLogoutAfterDelayedEcho()
         {
-            long binding = ((LoginSession)server.Context.Session).Binding;
+            long binding = ((LobbySession)server.Context.Session).Binding;
             var writer = new ArrayBufferWriter<byte>();
             GameNetRoutes.Echo.RequestCodec.Encode(writer, new EchoRequest { DelayMs = 100 });
             byte[] echo = new byte[32 + writer.WrittenCount];

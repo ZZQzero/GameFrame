@@ -44,14 +44,14 @@ namespace Game.Hotfix
                 return;
             }
 
-            if (!GameLoginSession.IsValidAccount(accountInput.text))
+            if (!Args.Session.IsAuthenticated && !GameLoginSession.IsValidAccount(accountInput.text))
             {
                 statusText.text = "账号需为 1～64 个字符，不能包含首尾空白或控制字符";
                 accountInput.ActivateInputField();
                 return;
             }
 
-            if (!GameLoginSession.IsValidPassword(passwordInput.text))
+            if (!Args.Session.IsAuthenticated && !GameLoginSession.IsValidPassword(passwordInput.text))
             {
                 statusText.text = "密码需为 8～128 个字符";
                 passwordInput.ActivateInputField();
@@ -60,7 +60,7 @@ namespace Game.Hotfix
 
             submitting = true;
             SetInteractable(false);
-            statusText.text = "正在登录…";
+            statusText.text = Args.Session.IsAuthenticated ? "正在进入主场景…" : "正在登录…";
             SubmitAsync(Args, OpenCancellationToken).Forget();
         }
 
@@ -68,15 +68,19 @@ namespace Game.Hotfix
         {
             try
             {
-                ResultCode result = await args.Session.LoginAsync(accountInput.text, passwordInput.text, token);
-                token.ThrowIfCancellationRequested();
-                if (result != ResultCode.Success)
+                if (!args.Session.IsAuthenticated)
                 {
-                    statusText.text = result == ResultCode.InvalidCredentials ? "账号或密码错误" : "登录被拒绝，请重新登录";
-                    return;
+                    ResultCode result = await args.Session.LoginAsync(accountInput.text, passwordInput.text, token);
+                    token.ThrowIfCancellationRequested();
+                    if (result != ResultCode.Success)
+                    {
+                        statusText.text = result == ResultCode.InvalidCredentials ? "账号或密码错误" : "登录被拒绝，请重新登录";
+                        return;
+                    }
                 }
 
-                statusText.text = "登录成功";
+                token.ThrowIfCancellationRequested();
+                statusText.text = "正在进入主场景…";
                 passwordInput.SetTextWithoutNotify(string.Empty);
                 await args.LoggedIn();
             }
@@ -87,7 +91,8 @@ namespace Game.Hotfix
             {
                 if (!token.IsCancellationRequested)
                 {
-                    statusText.text = error is NetworkRequestTimeoutException ? "登录超时，请再次点击确定" :
+                    statusText.text = args.Session.IsAuthenticated ? "进入主场景失败，请再次点击确定" :
+                        error is NetworkRequestTimeoutException ? "登录超时，请再次点击确定" :
                         error is NetworkRemoteException || error is NetworkBackpressureException ? "服务繁忙，请稍后再试" :
                         "连接或登录失败，请检查网络与服务端";
                 }
@@ -110,8 +115,8 @@ namespace Game.Hotfix
 
         private void SetInteractable(bool value)
         {
-            accountInput.interactable = value;
-            passwordInput.interactable = value;
+            accountInput.interactable = value && !Args.Session.IsAuthenticated;
+            passwordInput.interactable = value && !Args.Session.IsAuthenticated;
             confirmLoginButton.interactable = value;
         }
 

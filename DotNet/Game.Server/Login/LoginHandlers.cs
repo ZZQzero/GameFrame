@@ -1,183 +1,120 @@
-using System.Net;
 using System.Security.Cryptography;
-using Game.Hotfix.Network.Generated;
 using Game.Hotfix.Network.Protocol;
-using GameFrame.Network;
+using Game.Server.Sessions;
 using GameFrame.Server.Network;
 
 namespace Game.Server.Login
 {
     internal sealed class LoginHandlers
     {
-        private readonly AccountSessions accounts;
-        private readonly AccountService service;
-        private readonly LoginOptions options;
-        private readonly object gate = new object();
-        private readonly Dictionary<IPAddress, (long Window, int Attempts)> attempts = new Dictionary<IPAddress, (long, int)>();
-        private readonly Dictionary<string, (long Window, int Attempts)> accountAttempts = new Dictionary<string, (long, int)>(StringComparer.Ordinal);
+        private readonly AuthenticationService service;
 
-        internal LoginHandlers(AccountSessions accounts, AccountService service, LoginOptions options)
+        internal LoginHandlers(AuthenticationService service)
         {
-            options.Validate();
-            this.accounts = accounts;
             this.service = service;
-            this.options = options;
         }
 
-        internal ServerSession CreateSession(ServerConnectionContext connection) => new LoginSession(connection, accounts, options, AdmitLogin);
-
-        internal void Register(ServerApplication application)
-        {
-            application.Rpc(GameNetRoutes.Register, RegisterAccountAsync);
-            application.Rpc(GameNetRoutes.Login, LoginAsync, ClearLoginResponse);
-            application.Rpc(GameNetRoutes.ResumeLogin, Resume, ClearLoginResponse);
-            application.Rpc(GameNetRoutes.Logout, Logout);
-        }
-
-        private bool AdmitLogin(IPAddress ip)
-        {
-            lock (gate)
-            {
-                long window = NetworkClock.GetMilliseconds() / 1000;
-                if (!attempts.TryGetValue(ip, out var value))
-                {
-                    if (attempts.Count >= 128)
-                    {
-                        foreach (IPAddress expired in attempts.Where(pair => window - pair.Value.Window > 10).Select(pair => pair.Key).ToArray())
-                        {
-                            attempts.Remove(expired);
-                        }
-
-                        if (attempts.Count >= 128)
-                        {
-                            return false;
-                        }
-                    }
-                }
-
-                int count = value.Window == window ? value.Attempts + 1 : 1;
-                attempts[ip] = (window, count);
-                return count <= options.MaxLoginAttemptsPerSecond;
-            }
-        }
-
-        private bool AdmitAccount(string account)
-        {
-            lock (gate)
-            {
-                long window = NetworkClock.GetMilliseconds() / 1000;
-                if (!accountAttempts.TryGetValue(account, out var value))
-                {
-                    if (accountAttempts.Count >= 128)
-                    {
-                        foreach (string expired in accountAttempts.Where(pair => window - pair.Value.Window > 10).Select(pair => pair.Key).ToArray())
-                        {
-                            accountAttempts.Remove(expired);
-                        }
-
-                        if (accountAttempts.Count >= 128)
-                        {
-                            return false;
-                        }
-                    }
-                }
-
-                int count = value.Window == window ? value.Attempts + 1 : 1;
-                accountAttempts[account] = (window, count);
-                return count <= options.MaxLoginAttemptsPerSecond;
-            }
-        }
-
-        private async Task<OperationResponse> RegisterAccountAsync(ServerConnectionContext connection, RegisterRequest request, CancellationToken token)
+        internal async Task<OperationResponse> RegisterAsync(ServerConnectionContext connection, RegisterRequest request, CancellationToken token)
         {
             try
             {
-                if (!AdmitAccount(request.Account))
-                {
-                    throw new ServerRequestException(1);
-                }
-
-                ResultCode result = await service.RegisterAsync(request.Account, request.Password, token);
-                return new OperationResponse { ResultCode = result };
+                AuthenticationStatus result = await service.RegisterAsync(request.Account, request.Password, token);
+                return new OperationResponse { ResultCode = ToResultCode(result) };
             }
             finally
             {
                 request.Password = string.Empty;
-                ((LoginSession)connection.Session).FinishAuthentication();
+                ((LobbySession)connection.Session).FinishAuthentication();
             }
         }
 
-        private async Task<LoginResponse> LoginAsync(ServerConnectionContext connection, LoginRequest request, CancellationToken token)
+        internal async Task<LoginResponse> LoginAsync(ServerConnectionContext connection, LoginRequest request, CancellationToken token)
         {
+            var session = (LobbySession)connection.Session;
             try
             {
-                if (!AdmitAccount(request.Account))
-                {
-                    throw new ServerRequestException(1, 1);
-                }
-
-                var result = await service.LoginAsync(request.Account, request.Password, connection.RequestClose, token);
-                try
-                {
-                    ((LoginSession)connection.Session).Bind(result.Binding);
-                    return result.Response;
-                }
-                catch
-                {
-                    ClearLoginResponse(result.Response);
-                    throw;
-                }
+                AuthenticationResult result = await service.LoginAsync(request.Account, request.Password, session.RequestClose, token);
+                return BindAndRespond(session, result);
             }
             catch (ServerRequestException error)
             {
-                ((LoginSession)connection.Session).BeginClosing();
+                session.BeginClosing();
                 connection.CloseAfterResponse(error.CloseReason == 0 ? (ushort)1 : error.CloseReason);
                 throw;
             }
             finally
             {
                 request.Password = string.Empty;
-                ((LoginSession)connection.Session).FinishAuthentication();
+                session.FinishAuthentication();
             }
         }
 
-        private Task<LoginResponse> Resume(ServerConnectionContext connection, ResumeLoginRequest request, CancellationToken token)
+        internal Task<LoginResponse> ResumeAsync(ServerConnectionContext connection, ResumeLoginRequest request, CancellationToken token)
         {
+            var session = (LobbySession)connection.Session;
             try
             {
-                var result = accounts.Resume(request, connection.RequestClose);
-                try
-                {
-                    ((LoginSession)connection.Session).Bind(result.Binding);
-                    return Task.FromResult(result.Response);
-                }
-                catch
-                {
-                    ClearLoginResponse(result.Response);
-                    throw;
-                }
+                AuthenticationResult result = service.Resume(request.AccountSessionId, request.ResumeToken, session.RequestClose, token);
+                return Task.FromResult(BindAndRespond(session, result));
             }
             finally
             {
-                ((LoginSession)connection.Session).FinishAuthentication();
+                session.FinishAuthentication();
                 CryptographicOperations.ZeroMemory(request.ResumeToken);
                 CryptographicOperations.ZeroMemory(request.AccountSessionId);
             }
         }
 
-        private static void ClearLoginResponse(LoginResponse response)
+        internal Task<OperationResponse> LogoutAsync(ServerConnectionContext connection, LogoutRequest request, CancellationToken token)
+        {
+            var session = (LobbySession)connection.Session;
+            session.BeginClosing();
+            AuthenticationStatus result = service.Logout(session.Binding);
+            connection.CloseAfterResponse(1);
+            return Task.FromResult(new OperationResponse { ResultCode = ToResultCode(result) });
+        }
+
+        private static LoginResponse BindAndRespond(LobbySession session, AuthenticationResult result)
+        {
+            try
+            {
+                var response = new LoginResponse
+                {
+                    ResultCode = ToResultCode(result.Status),
+                    AccountId = result.Binding?.Identity.AccountId ?? 0,
+                    AuthEpoch = result.Binding?.Identity.AuthEpoch ?? 0,
+                    AccountSessionId = result.AccountSessionId,
+                    ResumeToken = result.ResumeToken,
+                    ResumeExpiresAtUtcMs = result.ExpiresAtUtcMs,
+                    AccountExpiresAtUtcMs = result.ExpiresAtUtcMs,
+                    ResumeRemainingTtlMs = result.RemainingTtlMs,
+                    AccountRemainingTtlMs = result.RemainingTtlMs
+                };
+                session.Bind(result.Binding);
+                return response;
+            }
+            catch
+            {
+                result.Dispose();
+                throw;
+            }
+        }
+
+        private static ResultCode ToResultCode(AuthenticationStatus status) => status switch
+        {
+            AuthenticationStatus.Success => ResultCode.Success,
+            AuthenticationStatus.InvalidInput => ResultCode.InvalidInput,
+            AuthenticationStatus.InvalidCredentials => ResultCode.InvalidCredentials,
+            AuthenticationStatus.AccountAlreadyExists => ResultCode.AccountAlreadyExists,
+            AuthenticationStatus.SessionRevoked => ResultCode.SessionRevoked,
+            AuthenticationStatus.Overloaded => throw new ServerRequestException(1),
+            _ => throw new ArgumentOutOfRangeException(nameof(status))
+        };
+
+        internal static void ClearResponse(LoginResponse response)
         {
             CryptographicOperations.ZeroMemory(response.ResumeToken);
             CryptographicOperations.ZeroMemory(response.AccountSessionId);
-        }
-
-        private Task<OperationResponse> Logout(ServerConnectionContext connection, LogoutRequest request, CancellationToken token)
-        {
-            var session = (LoginSession)connection.Session;
-            session.BeginClosing();
-            bool revoked = accounts.Logout(session.Binding);
-            connection.CloseAfterResponse(1);
-            return Task.FromResult(new OperationResponse { ResultCode = revoked ? ResultCode.Success : ResultCode.SessionRevoked });
         }
     }
 }

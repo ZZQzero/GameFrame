@@ -10,11 +10,15 @@ using Game.Hotfix;
 using Game.Hotfix.TableConfig;
 using GameFrame.Localization;
 using GameFrame.Network;
+using GameFrame.Scene;
 using GameFrame.UI;
 using NUnit.Framework;
+using TMPro;
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
+using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
+using UnityEngine.UI;
 using YooAsset;
 using GameEvents = GameFrame.Event.EventSystem;
 
@@ -26,10 +30,12 @@ namespace GameFrame.Tests
         GlobalConfig config;
         GameEntry entry;
         GameObject instance;
+        UnityEngine.SceneManagement.Scene testScene;
 
         [SetUp]
         public void SetUp()
         {
+            testScene = SceneManager.GetActiveScene();
             resources = new ResourceLoadManager();
             config = ScriptableObject.CreateInstance<GlobalConfig>();
         }
@@ -40,6 +46,22 @@ namespace GameFrame.Tests
             if (entry != null)
             {
                 await entry.StopAsync();
+            }
+
+            var mainScene = SceneManager.GetSceneByPath("Assets/Scenes/MainScene/Main.unity");
+            if (mainScene.IsValid() && mainScene.isLoaded)
+            {
+                // Single 切场已卸掉测试场景；先准备空场，才能卸载唯一的内容场景。
+                SceneManager.SetActiveScene(testScene.IsValid() && testScene.isLoaded
+                    ? testScene : SceneManager.CreateScene("ResourceLoadManagerTests"));
+                if (GameScene.IsInited && GameScene.IsLoaded("Main"))
+                {
+                    await GameScene.UnloadAsync("Main");
+                }
+                else
+                {
+                    await SceneManager.UnloadSceneAsync(mainScene);
+                }
             }
 
             GameUI.Shutdown();
@@ -187,6 +209,197 @@ namespace GameFrame.Tests
             Assert.IsNull(TableConfigManager.Tables);
             Assert.IsTrue(YooAssets.IsInitialized);
             Assert.AreSame(resources, ResourceLoadManager.Instance);
+        });
+
+        async UniTask<GameLoginSession> CreateLoginEntryAsync()
+        {
+            string endpoint = Environment.GetEnvironmentVariable("GF_LOGIN_TEST_ENDPOINT");
+            if (string.IsNullOrEmpty(endpoint))
+            {
+                Assert.Ignore("Real entry login requires GF_LOGIN_TEST_ENDPOINT and a local WSS/PostgreSQL server.");
+            }
+
+            await PrepareAsync(true);
+            // 在 Awake 前注入测试端点，避免修改正式 prefab 或使用玩家数据库。
+            var parent = new GameObject("inactive-entry-test-parent");
+            parent.SetActive(false);
+            try
+            {
+                instance = await resources.LoadGameObjectAsync(config.GameEntryLocation, parent.transform);
+                entry = instance.GetComponent<GameEntry>();
+                typeof(GameEntry).GetField("loginEndpoint", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .SetValue(entry, endpoint);
+                instance.transform.SetParent(null);
+                // 实际入口是持久 Launch 的子节点；测试独立实例同样需要跨 Single 切场存活。
+                UnityEngine.Object.DontDestroyOnLoad(instance);
+            }
+            finally
+            {
+                UnityEngine.Object.Destroy(parent);
+            }
+
+            await UniTask.WaitUntil(() => GameUI.IsOpen<LoginPanel>()).Timeout(TimeSpan.FromSeconds(15));
+            return (GameLoginSession)typeof(GameEntry).GetField("loginSession", BindingFlags.Instance | BindingFlags.NonPublic)
+                .GetValue(entry);
+        }
+
+        static void SubmitLogin(string account)
+        {
+            LoginPanel login = GameUI.Get<LoginPanel>();
+            var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            ((TMP_InputField)typeof(LoginPanel).GetField("accountInput", flags).GetValue(login)).text =
+                account;
+            ((TMP_InputField)typeof(LoginPanel).GetField("passwordInput", flags).GetValue(login)).text = "test-password";
+            ((Button)typeof(LoginPanel).GetField("confirmLoginButton", flags).GetValue(login)).onClick.Invoke();
+        }
+
+        async UniTask<GameLoginSession> LoginToMainAsync()
+        {
+            GameLoginSession session = await CreateLoginEntryAsync();
+            SubmitLogin("entry_" + Guid.NewGuid().ToString("N"));
+            await UniTask.WaitUntil(() => GameUI.IsOpen<GomokuMainPanel>()).Timeout(TimeSpan.FromSeconds(15));
+            Assert.AreEqual("Main", SceneManager.GetActiveScene().name);
+            Assert.AreEqual("Main", GameScene.ActiveId);
+            Assert.IsTrue(GameScene.IsLoaded("Main"));
+            Assert.IsTrue(entry.IsReady, "切场不能销毁持久业务入口或账号会话。");
+            CollectionAssert.AreEqual(new[] { GameUI.UICamera }, Camera.main.GetUniversalAdditionalCameraData().cameraStack);
+            Assert.IsTrue(session.IsAuthenticated);
+            Assert.IsFalse(GameUI.IsOpen<LoginPanel>());
+            return session;
+        }
+
+        [UnityTest]
+        public IEnumerator ConnectionLossWhileRunningReturnsToLogin() => UniTask.ToCoroutine(async () =>
+        {
+            GameLoginSession session = await LoginToMainAsync();
+            GameUser user = session.CurrentUser;
+            ISceneHandle mainHandle = GameScene.Loaded["Main"];
+            await session.LobbyClient.CloseAsync();
+            await UniTask.WaitUntil(() => GameUI.IsOpen<LoginPanel>()).Timeout(TimeSpan.FromSeconds(5));
+            Assert.IsTrue(GameRuntime.IsInited);
+            Assert.IsTrue(entry.IsReady);
+            Assert.IsNull(session.CurrentUser);
+            Assert.IsFalse(GameUI.IsOpen<GomokuMainPanel>());
+            SubmitLogin(user.AccountName);
+            await UniTask.WaitUntil(() => GameUI.IsOpen<GomokuMainPanel>()).Timeout(TimeSpan.FromSeconds(15));
+            Assert.AreSame(mainHandle, GameScene.Loaded["Main"], "重新登录复用 Main，不重复加载场景。");
+            Assert.AreEqual(user.AccountId, session.CurrentUser.AccountId);
+            Assert.Greater(session.CurrentUser.AuthEpoch, user.AuthEpoch);
+            CollectionAssert.AreEqual(new[] { GameUI.UICamera }, Camera.main.GetUniversalAdditionalCameraData().cameraStack);
+        });
+
+        sealed class GatedSceneLoader : ISceneLoader
+        {
+            readonly ISceneLoader inner;
+            public readonly UniTaskCompletionSource Started = new UniTaskCompletionSource();
+            public readonly UniTaskCompletionSource Continue = new UniTaskCompletionSource();
+
+            public GatedSceneLoader(ResourcePackage package)
+            {
+                inner = new YooAssetSceneLoader(package);
+            }
+
+            public async UniTask<ISceneHandle> LoadAsync(string location, LoadSceneMode mode,
+                bool allowSceneActivation, Action<float> report)
+            {
+                Started.TrySetResult();
+                await Continue.Task;
+                return await inner.LoadAsync(location, mode, allowSceneActivation, report);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator AuthenticationLossDuringMainLoadDoesNotOpenMain() => UniTask.ToCoroutine(async () =>
+        {
+            GameLoginSession session = await CreateLoginEntryAsync();
+            await GameScene.ShutdownAsync();
+            var loader = new GatedSceneLoader(resources.Package);
+            GameScene.InitLoader(loader);
+            string account = "entry_" + Guid.NewGuid().ToString("N");
+            try
+            {
+                SubmitLogin(account);
+                await loader.Started.Task.Timeout(TimeSpan.FromSeconds(15));
+                await session.LobbyClient.CloseAsync();
+                Assert.IsNull(session.CurrentUser);
+                Assert.IsTrue(GameUI.IsOpen<LoginPanel>());
+                loader.Continue.TrySetResult();
+                await GameScene.WaitForIdleAsync();
+                await UniTask.NextFrame();
+                Assert.AreEqual("Main", SceneManager.GetActiveScene().name);
+                Assert.IsFalse(GameUI.IsOpen<GomokuMainPanel>(), "迟到的切场结果不能进入已失效账号的业务。");
+                Assert.IsTrue(GameUI.IsOpen<LoginPanel>());
+                CollectionAssert.AreEqual(new[] { GameUI.UICamera }, Camera.main.GetUniversalAdditionalCameraData().cameraStack);
+                SubmitLogin(account);
+                await UniTask.WaitUntil(() => GameUI.IsOpen<GomokuMainPanel>()).Timeout(TimeSpan.FromSeconds(15));
+                Assert.IsTrue(session.IsAuthenticated);
+            }
+            finally
+            {
+                loader.Continue.TrySetResult();
+            }
+        });
+
+        [UnityTest]
+        public IEnumerator StopWaitsForMainLoadWithoutOpeningBusinessUI() => UniTask.ToCoroutine(async () =>
+        {
+            GameLoginSession session = await CreateLoginEntryAsync();
+            await GameScene.ShutdownAsync();
+            var loader = new GatedSceneLoader(resources.Package);
+            GameScene.InitLoader(loader);
+            try
+            {
+                SubmitLogin("entry_" + Guid.NewGuid().ToString("N"));
+                await loader.Started.Task.Timeout(TimeSpan.FromSeconds(15));
+                var stopped = entry.StopAsync().AsTask();
+                Assert.IsFalse(entry.IsReady);
+                Assert.IsFalse(stopped.IsCompleted, "业务主动停止必须等待自己发起的切场。");
+                loader.Continue.TrySetResult();
+                await stopped;
+                Assert.IsFalse(GameScene.IsBusy);
+                Assert.IsTrue(GameRuntime.IsInited);
+                Assert.IsNull(session.CurrentUser);
+                Assert.IsFalse(GameUI.IsOpen<LoginPanel>());
+                Assert.IsFalse(GameUI.IsOpen<GomokuMainPanel>());
+                Assert.AreEqual(0, GameRuntime.Network.Memory.OwnedBytes);
+            }
+            finally
+            {
+                loader.Continue.TrySetResult();
+            }
+        });
+
+        [UnityTest]
+        public IEnumerator UIShutdownBeforeFrameworkDoesNotNavigateOnAuthenticationLoss() => UniTask.ToCoroutine(async () =>
+        {
+            GameLoginSession session = await LoginToMainAsync();
+            int lost = 0;
+            session.AuthenticationLost += () => lost++;
+            GameUI.Shutdown();
+            await GameRuntime.ShutdownAsync();
+            Assert.IsTrue(entry.IsReady, "退出时允许框架先于业务入口收到关闭回调。");
+            Assert.AreEqual(1, lost, "网络关闭仍应清除认证并通知观察者。");
+            Assert.IsNull(session.CurrentUser);
+            Assert.IsFalse(GameUI.IsInited);
+            await entry.StopAsync();
+            Assert.IsFalse(entry.IsReady);
+        });
+
+        [UnityTest]
+        public IEnumerator FrameworkShutdownWithUIAliveDoesNotReopenLogin() => UniTask.ToCoroutine(async () =>
+        {
+            GameLoginSession session = await LoginToMainAsync();
+            int lost = 0;
+            session.AuthenticationLost += () => lost++;
+            await GameRuntime.ShutdownAsync();
+            await UniTask.NextFrame();
+            Assert.IsTrue(GameUI.IsInited);
+            Assert.IsTrue(entry.IsReady);
+            Assert.AreEqual(1, lost);
+            Assert.IsNull(session.CurrentUser);
+            Assert.IsFalse(GameUI.IsOpen<LoginPanel>(), "框架停止后不能把断线当作新的登录导航。");
+            await entry.StopAsync();
+            Assert.IsFalse(GameUI.IsOpen<GomokuMainPanel>());
         });
 
         [UnityTest]

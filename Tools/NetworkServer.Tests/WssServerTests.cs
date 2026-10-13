@@ -33,7 +33,7 @@ namespace GameFrame.Tests
         private WssServer server = null!;
         private LoginOptions settings = null!;
         private AccountSessions accounts = null!;
-        private AccountService service = null!;
+        private AuthenticationService service = null!;
         private TestAccountRepository repository = null!;
         private X509Certificate2 certificate = null!;
         private Uri endpoint = null!;
@@ -80,9 +80,9 @@ namespace GameFrame.Tests
 
             IAccountRepository storage = database == null ? repository : new PostgresAccountRepository(database.Database);
             accounts = new AccountSessions(settings);
-            service = new AccountService(storage, accounts);
+            service = new AuthenticationService(storage, accounts, settings);
             await service.RegisterAsync("local-test", "local-secret", timeout.Token);
-            server = new WssServer(new LobbyApplication(accounts, service, settings).Application, new WssServerOptions { HelloTimeout = TimeSpan.FromMilliseconds(500) });
+            server = new WssServer(new LobbyApplication(new LoginModule(accounts, service, settings)).Application, new WssServerOptions { HelloTimeout = TimeSpan.FromMilliseconds(500) });
             WebApplicationBuilder builder = WebApplication.CreateBuilder();
             builder.Logging.ClearProviders();
             builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0, listen => listen.UseHttps(certificate)));
@@ -228,7 +228,7 @@ namespace GameFrame.Tests
             Assert.That(login.ResumeToken.Length, Is.EqualTo(32));
             Assert.That((await Rpc(socket, GameNetRoutes.Echo, new EchoRequest { Text = "authenticated" })).Text,
                 Is.EqualTo("authenticated"));
-            AccountSessions.ClearResponse(login);
+            LoginHandlers.ClearResponse(login);
         }
 
         [Test]

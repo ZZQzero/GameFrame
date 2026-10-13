@@ -3,6 +3,7 @@ using Game.Hotfix.Network.Generated;
 using Game.Hotfix.Network.Protocol;
 using Game.Server;
 using Game.Server.Login;
+using Game.Server.Sessions;
 using GameFrame.Network;
 using GameFrame.Network.Protocol;
 using GameFrame.Network.Transport;
@@ -15,8 +16,8 @@ namespace GameFrame.Tests
     public sealed class AccountLifecycleTests
     {
         private static TaskCompletionSource<ulong> PendingEpoch() => new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private static Task<(LoginResponse Response, AccountSessions.Binding? Binding)> Login(AccountSessions sessions, ulong epoch,
-            Action<ushort>? close = null, ulong account = 1) =>
+        private static Task<AuthenticationResult> Login(AccountSessions sessions, ulong epoch,
+            Action<AccountSessionEndReason>? close = null, ulong account = 1) =>
             sessions.LoginAsync(account, _ => Task.FromResult(epoch), close ?? (_ => { }), CancellationToken.None);
 
         [Test]
@@ -24,21 +25,21 @@ namespace GameFrame.Tests
         {
             using var sessions = new AccountSessions(new LoginOptions());
             var epoch = PendingEpoch();
-            Task<(LoginResponse Response, AccountSessions.Binding? Binding)> old =
+            Task<AuthenticationResult> old =
                 sessions.LoginAsync(1, _ => epoch.Task, _ => { }, CancellationToken.None);
             var newer = await Login(sessions, 2);
             Assert.That(sessions.Logout(newer.Binding!.Id), Is.True);
-            Assert.That(newer.Binding.CloseReason, Is.EqualTo(7));
+            Assert.That(newer.Binding.CloseReason, Is.EqualTo(AccountSessionEndReason.Revoked));
             Assert.That(sessions.TrackedAccountCount, Is.EqualTo(1), "The old operation still owns the comparison state.");
             epoch.SetResult(1);
             var rejected = await old;
-            Assert.That(rejected.Response.ResultCode, Is.EqualTo(ResultCode.InvalidCredentials));
+            Assert.That(rejected.Status, Is.EqualTo(AuthenticationStatus.InvalidCredentials));
             Assert.That(rejected.Binding, Is.Null);
             Assert.That(sessions.TrackedAccountCount, Is.Zero);
             var fresh = await Login(sessions, 3);
-            Assert.That(fresh.Response.ResultCode, Is.EqualTo(ResultCode.Success));
-            AccountSessions.ClearResponse(newer.Response);
-            AccountSessions.ClearResponse(fresh.Response);
+            Assert.That(fresh.Status, Is.EqualTo(AuthenticationStatus.Success));
+            newer.Dispose();
+            fresh.Dispose();
         }
 
         [Test]
@@ -50,12 +51,12 @@ namespace GameFrame.Tests
             var newer = await Login(sessions, 2);
             await Task.Delay(80);
             var unrelated = await Login(sessions, 1, account: 2);
-            Assert.That(newer.Binding!.CloseReason, Is.EqualTo(4));
+            Assert.That(newer.Binding!.CloseReason, Is.EqualTo(AccountSessionEndReason.Expired));
             epoch.SetResult(1);
             Assert.That((await old).Binding, Is.Null);
             Assert.That(sessions.TrackedAccountCount, Is.EqualTo(1));
-            AccountSessions.ClearResponse(newer.Response);
-            AccountSessions.ClearResponse(unrelated.Response);
+            newer.Dispose();
+            unrelated.Dispose();
         }
 
         [Test]
@@ -68,15 +69,15 @@ namespace GameFrame.Tests
             epoch.SetResult(1);
             Assert.That((await old).Binding, Is.Null);
             Assert.That(sessions.IsCurrent(newer.Binding!.Id), Is.True);
-            ushort kicked = 0;
+            AccountSessionEndReason? kicked = null;
             var third = await Login(sessions, 3, reason => kicked = reason);
             var fourth = await Login(sessions, 4);
-            Assert.That(kicked, Is.EqualTo(2));
-            Assert.That(third.Binding!.CloseReason, Is.EqualTo(2));
+            Assert.That(kicked, Is.EqualTo(AccountSessionEndReason.Replaced));
+            Assert.That(third.Binding!.CloseReason, Is.EqualTo(AccountSessionEndReason.Replaced));
             Assert.That(sessions.IsCurrent(fourth.Binding!.Id), Is.True);
-            AccountSessions.ClearResponse(newer.Response);
-            AccountSessions.ClearResponse(third.Response);
-            AccountSessions.ClearResponse(fourth.Response);
+            newer.Dispose();
+            third.Dispose();
+            fourth.Dispose();
         }
 
         [TestCase(false)]
@@ -87,8 +88,8 @@ namespace GameFrame.Tests
             using var cancellation = new CancellationTokenSource();
             var epoch = PendingEpoch();
             var pending = sessions.LoginAsync(1, _ => epoch.Task, _ => { }, cancellation.Token);
-            ServerRequestException? overloaded = Assert.ThrowsAsync<ServerRequestException>(async () => await Login(sessions, 1, account: 2));
-            Assert.That(overloaded!.StatusCode, Is.EqualTo(1));
+            using AuthenticationResult overloaded = await Login(sessions, 1, account: 2);
+            Assert.That(overloaded.Status, Is.EqualTo(AuthenticationStatus.Overloaded));
             if (cancel)
             {
                 cancellation.Cancel();
@@ -104,7 +105,7 @@ namespace GameFrame.Tests
             Assert.That(sessions.TrackedAccountCount, Is.Zero);
             var next = await Login(sessions, 1, account: 2);
             Assert.That(next.Binding, Is.Not.Null);
-            AccountSessions.ClearResponse(next.Response);
+            next.Dispose();
         }
 
         [Test]
@@ -117,29 +118,25 @@ namespace GameFrame.Tests
             Assert.That(second.Binding, Is.Not.Null);
             epoch.SetResult(1);
             var result = await first;
-            AccountSessions.ClearResponse(result.Response);
-            AccountSessions.ClearResponse(second.Response);
+            result.Dispose();
+            second.Dispose();
         }
 
         [Test]
         public async Task ResumeRevokesOnlyTheOldBindingAndRotatesTheToken()
         {
             using var sessions = new AccountSessions(new LoginOptions());
-            ushort reason = 0;
+            AccountSessionEndReason? reason = null;
             var first = await Login(sessions, 1, value => reason = value);
-            var resumed = sessions.Resume(new ResumeLoginRequest
-            {
-                AccountSessionId = first.Response.AccountSessionId,
-                ResumeToken = first.Response.ResumeToken
-            }, _ => { });
-            Assert.That(reason, Is.EqualTo(2));
-            Assert.That(first.Binding!.CloseReason, Is.EqualTo(2));
+            var resumed = sessions.Resume(first.AccountSessionId, first.ResumeToken, _ => { });
+            Assert.That(reason, Is.EqualTo(AccountSessionEndReason.Replaced));
+            Assert.That(first.Binding!.CloseReason, Is.EqualTo(AccountSessionEndReason.Replaced));
             Assert.That(resumed.Binding!.CloseReason, Is.Null);
-            Assert.That(resumed.Response.AuthEpoch, Is.EqualTo(first.Response.AuthEpoch));
+            Assert.That(resumed.Binding!.Identity.AuthEpoch, Is.EqualTo(first.Binding!.Identity.AuthEpoch));
             sessions.Dispose();
-            Assert.That(resumed.Binding.CloseReason, Is.EqualTo(7));
-            AccountSessions.ClearResponse(first.Response);
-            AccountSessions.ClearResponse(resumed.Response);
+            Assert.That(resumed.Binding.CloseReason, Is.EqualTo(AccountSessionEndReason.Revoked));
+            first.Dispose();
+            resumed.Dispose();
         }
 
         [Test]
@@ -187,12 +184,12 @@ namespace GameFrame.Tests
         {
             var repository = new BlockedRepository();
             using var sessions = new AccountSessions(new LoginOptions());
-            using var service = new AccountService(repository, sessions);
-            var application = new LobbyApplication(sessions, service, new LoginOptions()).Application;
+            using var service = new AuthenticationService(repository, sessions, new LoginOptions());
+            var application = new LobbyApplication(new LoginModule(sessions, service, new LoginOptions())).Application;
             application.Freeze();
             var memory = new FrameMemoryBudget(1024 * 1024);
             using var cancel = new CancellationTokenSource();
-            Task[] blocked = Enumerable.Range(0, 4).Select(_ => service.LoginAsync("player", "valid-password", _ => { }, cancel.Token)).ToArray();
+            Task[] blocked = Enumerable.Range(0, 4).Select(index => service.LoginAsync("blocked-" + index, "valid-password", _ => { }, cancel.Token)).ToArray();
             try
             {
                 var context = Context(application, memory);
@@ -246,20 +243,20 @@ namespace GameFrame.Tests
         {
             using var sessions = new AccountSessions(new LoginOptions());
             using var repository = new TestAccountRepository();
-            using var service = new AccountService(repository, sessions);
-            var application = new LobbyApplication(sessions, service, new LoginOptions()).Application;
+            using var service = new AuthenticationService(repository, sessions, new LoginOptions());
+            var application = new LobbyApplication(new LoginModule(sessions, service, new LoginOptions())).Application;
             var memory = new FrameMemoryBudget(1024 * 1024);
             var context = Context(application, memory);
             await context.Session.ConnectedAsync(context);
             var login = await Login(sessions, 1);
-            var session = (LoginSession)context.Session;
+            var session = (LobbySession)context.Session;
             session.Bind(login.Binding);
             sessions.Logout(login.Binding!.Id);
             var header = new ServerMessageHeader(GameNetRoutes.Echo.Opcode, 1, 0, NetDelivery.Reliable);
             Assert.That(session.CheckDeadline(AccountSessions.Now), Is.EqualTo(7));
             Assert.That(session.Admit(header).CloseReason, Is.EqualTo(7));
             Assert.That(session.CheckDispatch(header).CloseReason, Is.EqualTo(7));
-            AccountSessions.ClearResponse(login.Response);
+            login.Dispose();
         }
 
         [Test]
@@ -267,18 +264,18 @@ namespace GameFrame.Tests
         {
             using var sessions = new AccountSessions(new LoginOptions());
             using var repository = new TestAccountRepository();
-            using var service = new AccountService(repository, sessions);
-            var application = new LobbyApplication(sessions, service, new LoginOptions()).Application;
+            using var service = new AuthenticationService(repository, sessions, new LoginOptions());
+            var application = new LobbyApplication(new LoginModule(sessions, service, new LoginOptions())).Application;
             var memory = new FrameMemoryBudget(1024 * 1024);
             var context = Context(application, memory);
             await context.Session.ConnectedAsync(context);
             var first = await Login(sessions, 1);
             var second = await Login(sessions, 2);
-            ((LoginSession)context.Session).Bind(first.Binding);
+            ((LobbySession)context.Session).Bind(first.Binding);
             Assert.That(context.IsRestricted, Is.True);
             Assert.That(context.RequestedCloseReason, Is.EqualTo(2));
-            AccountSessions.ClearResponse(first.Response);
-            AccountSessions.ClearResponse(second.Response);
+            first.Dispose();
+            second.Dispose();
         }
 
         [Test]
@@ -290,12 +287,118 @@ namespace GameFrame.Tests
                 new IPEndPoint(IPAddress.Loopback, 1000), GameNetProtocol.Catalog, memory,
                 CancellationToken.None, _ => false, () => { });
             bool admitted = false;
-            var session = new LoginSession(context, sessions, new LoginOptions(), _ => admitted);
+            var session = new LobbySession(context, sessions, new LoginOptions(), _ => admitted);
             await session.ConnectedAsync(context);
             var header = new ServerMessageHeader(GameNetRoutes.Login.Opcode, 1, 100, NetDelivery.Reliable);
             Assert.That(session.Admit(header), Is.EqualTo(ServerAdmission.Deny(1, 1)));
             admitted = true;
             Assert.That(session.Admit(header).Allowed, Is.True);
+        }
+
+        [Test]
+        public async Task ConnectionIdentityRequiresAuthenticationAndDoesNotOwnResponseCredentials()
+        {
+            var options = new LoginOptions();
+            using var sessions = new AccountSessions(options);
+            using var repository = new TestAccountRepository();
+            using var service = new AuthenticationService(repository, sessions, options);
+            var application = new LobbyApplication(new LoginModule(sessions, service, options)).Application;
+            var memory = new FrameMemoryBudget(1024 * 1024);
+            var context = Context(application, memory);
+            await context.Session.ConnectedAsync(context);
+            var session = (LobbySession)context.Session;
+            Assert.That(Assert.Throws<ServerRequestException>(() => session.RequireIdentity())!.StatusCode, Is.EqualTo(2));
+
+            var request = new LoginRequest { Account = "identity", Password = "valid-password" };
+            LoginResponse response = await new LoginHandlers(service).LoginAsync(context, request, CancellationToken.None);
+            try
+            {
+                Assert.That(request.Password, Is.Empty);
+                AccountIdentity identity = session.RequireIdentity();
+                Assert.That(identity.AccountId, Is.EqualTo(response.AccountId));
+                Assert.That(identity.AuthEpoch, Is.EqualTo(response.AuthEpoch));
+                Assert.That(identity.BindingId, Is.EqualTo(session.Binding));
+                LoginHandlers.ClearResponse(response);
+                Assert.That(response.ResumeToken, Is.All.Zero);
+                Assert.That(response.AccountSessionId, Is.All.Zero);
+                Assert.That(session.RequireIdentity(), Is.EqualTo(identity));
+                Assert.That(sessions.IsCurrent(identity.BindingId), Is.True);
+            }
+            finally
+            {
+                LoginHandlers.ClearResponse(response);
+                await session.ClosedAsync(context, default);
+            }
+
+            Assert.That(memory.OwnedBytes, Is.Zero);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task DelayedEchoRejectsAnIdentityRevokedDuringItsAwait(bool logout)
+        {
+            var options = new LoginOptions();
+            using var sessions = new AccountSessions(options);
+            using var repository = new TestAccountRepository();
+            using var service = new AuthenticationService(repository, sessions, options);
+            var application = new LobbyApplication(new LoginModule(sessions, service, options)).Application;
+            application.Freeze();
+            var memory = new FrameMemoryBudget(1024 * 1024);
+            var context = Context(application, memory);
+            await context.Session.ConnectedAsync(context);
+            using AuthenticationResult first = await Login(sessions, 1);
+            ((LobbySession)context.Session).Bind(first.Binding);
+            using (OwnedFrame request = Request(memory, GameNetRoutes.Echo, new EchoRequest { DelayMs = 100 }))
+            {
+                Task<OwnedFrame?> pending = application.DispatchAsync(context, request, memory);
+                Assert.That(pending.IsCompleted, Is.False);
+                if (logout)
+                {
+                    Assert.That(service.Logout(first.Binding!.Id), Is.EqualTo(AuthenticationStatus.Success));
+                }
+                else
+                {
+                    using AuthenticationResult newer = await Login(sessions, 2);
+                }
+
+                using OwnedFrame response = (await pending)!;
+                Assert.That(response.Header.StatusCode, Is.EqualTo(2));
+                Assert.That(response.Header.BodyLength, Is.Zero);
+                Assert.That(context.TakeCloseReason(), Is.EqualTo(logout ? 7 : 2));
+            }
+
+            await context.Session.ClosedAsync(context, default);
+            Assert.That(memory.OwnedBytes, Is.Zero);
+        }
+
+        [Test]
+        public async Task AuthenticationServiceResumesDetachedSessionsAndLogoutRevokesTheRotatedCredentials()
+        {
+            var options = new LoginOptions();
+            using var sessions = new AccountSessions(options);
+            using var repository = new TestAccountRepository();
+            using var service = new AuthenticationService(repository, sessions, options);
+            var application = new LobbyApplication(new LoginModule(sessions, service, options)).Application;
+            var memory = new FrameMemoryBudget(1024 * 1024);
+            var context = Context(application, memory);
+            await context.Session.ConnectedAsync(context);
+            using AuthenticationResult first = await service.LoginAsync("resume", "valid-password", _ => { }, CancellationToken.None);
+            ((LobbySession)context.Session).Bind(first.Binding);
+            await context.Session.ClosedAsync(context, default);
+            Assert.That(sessions.IsCurrent(first.Binding!.Id), Is.True);
+
+            using AuthenticationResult resumed = service.Resume(first.AccountSessionId, first.ResumeToken, _ => { }, CancellationToken.None);
+            Assert.That(resumed.Status, Is.EqualTo(AuthenticationStatus.Success));
+            Assert.That(resumed.Binding!.Identity.AccountId, Is.EqualTo(first.Binding.Identity.AccountId));
+            Assert.That(resumed.Binding.Identity.AuthEpoch, Is.EqualTo(first.Binding.Identity.AuthEpoch));
+            Assert.That(resumed.Binding.Id, Is.Not.EqualTo(first.Binding.Id));
+            using AuthenticationResult reused = service.Resume(first.AccountSessionId, first.ResumeToken, _ => { }, CancellationToken.None);
+            Assert.That(reused.Status, Is.EqualTo(AuthenticationStatus.InvalidCredentials));
+            Assert.That(service.Logout(first.Binding.Id), Is.EqualTo(AuthenticationStatus.SessionRevoked));
+            Assert.That(service.Logout(resumed.Binding.Id), Is.EqualTo(AuthenticationStatus.Success));
+            using AuthenticationResult revoked = service.Resume(resumed.AccountSessionId, resumed.ResumeToken, _ => { }, CancellationToken.None);
+            Assert.That(revoked.Status, Is.EqualTo(AuthenticationStatus.InvalidCredentials));
+            Assert.That(memory.OwnedBytes, Is.Zero);
         }
     }
 }

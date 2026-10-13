@@ -1,29 +1,39 @@
+using System.Net;
 using System.Security.Cryptography;
-using Game.Hotfix.Network.Protocol;
-using GameFrame.Server.Network;
 
 namespace Game.Server.Login
 {
-    internal sealed class AccountService : IDisposable
+    internal sealed class AuthenticationService : IDisposable
     {
         private readonly IAccountRepository repository;
         private readonly AccountSessions sessions;
+        private readonly AuthenticationRateLimiter limiter;
         private readonly SemaphoreSlim operations = new SemaphoreSlim(4, 4);
 
-        internal AccountService(IAccountRepository repository, AccountSessions sessions)
+        internal AuthenticationService(IAccountRepository repository, AccountSessions sessions, LoginOptions options)
         {
             this.repository = repository;
             this.sessions = sessions;
+            limiter = new AuthenticationRateLimiter(options);
         }
 
-        internal async Task<ResultCode> RegisterAsync(string account, string password, CancellationToken cancellation)
+        internal async Task<AuthenticationStatus> RegisterAsync(string account, string password, CancellationToken cancellation)
         {
-            if (!PasswordHasher.Valid(account, password))
+            if (!limiter.AdmitAccount(account))
             {
-                return ResultCode.InvalidInput;
+                return AuthenticationStatus.Overloaded;
             }
 
-            await AdmitAsync(cancellation);
+            if (!PasswordHasher.Valid(account, password))
+            {
+                return AuthenticationStatus.InvalidInput;
+            }
+
+            if (!await operations.WaitAsync(0, cancellation))
+            {
+                return AuthenticationStatus.Overloaded;
+            }
+
             byte[] salt = Array.Empty<byte>();
             byte[] hash = Array.Empty<byte>();
             try
@@ -31,7 +41,7 @@ namespace Game.Server.Login
                 salt = RandomNumberGenerator.GetBytes(16);
                 hash = await Task.Run(() => PasswordHasher.Hash(password, salt, PasswordHasher.Iterations), cancellation);
                 return await repository.CreateAsync(account, salt, hash, PasswordHasher.Iterations, cancellation) ?
-                    ResultCode.Success : ResultCode.AccountAlreadyExists;
+                    AuthenticationStatus.Success : AuthenticationStatus.AccountAlreadyExists;
             }
             finally
             {
@@ -41,15 +51,24 @@ namespace Game.Server.Login
             }
         }
 
-        internal async Task<(LoginResponse Response, AccountSessions.Binding? Binding)> LoginAsync(
-            string account, string password, Action<ushort> disconnect, CancellationToken cancellation)
+        internal async Task<AuthenticationResult> LoginAsync(
+            string account, string password, Action<AccountSessionEndReason> disconnect, CancellationToken cancellation)
         {
-            if (!PasswordHasher.Valid(account, password))
+            if (!limiter.AdmitAccount(account))
             {
-                return (new LoginResponse { ResultCode = ResultCode.InvalidCredentials }, null);
+                return AuthenticationResult.Failure(AuthenticationStatus.Overloaded);
             }
 
-            await AdmitAsync(cancellation);
+            if (!PasswordHasher.Valid(account, password))
+            {
+                return AuthenticationResult.Failure();
+            }
+
+            if (!await operations.WaitAsync(0, cancellation))
+            {
+                return AuthenticationResult.Failure(AuthenticationStatus.Overloaded);
+            }
+
             try
             {
                 StoredAccount? stored = await repository.FindAsync(account, cancellation);
@@ -90,7 +109,7 @@ namespace Game.Server.Login
                         {
                             if (!CryptographicOperations.FixedTimeEquals(hash, stored.PasswordHash))
                             {
-                                return (new LoginResponse { ResultCode = ResultCode.InvalidCredentials }, null);
+                                return AuthenticationResult.Failure();
                             }
                         }
                         finally
@@ -109,13 +128,17 @@ namespace Game.Server.Login
             }
         }
 
-        private async Task AdmitAsync(CancellationToken cancellation)
+        internal bool AdmitConnection(IPAddress address) => limiter.AdmitIp(address);
+
+        internal AuthenticationResult Resume(byte[] accountSessionId, byte[] resumeToken, Action<AccountSessionEndReason> disconnect,
+            CancellationToken cancellation)
         {
-            if (!await operations.WaitAsync(0, cancellation))
-            {
-                throw new ServerRequestException(1);
-            }
+            cancellation.ThrowIfCancellationRequested();
+            return sessions.Resume(accountSessionId, resumeToken, disconnect);
         }
+
+        internal AuthenticationStatus Logout(long binding) =>
+            sessions.Logout(binding) ? AuthenticationStatus.Success : AuthenticationStatus.SessionRevoked;
 
         public void Dispose() => operations.Dispose();
     }

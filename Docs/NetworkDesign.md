@@ -118,11 +118,11 @@ DotNet/Game.Server/               唯一业务可执行入口、local 配置、�
 
 Game.Server 使用 Web SDK/net10.0，local 功能需显式 profile；PostgreSQL 注册/密码认证已接入，生产 hosting（监听/部署与跨进程会话）未配置时拒绝启动，启动不校验玩家凭据。WssServer 通过 hosted lifecycle 的 StoppingAsync 阶段在 Kestrel 等 StopAsync 前 join 网络，不能仅依赖注册先后或 RunAsync 返回后的清理。不提前增加网关/账号/世界等可执行项目；第 14 节业务契约保留供后续实现。
 
-Game.Server 内按业务功能建目录：Login/ 集中账号、PostgreSQL 仓库、注册/登录/恢复/注销处理器和每连接登录状态。LobbyApplication 作为大厅组合入口显式注册模块与路由；Program 校验 profile、加载 Luban Tables 后选择 LocalWssService/LocalKcpService。启动入口负责配置校验、资源创建、运行及关闭所有权，不增加反射注册或额外生命周期管理器。配置或初始化失败停止后续步骤，已创建资源按原所有权释放。
+Game.Server 内按业务功能建目录：Login/ 集中认证用例、PostgreSQL 仓库、账号会话和注册/登录/恢复/注销协议入口；Sessions/ 的 LobbySession 负责每连接准入、身份绑定和关闭，身份来源唯一为 AccountSessions.Binding。LobbyApplication 只显式组合 Login/Echo/World 模块，业务处理归所属模块；简单请求可以共用 Handler 类，复杂用例再拆分。Program 校验 profile、加载 Luban Tables 后选择 LocalWssService/LocalKcpService。启动入口负责配置校验、资源创建、运行及关闭所有权，不增加反射注册或额外生命周期管理器。配置或初始化失败停止后续步骤，已创建资源按原所有权释放。
 
 两端从同源 Excel 分别生成配置，服务端数据随构建/发布复制；启动先加载 Tables，缺文件或反序列化失败停止后续流程。配置通过重启更新，不增加通用配置管理器或热重载；分组、版本与部署细节见服务端规范和说明。
 
-账号主数据库已选定 PostgreSQL，通过应用层 Npgsql 仓库接入。服务启动校验证书、数据库连接与账号表，不接收或预置玩家账号密码；客户端通过 WSS Register/Login RPC 注册、登录。LoginOptions 只保存策略与容量，AccountService 负责密码校验与有界认证并发，PostgresAccountRepository 负责参数化持久化，AccountSessions 负责单进程的账号会话与绑定。注册不自动登录；持久化账号可在重启后登录，内存 Resume 凭据不跨重启恢复。具体初始化、密码格式、单进程边界与验证见 [服务端账号规范](DotNetDevelopment.md#4-数据库与账号业务) 和 [运行配置](DotNetUsage.md)。
+账号主数据库已选定 PostgreSQL，通过应用层 Npgsql 仓库接入。服务启动校验证书、数据库连接与账号表，不接收或预置玩家账号密码；客户端通过 WSS Register/Login RPC 注册、登录。LoginOptions 只保存策略与容量，AuthenticationService 统一认证用例、密码校验与有界准入，PostgresAccountRepository 负责参数化持久化，AccountSessions 负责单进程的账号会话与绑定。业务结果与会话结束原因由 Handler/LobbySession 映射成协议响应/关闭码。大厅业务通过 RequireIdentity 取得只读身份，异步等待后按业务语义复查并仲裁提交。注册不自动登录；Login 不存在则自动建号并认证，存在则校验密码；持久化账号可在重启后登录，内存 Resume 凭据不跨重启恢复。具体初始化、密码格式、单进程边界与验证见 [服务端账号规范](DotNetDevelopment.md#4-数据库与账号业务) 和 [运行配置](DotNetUsage.md)。
 
 Git 保留 DotNet 源码、解决方案、项目和依赖锁文件；忽略其 bin/obj、artifacts、TestResults、日志及 IDE 本地配置。Tools 下的 .NET 工程采用相同过滤，公共 Native/Kcp/build 中维护的构建脚本与已安装插件产物继续保留。
 
@@ -652,7 +652,7 @@ sequenceDiagram
 ```
 
 1. 从可信启动/热更配置读取大厅 WSS 入口，建立 TLS 连接并完成无 ticket 的协议 Hello。协议不符在发送登录凭据前拒绝。
-2. 新账号先使用 Register RPC 创建 PostgreSQL 账号，注册成功仍未登录。Hotfix 使用 Login RPC 提交账号凭据，或显式选择 ResumeLogin RPC 提交有效恢复凭据；服务端验证后将当前 WSS connection 绑定到账号会话。所有敏感字段只在 WSS 正文中出现。
+2. Hotfix 使用 Login RPC 提交账号凭据：服务端查询 PostgreSQL，账号不存在则创建并认证，存在则校验密码；独立 Register 仍可显式使用，成功不会自动登录。也可显式选择 ResumeLogin RPC 提交有效恢复凭据；服务端验证后将当前 WSS connection 绑定到账号会话。所有敏感字段只在 WSS 正文中出现。
 3. 登录成功才开放大厅业务、选角色/世界与 RequestWorldGrant。客户端不需要为每条大厅 RPC 再携带账号 token，服务端根据连接绑定的 principal/authEpoch 校验。
 4. 世界 transport 选择 WSS 时直接复用当前已登录连接，经网关路由世界消息；不申请 KCP grant，不建立第二条 WSS，不加载 KCP native 插件。
 5. 选择 KCP 时，已登录大厅向目标网关注册新 grant，注册成功后通过 RPC 返回端点与密钥；客户端先完成 DTLS，再用 ClientHello ticket 绑定账号授权。
@@ -881,7 +881,7 @@ StopSessionAsync(requestLogout)
   5. 最后传播主异常
 ```
 
-上述 GameNetworkSession、世界入场/恢复/离场与快照处理是后续 Hotfix/.NET 业务接入流程。当前已生成相关路由，并实现服务端 Register/Login/ResumeLogin/Logout；RequestWorldGrant 返回 WorldUnavailable，其余世界入站路由显式拒绝，尚无世界处理器或完整世界会话。客户端已实现普通实例 GameLoginSession、只读 GameUser 和登录面板参数注入，当前仅 WSS 账号登录/注销，断线清空并回到登录，不自动 Resume。启动/恢复失败停止当前流程；调用者显式清理已获得的资源。KCP 世界启动失败不隐式注销账号或关闭独立大厅。
+上述 GameNetworkSession、世界入场/恢复/离场与快照处理是后续 Hotfix/.NET 业务接入流程。当前已生成相关路由，并实现服务端 Register/Login/ResumeLogin/Logout；WorldModule 注册 RequestWorldGrant 返回 WorldUnavailable，其余世界入站路由显式拒绝，尚无世界业务实现或完整世界会话。客户端已实现普通实例 GameLoginSession、只读 GameUser 和登录面板参数注入，当前仅 WSS 账号登录/注销，断线清空并回到登录，不自动 Resume。启动/恢复失败停止当前流程；调用者显式清理已获得的资源。KCP 世界启动失败不隐式注销账号或关闭独立大厅。
 
 WSS 共享连接的状态流不能假装独立：EnterWorld/LeaveWorld 超时、取消或处理器失败导致世界状态不确定时，不能先注销处理器再继续使用大厅 socket；该次共享 WSS 必须停止业务并关闭，大厅可通过显式 ResumeLogin 恢复账号。业务明确拒绝入场且尚未改变状态时可保留大厅。StopSession 将关闭全部连接，不重复发 LeaveWorld；所有失败均保留原异常，不自动执行恢复或入场回滚。
 

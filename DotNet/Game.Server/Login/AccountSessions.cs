@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
-using Game.Hotfix.Network.Protocol;
+using Game.Server.Sessions;
 using GameFrame.Network;
-using GameFrame.Server.Network;
 
 namespace Game.Server.Login
 {
@@ -11,36 +10,37 @@ namespace Game.Server.Login
         internal sealed class Binding
         {
             private int closeReason;
-            internal long Id { get; }
+            internal long Id => Identity.BindingId;
+            internal AccountIdentity Identity { get; }
             private readonly long deadline;
-            internal ushort? CloseReason
+            internal AccountSessionEndReason? CloseReason
             {
                 get
                 {
                     int reason = Volatile.Read(ref closeReason);
-                    return reason != 0 ? (ushort)reason : Now >= deadline ? (ushort)4 : null;
+                    return reason != 0 ? (AccountSessionEndReason)reason : Now >= deadline ? AccountSessionEndReason.Expired : null;
                 }
             }
 
-            internal Binding(long id, long deadline)
+            internal Binding(long id, ulong accountId, ulong epoch, long deadline)
             {
-                Id = id;
+                Identity = new AccountIdentity(accountId, epoch, id);
                 this.deadline = deadline;
             }
 
-            internal void Revoke(ushort reason) => Interlocked.CompareExchange(ref closeReason, reason, 0);
+            internal void Revoke(AccountSessionEndReason reason) => Interlocked.CompareExchange(ref closeReason, (int)reason, 0);
         }
 
         private sealed class Session
         {
-            internal ulong AccountId;
-            internal ulong Epoch;
+            internal ulong AccountId => Binding.Identity.AccountId;
+            internal ulong Epoch => Binding.Identity.AuthEpoch;
             internal required Binding Binding;
             internal byte[] Id = Array.Empty<byte>();
             internal byte[] ResumeDigest = Array.Empty<byte>();
             internal long Deadline;
             internal long ExpiresUtc;
-            internal Action<ushort>? Disconnect;
+            internal Action<AccountSessionEndReason>? Disconnect;
             internal long AttemptWindow;
             internal int Attempts;
         }
@@ -79,8 +79,8 @@ namespace Game.Server.Login
             this.options = options;
         }
 
-        internal async Task<(LoginResponse Response, Binding? Binding)> LoginAsync(ulong accountId,
-            Func<CancellationToken, Task<ulong>> advanceEpoch, Action<ushort> disconnect, CancellationToken cancellation)
+        internal async Task<AuthenticationResult> LoginAsync(ulong accountId,
+            Func<CancellationToken, Task<ulong>> advanceEpoch, Action<AccountSessionEndReason> disconnect, CancellationToken cancellation)
         {
             if (accountId == 0)
             {
@@ -96,7 +96,7 @@ namespace Game.Server.Login
                 foreach (var pair in accounts.Where(pair => pair.Value.Session != null &&
                     Now >= pair.Value.Session.Deadline).ToArray())
                 {
-                    Remove(pair.Value.Session!, 4);
+                    Remove(pair.Value.Session!, AccountSessionEndReason.Expired);
                 }
 
                 if (!accounts.TryGetValue(accountId, out state!))
@@ -104,7 +104,7 @@ namespace Game.Server.Login
                     // A pending first login reserves the same slot its committed session will own.
                     if (accounts.Count >= options.MaxSessions)
                     {
-                        throw new ServerRequestException(1);
+                        return AuthenticationResult.Failure(AuthenticationStatus.Overloaded);
                     }
 
                     state = new AccountState();
@@ -118,8 +118,8 @@ namespace Game.Server.Login
             try
             {
                 ulong epoch = await advanceEpoch(cancellation).ConfigureAwait(false);
-                Action<ushort>? revoke;
-                (LoginResponse Response, Binding? Binding) result;
+                Action<AccountSessionEndReason>? revoke;
+                AuthenticationResult result;
                 lock (gate)
                 {
                     ObjectDisposedException.ThrowIf(disposed, this);
@@ -131,12 +131,12 @@ namespace Game.Server.Login
 
                     if (state.Session != null && Now >= state.Session.Deadline)
                     {
-                        Remove(state.Session, 4);
+                        Remove(state.Session, AccountSessionEndReason.Expired);
                     }
 
                     if (state.Revision != revision || epoch <= state.LatestEpoch)
                     {
-                        return (Failure(), null);
+                        return AuthenticationResult.Failure();
                     }
 
                     Session? previous = state.Session;
@@ -145,15 +145,13 @@ namespace Game.Server.Login
                     {
                         // A newer login may replace this login too; only revocation invalidates
                         // all in-flight operations, while epoch orders competing login commits.
-                        Remove(previous, 2, invalidatePending: false);
+                        Remove(previous, AccountSessionEndReason.Replaced, invalidatePending: false);
                     }
 
                     long deadline = checked(Now + (long)options.AccountLifetime.TotalMilliseconds);
                     var session = new Session
                     {
-                        AccountId = accountId,
-                        Epoch = epoch,
-                        Binding = new Binding(NextBinding(), deadline),
+                        Binding = new Binding(NextBinding(), accountId, epoch, deadline),
                         Id = RandomNumberGenerator.GetBytes(16),
                         Deadline = deadline,
                         ExpiresUtc = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + (long)options.AccountLifetime.TotalMilliseconds,
@@ -163,17 +161,17 @@ namespace Game.Server.Login
                     state.LatestEpoch = epoch;
                     sessions.Add(Convert.ToHexString(session.Id), session);
                     bindings.Add(session.Binding.Id, session);
-                    result = (RotateToken(session), session.Binding);
+                    result = RotateToken(session);
                 }
 
                 try
                 {
-                    revoke?.Invoke(2);
+                    revoke?.Invoke(AccountSessionEndReason.Replaced);
                     return result;
                 }
                 catch
                 {
-                    ClearResponse(result.Response);
+                    result.Dispose();
                     throw;
                 }
             }
@@ -187,36 +185,36 @@ namespace Game.Server.Login
             }
         }
 
-        internal (LoginResponse Response, Binding? Binding) Resume(ResumeLoginRequest request, Action<ushort> disconnect)
+        internal AuthenticationResult Resume(byte[] accountSessionId, byte[] resumeToken, Action<AccountSessionEndReason> disconnect)
         {
-            if (request.AccountSessionId.Length != 16 || request.ResumeToken.Length != 32)
+            if (accountSessionId.Length != 16 || resumeToken.Length != 32)
             {
-                return (Failure(), null);
+                return AuthenticationResult.Failure();
             }
 
-            byte[] digest = SHA256.HashData(request.ResumeToken);
-            Action<ushort>? revoke;
-            (LoginResponse Response, Binding? Binding) result;
+            byte[] digest = SHA256.HashData(resumeToken);
+            Action<AccountSessionEndReason>? revoke;
+            AuthenticationResult result;
             try
             {
                 lock (gate)
                 {
                     ObjectDisposedException.ThrowIf(disposed, this);
-                    if (!sessions.TryGetValue(Convert.ToHexString(request.AccountSessionId), out Session? session) ||
+                    if (!sessions.TryGetValue(Convert.ToHexString(accountSessionId), out Session? session) ||
                         Now >= session.Deadline || !AllowAttempt(session) ||
                         !CryptographicOperations.FixedTimeEquals(digest, session.ResumeDigest))
                     {
-                        return (Failure(), null);
+                        return AuthenticationResult.Failure();
                     }
 
-                    var binding = new Binding(NextBinding(), session.Deadline);
+                    var binding = new Binding(NextBinding(), session.AccountId, session.Epoch, session.Deadline);
                     revoke = session.Disconnect;
-                    session.Binding.Revoke(2);
+                    session.Binding.Revoke(AccountSessionEndReason.Replaced);
                     bindings.Remove(session.Binding.Id);
                     session.Binding = binding;
                     session.Disconnect = disconnect;
                     bindings.Add(binding.Id, session);
-                    result = (RotateToken(session), binding);
+                    result = RotateToken(session);
                 }
             }
             finally
@@ -226,12 +224,12 @@ namespace Game.Server.Login
 
             try
             {
-                revoke?.Invoke(2);
+                revoke?.Invoke(AccountSessionEndReason.Replaced);
                 return result;
             }
             catch
             {
-                ClearResponse(result.Response);
+                result.Dispose();
                 throw;
             }
         }
@@ -253,7 +251,7 @@ namespace Game.Server.Login
                     return false;
                 }
 
-                Remove(session, 7);
+                Remove(session, AccountSessionEndReason.Revoked);
                 return true;
             }
         }
@@ -291,35 +289,24 @@ namespace Game.Server.Login
             return ++session.Attempts <= options.MaxLoginAttemptsPerSecond;
         }
 
-        private static LoginResponse RotateToken(Session session)
+        private static AuthenticationResult RotateToken(Session session)
         {
             byte[] token = RandomNumberGenerator.GetBytes(32);
             CryptographicOperations.ZeroMemory(session.ResumeDigest);
             session.ResumeDigest = SHA256.HashData(token);
             uint ttl = checked((uint)Math.Max(0, session.Deadline - Now));
-            return new LoginResponse
+            return new AuthenticationResult
             {
-                ResultCode = ResultCode.Success,
-                AccountId = session.AccountId,
+                Status = AuthenticationStatus.Success,
+                Binding = session.Binding,
                 AccountSessionId = (byte[])session.Id.Clone(),
-                AuthEpoch = session.Epoch,
                 ResumeToken = token,
-                ResumeExpiresAtUtcMs = session.ExpiresUtc,
-                AccountExpiresAtUtcMs = session.ExpiresUtc,
-                ResumeRemainingTtlMs = ttl,
-                AccountRemainingTtlMs = ttl
+                ExpiresAtUtcMs = session.ExpiresUtc,
+                RemainingTtlMs = ttl
             };
         }
 
-        private static LoginResponse Failure() => new LoginResponse { ResultCode = ResultCode.InvalidCredentials };
-
-        internal static void ClearResponse(LoginResponse response)
-        {
-            CryptographicOperations.ZeroMemory(response.ResumeToken);
-            CryptographicOperations.ZeroMemory(response.AccountSessionId);
-        }
-
-        private void Remove(Session session, ushort reason, bool invalidatePending = true)
+        private void Remove(Session session, AccountSessionEndReason reason, bool invalidatePending = true)
         {
             AccountState state = accounts[session.AccountId];
             if (invalidatePending)
@@ -354,7 +341,7 @@ namespace Game.Server.Login
                 {
                     if (state.Session != null)
                     {
-                        Remove(state.Session, 7);
+                        Remove(state.Session, AccountSessionEndReason.Revoked);
                     }
                 }
             }

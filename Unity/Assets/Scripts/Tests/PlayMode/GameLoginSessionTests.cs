@@ -247,6 +247,35 @@ namespace GameFrame.Tests
         });
 
         [UnityTest]
+        public IEnumerator FailedMainEntryCanBeRetriedWithoutLoggingInAgain() => UniTask.ToCoroutine(async () =>
+        {
+            GameLoginSession session = CreateSession();
+            int entries = 0;
+            OpenPanel(session, () =>
+            {
+                entries++;
+                return entries == 1
+                    ? UniTask.FromException(new InvalidOperationException("test main entry failure"))
+                    : UniTask.CompletedTask;
+            });
+            Control<TMP_InputField>("accountInput").text = Account();
+            Control<TMP_InputField>("passwordInput").text = "test-password";
+            LogAssert.Expect(LogType.Exception, "InvalidOperationException: test main entry failure");
+            Button confirm = Control<Button>("confirmLoginButton");
+            confirm.onClick.Invoke();
+            await UniTask.WaitUntil(() => entries == 1 && confirm.interactable).Timeout(TimeSpan.FromSeconds(10));
+            GameUser user = session.CurrentUser;
+            Assert.IsNotNull(user);
+            Assert.AreEqual("进入主场景失败，请再次点击确定", Control<TextMeshProUGUI>("statusText").text);
+            Assert.AreEqual(string.Empty, Control<TMP_InputField>("passwordInput").text);
+            Assert.IsFalse(Control<TMP_InputField>("accountInput").interactable);
+            Assert.IsFalse(Control<TMP_InputField>("passwordInput").interactable);
+            confirm.onClick.Invoke();
+            await UniTask.WaitUntil(() => entries == 2 && confirm.interactable).Timeout(TimeSpan.FromSeconds(5));
+            Assert.AreSame(user, session.CurrentUser, "再次点击只进入主场景，不重复认证或增加 epoch。");
+        });
+
+        [UnityTest]
         public IEnumerator PanelCloseAndReopenCancelsOldRequestWithoutChangingNewStatus() => UniTask.ToCoroutine(async () =>
         {
             GameLoginSession session = CreateSession();

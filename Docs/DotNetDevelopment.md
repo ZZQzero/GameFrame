@@ -32,9 +32,13 @@ SDK 由 `DotNet/global.json`、`Tools/global.json` 锁定为 10.0.401，工程�
 
 `DotNet/NetworkProtocol` 加入服务端解决方案，提供 Generate/Check IDE 启动项；Unity Editor 菜单通过外部 .NET 进程调用同一工具。生成器只依赖 Core 和生成/编译库，不引用 Game.Protocol，保持缺失既有生成文件时仍能运行。协议源、正式生成文件与共享源码引用位置保持一致，详见双方使用说明。
 
-`Game.Server/Program.cs` 验证 profile、加载游戏配置并选择启动入口；`LocalWssService`、`LocalKcpService` 持有各自配置和资源。`LobbyApplication` 显式组合功能路由。按功能建目录，例如 `Login/` 放账号服务、仓库、会话、注册/登录/恢复/注销处理器及策略；后续背包、房间等沿用此方式。通用数据库连接池在 `Game.Server/Database/`，不是网络框架能力。不为尚未实现的网关、世界、账号再创建多个可执行项目。
+`Game.Server/Program.cs` 验证 profile、加载游戏配置并选择启动入口；`LocalWssService`、`LocalKcpService` 持有各自配置和资源。`LobbyApplication` 只显式组合 `LoginModule`、`EchoModule`、`WorldModule`，不实现业务处理。按功能建目录：`Login/` 放认证用例、仓库、账号会话与处理器，`Sessions/` 放大厅连接会话和只读身份，`Diagnostics/` 放大厅 Echo，`World/` 显式注册当前未实现业务的返回/拒绝决定；后续背包、房间沿用此方式。通用数据库连接池在 `Game.Server/Database/`，不是网络框架能力。不为尚未实现的网关、世界、账号再创建多个可执行项目。
 
 处理器通过 `ServerApplication` 显式注册强类型 RPC/Notify 或 Reject。构造 host 前全部入站路由必须有明确处理/拒绝决定；host 校验漏注册、重复注册、目录归属后冻结应用。Push 不注册入站 handler。不用反射扫描处理器或运行时按类型名找 opcode。
+
+模块只承担显式注册与必要的依赖组合，不引入通用模块基类、扫描或消息中转层。Request/Response 配对由生成的 `NetRpc<TRequest,TResponse>` 保证；不要求每个请求单独建类。当前四条认证入口保留在 `LoginHandlers`，负责协议适配、敏感 DTO 清理和回复后关闭；复杂用例再按实际职责拆处理器。
+
+大厅业务通过 `LobbySession.RequireIdentity()` 取得 `AccountIdentity(AccountId, AuthEpoch, BindingId)`。身份由 `AccountSessions.Binding` 提供，不包含恢复凭据，不另存一份登录标志。入口检查与外部 IO 后复查不能替代状态提交处的仲裁：身份快照不是永久授权，角色归属/房间成员等权限由所属模块检查，共享状态由该业务同步，持久化副作用使用该业务的事务/幂等。普通 EOF 排空期间仍可使用有效账号身份；LobbySession 已进入 closing、连接取消或绑定被顶号、到期、撤销时拒绝身份访问。
 
 ## 3. 启动、连接与关闭
 
@@ -88,6 +92,10 @@ PostgreSQL 是账号主库，Npgsql 10.0.3 通过 NuGet 引用在 Game.Server，
 SELECT 1 检查与账号表检查在监听前分别完成；SQL 初始化由部署者显式执行。单 SQL 的 command/reader 用 await using；多 SQL 原子操作独占一个连接与事务，command 绑定同一 transaction，成功显式 CommitAsync，最后释放。SQL 全部参数化，结果映射和事务归业务仓库，服务依赖仓库接口。复用 Npgsql，不创建通用 CRUD 转发类。所有异步数据库操作传递取消；异常原样传播，不当作账号不存在或密码错误。
 
 当前池最大 16、连接/命令超时 5 秒，默认 search_path=public、关闭详细错误。仓库已有 CreateAsync/FindAsync/AdvanceEpochAsync；删号、改密/找回尚未实现，不提前增加无调用方接口。游戏服务释放连接池不会停止 PostgreSQL 进程，进程由显式维护工具、Docker 或系统服务管理。
+
+`AuthenticationService` 是注册、登录、恢复和注销的统一用例入口，持有同一个 `AuthenticationRateLimiter` 与全局认证在途门禁；IP 限额在连接准入执行，账号限额在注册/登录用例执行。`AccountSessions` 是账号会话的唯一状态所有者；业务层返回 `AuthenticationStatus`/`AuthenticationResult` 和 `AccountSessionEndReason`，不构造协议 DTO、不引用 `ServerRequestException` 或网络关闭码。Handler 映射业务结果，`LobbySession` 将会话结束原因映射到连接关闭原因。数据库/内部故障继续原样传播。
+
+`AuthenticationResult` 的凭据数组由调用方拥有：直接业务调用者用 `Dispose()` 清零；Handler 成功映射时将数组所有权交给响应，交接失败清理结果，框架编码完成或编码失败后调用 `LoginHandlers.ClearResponse`。不复制 token、不让只读身份引用敏感数组，也不能在编码前清空成功响应。账号会话只保留自身会话 ID 与 token 摘要。
 
 账号规则：
 
@@ -379,7 +387,7 @@ KcpListenerHost 通过 System.Diagnostics.Metrics 的 `GameFrame.Server.Network.
 
 ### 当前范围与待完成项（2026-10-13）
 
-已实现：五个运行时工程与离线协议/配置工具分层、Luban 双端生成和服务端加载、配置 IDE 启动项与 CI 只读产物检查、强类型框架接口、WSS/KCP 底层、Proto→MemoryPack、PostgreSQL 账号、local 启动、原生构建安装、KCP owner/业务队列测量和主要生命周期回归；已修复 WSS/KCP 慢 Connected 阻塞传输、WSS 最小接收额度遗漏扩容峰值、未订阅 Push 漏校验、KCP 容量越界，以及账号迟到 epoch/认证收尾/关闭原因/logger 问题。
+已实现：五个运行时工程与离线协议/配置工具分层、Luban 双端生成和服务端加载、配置 IDE 启动项与 CI 只读产物检查、强类型框架接口、显式业务模块组合与统一认证用例/连接身份入口、WSS/KCP 底层、Proto→MemoryPack、PostgreSQL 账号、local 启动、原生构建安装、KCP owner/业务队列测量和主要生命周期回归；已修复 WSS/KCP 慢 Connected 阻塞传输、WSS 最小接收额度遗漏扩容峰值、未订阅 Push 漏校验、KCP 容量越界，以及账号迟到 epoch/认证收尾/关闭原因/logger 问题。
 
 未完成：生产 hosting/跨进程账号仲裁，账号到世界 grant 注册及撤销链路、世界/角色/AOI/移动/恢复业务，完整元数据计账、RPC 分阶段/分位耗时与统一服务端诊断、精细期限调度、帧池化/零逐包分配目标、构建输入指纹拆分、生产容量与 soak。先补测量再决定池化、编码长度预计算、采样或锁/调度调整。
 

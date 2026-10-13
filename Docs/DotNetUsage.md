@@ -231,7 +231,21 @@ var repository = new PostgresAccountRepository(database.DataSource);
 await repository.ValidateAsync(cancellation);
 ```
 
-这些内部应用类型在 Game.Server 中调用。账号 CRUD 接口为 CreateAsync/FindAsync/AdvanceEpochAsync，密码哈希/认证用 AccountService，不让处理器绕过它直接创建玩家。后续角色等仓库借用同一 DataSource；完整事务和资源规则见开发规范。
+这些内部应用类型在 Game.Server 中调用。账号 CRUD 接口为 CreateAsync/FindAsync/AdvanceEpochAsync，注册、登录、恢复和注销用 AuthenticationService，不让处理器绕过它直接创建玩家。后续角色等仓库借用同一 DataSource；完整事务和资源规则见开发规范。
+
+大厅显式组合示例（repository 为已验证的账号仓库）：
+
+```csharp
+var options = new LoginOptions();
+using var accounts = new AccountSessions(options);
+using var authentication = new AuthenticationService(repository, accounts, options);
+var login = new LoginModule(accounts, authentication, options);
+var application = new LobbyApplication(login).Application;
+```
+
+`LobbyApplication` 内逐项调用 Login/Echo/World 模块的 Register。认证请求入口在 `Login/LoginHandlers.cs`，完整用例在 `Login/AuthenticationService.cs`，连接准入与身份绑定在 `Sessions/LobbySession.cs`。新增业务在自己的模块中显式注册生成路由，再加入大厅组合；不改登录处理器或框架分发，不使用反射。所有模块借用宿主持有的资源，网络停止并 join handler 后才释放认证服务、账号会话和数据库。
+
+大厅 Handler 从 `((LobbySession)context.Session).RequireIdentity()` 取得只读账号 ID、认证代次和绑定 ID。等待外部 IO 后复查绑定，业务状态提交处仍须执行所属业务的并发仲裁与权限检查；不要将身份快照当永久授权，也不要把客户端携带的账号 ID 当作当前用户。大厅 Echo 已在延迟前后执行身份检查。独立 KCP local harness 保留自己的无账号传输测试契约，不使用 LobbySession。
 
 <a id="协议生成与验证"></a>
 
@@ -334,6 +348,7 @@ PG 测试角色需能创建 schema，测试创建随机 schema 并只删除自�
 
 | 日期与范围 | 证据 | 限制 |
 | --- | --- | --- |
+| 2026-10-13 大厅业务模块与认证职责整理，macOS/.NET 10.0.401 | 七工程 Release 编译 0 警告/错误；Server160/160、Framework13/13、0 跳过，使用临时独立 PostgreSQL18.6 与已核验源码/二进制 manifest 的现有 macOS Release native；新增身份与凭据清理独立、异步 Echo 期间顶号/注销拒绝、断线恢复与注销凭据撤销用例；既有真实 WSS/PG、单次 token、epoch 仲裁、过载关闭/注册重试、普通 EOF 排空及 UDP/DTLS 回归通过；协议 check --artifacts 五文件一致 | 本轮未改协议、客户端或通用框架；未运行 Unity/Player/IL2CPP、独立 Game.Server 进程联调、其他平台、远端 CI、native 重构建/sanitizer 或容量验收；临时 PG 与文件已清理 |
 | 2026-10-13 Login 自动建号与客户端接入，macOS/.NET 10.0.401 | 七工程 Release 编译 0 警告/错误；四测试工程 locked restore 通过；Server156、Framework13、Protocol182、ConfigGenerator15 共 366/366、0 跳过，使用独立 PG18.6 与现有 macOS Release native；新增真实 PG 首次建号、同名并发同/不同密码、保存密码复验与无效/取消输入测试，真实 WSS 一次 Login 后 Echo；协议 check --artifacts 通过；实际 Game.Server + Unity 登录/断线闭环通过 | 本地单实例；未验证生产部署、远端 CI、其他服务端平台、容量/soak；Unity 证据及临时开发证书信任范围见客户端说明 |
 | 2026-10-13 服务端传输修正与测量，macOS/.NET 10.0.401 | 七工程 Release 编译 0 警告/错误，解决方案与四测试工程 locked restore 通过；Server150、Framework13、Protocol182、ConfigGenerator15 共 360/360、0 跳过，使用独立 PG18 与本机 Release native；真实 UDP/DTLS 验证 21.5 秒初始化期间心跳/准入、业务 FIFO、factory 发布、失败/主动关闭取消与正常关闭排空，完成后 owned 归零；WSS33,824 最小额度接收最大帧及双 lease 清理通过；协议 check --artifacts 与 Luban check --target all 通过；CI YAML 解析、路径/检查入口与 setup-dotnet 双版本安装语义核对通过 | 未执行远端 CI、Unity/Player/IL2CPP/真机、Windows/Linux 服务端实跑、新 native 构建/sanitizer、容量或 soak；新增指标不是完整服务端诊断 |
 | 2026-10-13 KCP 单连接低负载样本，同上环境 | 16 次 Echo 预热后 128 次串行小消息；owner 工作 P95=0.244ms、循环间隔 P95=11.262ms、owner 分配 P95=1,256By/轮、发送排队 P95=11ms、派发排队 P95=1ms；含客户端 Pump 的 RPC RTT P95=57.581ms | 开启 MeterListener 的 loopback 功能样本，非容量/生产延迟门禁；包含采集开销，不代表纯框架分配或 WAN 性能；保留现有调度与内存策略 |

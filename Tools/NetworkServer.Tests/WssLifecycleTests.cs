@@ -143,9 +143,9 @@ namespace GameFrame.Tests
             var options = new LoginOptions { AccountLifetime = TimeSpan.FromMilliseconds(300) };
             using var sessions = new AccountSessions(options);
             using var repository = new TestAccountRepository();
-            using var service = new AccountService(repository, sessions);
+            using var service = new AuthenticationService(repository, sessions, new LoginOptions());
             await service.RegisterAsync("player", "valid-password", guard.Token);
-            await Start(new LobbyApplication(sessions, service, options).Application);
+            await Start(new LobbyApplication(new LoginModule(sessions, service, options)).Application);
             await Send(GameNetRoutes.Login, new LoginRequest { Account = "player", Password = "valid-password" });
             using (OwnedFrame response = (await Receive())!)
             {
@@ -166,12 +166,12 @@ namespace GameFrame.Tests
         {
             var repository = new AccountLifecycleTests.BlockedRepository();
             using var sessions = new AccountSessions(new LoginOptions());
-            using var service = new AccountService(repository, sessions);
+            using var service = new AuthenticationService(repository, sessions, new LoginOptions());
             using var cancellation = new CancellationTokenSource();
-            Task[] blocked = Enumerable.Range(0, 4).Select(_ => service.LoginAsync("player", "valid-password", _ => { }, cancellation.Token)).ToArray();
+            Task[] blocked = Enumerable.Range(0, 4).Select(index => service.LoginAsync("blocked-" + index, "valid-password", _ => { }, cancellation.Token)).ToArray();
             try
             {
-                await Start(new LobbyApplication(sessions, service, new LoginOptions()).Application);
+                await Start(new LobbyApplication(new LoginModule(sessions, service, new LoginOptions())).Application);
                 if (register)
                 {
                     await Send(GameNetRoutes.Register, new RegisterRequest { Account = "player", Password = "valid-password" });

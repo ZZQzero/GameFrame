@@ -6,8 +6,10 @@ using Game.AOT;
 using Game.Hotfix.TableConfig;
 using GameFrame;
 using GameFrame.Localization;
+using GameFrame.Scene;
 using GameFrame.UI;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace Game.Hotfix
 {
@@ -18,9 +20,13 @@ namespace Game.Hotfix
         bool ownsTables;
         [SerializeField] string loginEndpoint = "wss://localhost:7443/network";
         GameLoginSession loginSession;
+        AsyncLazy enteringMain;
         Task stopping;
 
         public bool IsReady { get; private set; }
+
+        // 退出回调的先后顺序不固定，业务入口尚未停止时框架也可能已开始关闭。
+        bool CanNavigate => IsReady && GameRuntime.IsInited && GameUI.IsInited;
 
         void Awake()
         {
@@ -83,13 +89,13 @@ namespace Game.Hotfix
 
         async UniTask OpenLoginAsync(string message = "")
         {
-            if (!IsReady)
+            if (!CanNavigate)
             {
                 return;
             }
 
             await GameUI.Push<LoginPanel, LoginPanelArgs>(new LoginPanelArgs(loginSession, OpenMainAsync, message));
-            if (!IsReady && GameUI.IsInited)
+            if (!CanNavigate && GameUI.IsInited)
             {
                 GameUI.Close<LoginPanel>();
             }
@@ -97,14 +103,71 @@ namespace Game.Hotfix
 
         async UniTask OpenMainAsync()
         {
-            if (!IsReady || !loginSession.IsAuthenticated)
+            if (enteringMain != null)
+            {
+                await enteringMain.Task;
+            }
+
+            if (!CanNavigate)
+            {
+                return;
+            }
+
+            var pending = UniTask.Lazy(OpenMainCoreAsync);
+            enteringMain = pending;
+            try
+            {
+                await pending.Task;
+            }
+            finally
+            {
+                if (ReferenceEquals(enteringMain, pending))
+                {
+                    enteringMain = null;
+                }
+            }
+        }
+
+        async UniTask OpenMainCoreAsync()
+        {
+            if (!CanNavigate)
+            {
+                return;
+            }
+
+            GameUser user = loginSession.CurrentUser;
+            if (user == null)
             {
                 throw new InvalidOperationException("[GameEntry] 账号会话已失效，不能进入主界面。");
             }
 
+            // 场景加载不能取消；重新登录先等上一次切场结束，旧账号的完成结果不能导航。
+            await GameScene.WaitForIdleAsync();
+            if (!CanNavigate || !ReferenceEquals(loginSession.CurrentUser, user))
+            {
+                return;
+            }
+
+            if (!GameScene.IsLoaded("Main"))
+            {
+                await GameScene.LoadAsync("Main", LoadSceneMode.Single);
+            }
+
+            if (!CanNavigate)
+            {
+                return;
+            }
+
+            // Single 加载会销毁 Launch 场景的相机，登录和主面板共用持久 UI 根节点。
+            GameUI.ConfigureURPCameraStack(Camera.main);
+            if (!ReferenceEquals(loginSession.CurrentUser, user))
+            {
+                return;
+            }
+
             GameUI.Close<LoginPanel>();
             await GameUI.Push<GomokuMainPanel>();
-            if (!IsReady || !loginSession.IsAuthenticated)
+            if (!CanNavigate || !ReferenceEquals(loginSession.CurrentUser, user))
             {
                 if (GameUI.IsInited)
                 {
@@ -115,12 +178,13 @@ namespace Game.Hotfix
 
         void OnAuthenticationLost()
         {
-            if (!IsReady)
+            if (!CanNavigate)
             {
                 return;
             }
 
             GameUI.Close<GomokuMainPanel>();
+            GameUI.Close<LoginPanel>();
             OpenLoginAsync("会话已结束，请重新登录").Forget();
         }
 
@@ -157,6 +221,25 @@ namespace Game.Hotfix
             catch (Exception error)
             {
                 failure = error;
+            }
+
+            try
+            {
+                if (enteringMain != null)
+                {
+                    await enteringMain.Task;
+                }
+            }
+            catch (Exception error)
+            {
+                if (failure == null)
+                {
+                    failure = error;
+                }
+                else
+                {
+                    Debug.LogException(error);
+                }
             }
 
             try

@@ -1,6 +1,7 @@
 # 五子棋本地对局
 
-从 `Unity/Assets/Scenes/Launch.unity` 启动后，GameEntry 打开 `GomokuMainPanel`。
+从 `Unity/Assets/Scenes/Launch.unity` 启动并登录成功后，GameEntry 通过 GameScene 切换到
+`Unity/Assets/Scenes/MainScene/Main.unity`，再打开 `GomokuMainPanel`。
 当前为同机双人：黑方先行，双方交替落子，横、竖、两种斜线连续五子及以上获胜，
 没有三三、四四和长连禁手。棋盘填满且没有获胜方时和棋。
 点击已占用位置或终局后继续点击不会改变棋局；“悔一步”撤销最近一手，“重新开始”清空棋局。

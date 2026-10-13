@@ -8,7 +8,7 @@ GameUI.SetPackage → 下载 boot 资源 → 启动其余框架系统 →
 加载 AOT 元数据与 Hotfix DLL → 实例化 GameEntry prefab → 读取热更配置并补入翻译 → 启动热更业务。
 Launch 负责框架初始化、选择相机和准备资源。GameEntry 在 Awake 中初始化 Hotfix 配置，
 并调用 `GameUIRegistration.RegisterAll()` 统一注册业务面板、创建并注入 Hotfix 的 `GameLoginSession`，完成后 IsReady 为 true。
-Start 中打开登录面板，登录成功后进入五子棋主面板。
+Start 中打开登录面板，登录成功后通过 GameScene 以 Single 模式加载并激活 Main，再进入五子棋主面板。
 GameEntry 只组合、调用和释放业务对象，不保存账号字段或实现认证；会话实例持有用户信息、凭据和连接。
 Launch 启动 GameRuntime 时 EnableUI 为 false，语言服务也不重复初始化，并通过 NetworkOptions 启用网络宿主。
 任一步失败直接抛出并终止后续启动，不重试、不回退旧资源、不自动回滚。
@@ -59,7 +59,12 @@ Launch 引用 `Assets/Resources/GlobalConfig.asset`，该 ScriptableObject 随�
 语言服务、事件派发器和 UI 在资源初始化前启动；Timer、Pool、Scene 在 boot 下载完成后由 Launch 启动。
 Input / Audio 在 Launch 的 Inspector 绑定配置后才启用。GameEntry 在 Awake 中自动初始化热更配置和业务。
 启动完成后在 Launch 场景打开 `LoginPanel`，用户输入账号和密码后才连接 WSS；不存在的账号由服务端创建并登录。
-成功后关闭登录面板并打开 `GomokuMainPanel`，无需额外切换内容场景；连接失效回到登录。
+成功后通过 `GameScene.LoadAsync("Main", LoadSceneMode.Single)` 进入 `Assets/Scenes/MainScene/Main.unity`，
+重新将持久 UI 相机绑定到 Main 的主相机，再关闭登录面板并打开 `GomokuMainPanel`。
+Launch 和其子节点 GameEntry 跨切场保留，账号会话与框架不重新初始化；内置 Launch 场景由 Single 加载卸载。
+连接失效后在当前 Main 场景打开登录面板，重新登录复用已加载的 Main，不重新加载 Launch。
+场景加载失败保留已认证会话与登录面板，玩家再次点击确定只重新执行进入主场景，不重复登录或自动重试。
+Main 场景采集组标记为 `boot`，在启动资源准备阶段下载；Main 不加入 Build Settings，也不把 Launch 采集进资源包。
 GameEntry prefab 的 `Login Endpoint` 是可信环境端点，当前开发值为 `wss://localhost:7443/network`，生产资源需替换为实际服务地址。
 本地开发证书可在 `Tools/GameFrame/Network/Set Local Development Certificate` 配置；Editor 在 BeforeSceneLoad 读取本机配置并启用信任，先于 Launch/GameEntry 初始化，停止播放后恢复。工具不进入 Player，也不为入口增加 Editor 依赖，详见 [客户端网络使用说明](ClientNetworkUsage.md)。
 `DefaultPackage` 的 `Gomoku` 组采集 `Assets/Prefab/Gomoku`、`Assets/ArtRes/Gomoku/Image` 和 `Assets/ArtRes/Gomoku/Audio`，
@@ -151,8 +156,9 @@ UnityEngine.Application.Quit();
 `ResourceLoadManager.Instance.ShutdownAsync()`。这些接口不属于进程退出流程。
 
 Launch.OnApplicationQuit / OnDestroy 负责关闭 UI、发起其余框架系统关闭、关闭语言服务并清空事件；不等待异步完成。
-GameEntry.OnApplicationQuit / OnDestroy 发起幂等 StopAsync，关闭业务面板、清理会话及自己初始化的热更配置，不等待、不关闭框架。
+GameEntry.OnApplicationQuit / OnDestroy 发起幂等 StopAsync，关闭业务面板、等待已发起的主场景导航、清理会话及自己初始化的热更配置；生命周期回调不等待、不关闭框架。
 Editor 与正式包共用这些简单清理，两次生命周期回调不会重复清理。
+Unity 不保证 Launch 与 GameEntry 退出回调的顺序；业务 UI 导航要求 GameEntry 就绪、GameRuntime 运行且 GameUI 已初始化，异步打开完成后再次核对。框架关闭触发的认证失效仍清空用户与凭据，但不再打开登录或主界面。
 Editor 停止播放时，资源系统由 YooAsset 自己的 Editor 驱动关闭。
 GameEntry 创建之前启动失败时，不执行额外的退出回滚；正式包退出由系统回收资源，
 Editor 重新播放使用默认 Domain Reload 重置静态状态。

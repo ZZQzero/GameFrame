@@ -23,8 +23,8 @@ namespace Game.Server
             var repository = new PostgresAccountRepository(database.DataSource);
             await repository.ValidateAsync(CancellationToken.None);
             using var accounts = new AccountSessions(options);
-            using var service = new AccountService(repository, accounts);
-            var application = new LobbyApplication(accounts, service, options);
+            using var service = new AuthenticationService(repository, accounts, options);
+            var application = new LobbyApplication(new LoginModule(accounts, service, options));
             await using WebApplication app = CreateHost(application.Application, networkOptions, certificate, port, tables);
             WssServer network = app.Services.GetRequiredService<WssServer>();
             ConfigurePipeline(app, network);

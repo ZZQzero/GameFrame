@@ -1,11 +1,12 @@
 using System.Net;
 using Game.Hotfix.Network.Generated;
+using Game.Server.Login;
 using GameFrame.Network;
 using GameFrame.Server.Network;
 
-namespace Game.Server.Login
+namespace Game.Server.Sessions
 {
-    internal sealed class LoginSession : ServerSession
+    internal sealed class LobbySession : ServerSession
     {
         private readonly AccountSessions accounts;
         private readonly LoginOptions options;
@@ -18,7 +19,7 @@ namespace Game.Server.Login
         public override bool RequiresRestrictedTraffic => true;
         internal long Binding => Volatile.Read(ref binding)?.Id ?? 0;
 
-        internal LoginSession(ServerConnectionContext connection, AccountSessions accounts, LoginOptions options, Func<IPAddress, bool> admitLogin)
+        internal LobbySession(ServerConnectionContext connection, AccountSessions accounts, LoginOptions options, Func<IPAddress, bool> admitLogin)
         {
             this.accounts = accounts;
             this.options = options;
@@ -44,7 +45,7 @@ namespace Game.Server.Login
             if (current != null)
             {
                 return !login && current.CloseReason == null ? ServerAdmission.Allow :
-                    ServerAdmission.Deny(closeReason: current.CloseReason ?? 5);
+                    ServerAdmission.Deny(closeReason: CloseCode(current.CloseReason) ?? 5);
             }
 
             if (!login || header.BodyLength > 2048 || Interlocked.CompareExchange(ref loginInFlight, 1, 0) != 0)
@@ -76,7 +77,7 @@ namespace Game.Server.Login
             }
 
             return !login && current.CloseReason == null ? ServerAdmission.Allow :
-                ServerAdmission.Deny(closeReason: current.CloseReason ?? 5);
+                ServerAdmission.Deny(closeReason: CloseCode(current.CloseReason) ?? 5);
         }
 
         public override ushort? CheckDeadline(long nowMilliseconds)
@@ -92,7 +93,7 @@ namespace Game.Server.Login
                 return 6;
             }
 
-            return Volatile.Read(ref binding)?.CloseReason;
+            return CloseCode(Volatile.Read(ref binding)?.CloseReason);
         }
 
         internal void Bind(AccountSessions.Binding? value)
@@ -103,7 +104,7 @@ namespace Game.Server.Login
                 Volatile.Write(ref closing, 1);
                 connection.CloseAfterResponse(5);
             }
-            else if (value.CloseReason is ushort reason)
+            else if (CloseCode(value.CloseReason) is ushort reason)
             {
                 connection.RequestClose(reason);
             }
@@ -112,6 +113,34 @@ namespace Game.Server.Login
                 connection.EnableFullTraffic();
             }
         }
+
+        internal AccountIdentity RequireIdentity()
+        {
+            connection.Cancellation.ThrowIfCancellationRequested();
+            AccountSessions.Binding? current = Volatile.Read(ref binding);
+            if (current == null || Volatile.Read(ref closing) != 0)
+            {
+                throw new ServerRequestException(2, 5);
+            }
+
+            if (CloseCode(current.CloseReason) is ushort reason)
+            {
+                throw new ServerRequestException(2, reason);
+            }
+
+            return current.Identity;
+        }
+
+        internal void RequestClose(AccountSessionEndReason reason) => connection.RequestClose(CloseCode(reason)!.Value);
+
+        private static ushort? CloseCode(AccountSessionEndReason? reason) => reason switch
+        {
+            null => null,
+            AccountSessionEndReason.Replaced => 2,
+            AccountSessionEndReason.Expired => 4,
+            AccountSessionEndReason.Revoked => 7,
+            _ => throw new ArgumentOutOfRangeException(nameof(reason))
+        };
 
         private static bool IsAuthentication(uint opcode) => opcode == GameNetRoutes.Login.Opcode ||
             opcode == GameNetRoutes.ResumeLogin.Opcode || opcode == GameNetRoutes.Register.Opcode;

@@ -48,7 +48,9 @@ openssl x509 -in /absolute/path/localhost.pem -outform DER -out /absolute/path/l
 
 不要将 PFX 或私钥导入 Unity；正式服务使用对应域名的可信 CA 证书，Editor 工具不进入 Player。
 
-登录按钮校验账号（1～64 个 UTF-16 字符，无首尾空白/控制字符）、密码（8～128，不裁剪），禁用控件并提交一次 Login。已有账号验密，不存在则建号并认证；错误密码显示拒绝，失败收尾清空密码并恢复输入。成功后关闭登录面板并打开现有五子棋主界面，账号连接继续存活；五子棋仍是本地玩法，没有新增服务器对局。
+登录按钮校验账号（1～64 个 UTF-16 字符，无首尾空白/控制字符）、密码（8～128，不裁剪），禁用控件并提交一次 Login。已有账号验密，不存在则建号并认证；错误密码显示拒绝，失败收尾清空密码并恢复输入。成功后通过 GameScene 以 Single 模式加载、激活 Main，绑定 Main 的主相机与持久 UI 相机，再关闭登录面板并打开现有五子棋主界面，账号连接继续存活；五子棋仍是本地玩法，没有新增服务器对局。
+
+进入 Main 失败时登录面板保留，已认证会话仍有效；账号和密码输入保持禁用，玩家再次点击确定只进入主场景，不重复认证。断线后清空认证并重新打开登录面板；Main 已加载时重新登录复用该场景。加载期间认证失效或业务停止，迟到的场景完成结果不打开五子棋；主动 StopAsync 等待已发起的主场景导航收尾。
 
 会话是普通实例，由入口创建、注入、释放，后续业务接收同一个实例：
 
@@ -64,6 +66,8 @@ ulong accountId = user.AccountId;
 ```
 
 GameUser 只包含账号 ID、输入账号名、认证 epoch 和单调到期时间；私有 sessionId/token 不暴露给 UI，不持久化密码或凭据。断线、顶号或显式注销清空认证并回到登录，无自动重连或 Resume。`await session.LogoutAsync(token)` 请求远端注销并清理本地状态；生命周期结束使用 `await session.DisposeAsync()`。运行中关闭整个应用先 `await entry.StopAsync()`，再关闭 GameUI、GameRuntime 和资源服务。
+
+停止播放或进程退出时，Unity 不保证 Launch 和 GameEntry 的清理顺序。此时网络关闭仍清空认证；入口仅在业务就绪、GameRuntime 运行且 GameUI 已初始化时执行界面切换，异步打开完成后再次检查，避免在 UI 销毁后返回登录。
 
 下面展示底层 RPC，已有 GameLoginSession 的业务直接调用它，不再重复维护一份认证状态。独立注册仍可选择 Register，再 Login：
 
@@ -253,7 +257,7 @@ Unity 依赖固定 MemoryPack1.21.4，NuGetForUnity4.5.0 与 MemoryPack.Unity Gi
 | 共享协议/codec/生成产物 | NetworkProtocolTests、NetworkMemoryPackTests EditMode，.NET Protocol.Tests 及 check --artifacts |
 | 协议编辑器工具 | NetworkProtocolToolTests EditMode（macOS/Linux 进程管道与错误路径）、实际 Generate/Check 菜单 |
 | 网络宿主、订阅、关闭和异步生命周期 | NetworkLifecycleTests PlayMode 及相关.NET 连接/框架回归 |
-| 登录面板、账号会话与入口 | GameLoginSessionTests、ResourceLoadManagerTests PlayMode，实际 Launch 登录；前者使用 GF_LOGIN_TEST_ENDPOINT 指向已准备的 WSS/PostgreSQL 服务，未配置时明确跳过联调用例 |
+| 登录面板、账号会话与入口 | GameLoginSessionTests、ResourceLoadManagerTests PlayMode，实际 Launch 登录；联调用例使用 GF_LOGIN_TEST_ENDPOINT 指向已准备的 WSS/PostgreSQL 服务，未配置时明确跳过；入口用例在 Awake 前注入端点，不修改正式 prefab |
 | KCP/socket/native | native 回归、.NET KcpLoopbackTests、Unity NetworkKcpLoopbackTests |
 | 程序集/平台条件 | Editor 编译、实际目标 Player 脚本；native 链接另做 IL2CPP 包与实跑 |
 
@@ -265,6 +269,8 @@ Unity TLS 在部分 Editor 平台不继承 `dotnet dev-certs` 的信任。登录
 
 | 日期/实际范围 | 结果 | 不证明的部分 |
 | --- | --- | --- |
+| 2026-10-13 登录成功切 Main，Unity6000.3.19f1/macOS | Editor 编译通过；账号、资源、场景操作、GameRuntime、网络生命周期及根节点 PlayMode 73/73，零跳过；覆盖 Main 激活/相机 Stack、断线后复用 Main、加载中认证失效、主动 Stop 等待加载、进入失败后显式再次进入且不重复 Login；实际 Launch 按钮登录后仅 Main 场景加载，GameEntry/会话/UI 根保留，Stack 恰好一个 UI 相机；保持登录停止播放无新增 Console 错误；最终 StandaloneOSX Player 脚本 43 程序集通过 | 首轮停止用例发现导航任务登记晚于加载开始回调，改为使用 AsyncLazy 先登记再执行后整组通过；独立临时 WSS/PostgreSQL 联调，恢复测试端点、场景、EditorSettings、环境和字体变化并清理临时服务。未构建正式资源包、IL2CPP 或验证真机/其他平台 |
+| 2026-10-13 登录后退出顺序修复，Unity6000.3.19f1/macOS | Editor 编译通过；账号、资源、GameRuntime、网络生命周期与根节点 PlayMode 55/55，零跳过；新增真实登录用例覆盖正常断线回登录、UI 先关闭及框架先关闭且 UI 尚存两种顺序；实际 Launch 从按钮登录进入五子棋后停止播放，Console 无新增错误；StandaloneOSX Player 脚本 43 程序集通过 | 使用独立临时 WSS/PostgreSQL，不修改玩家数据库；验证后恢复端点、场景、EditorSettings、环境变量及字体变化并清理临时服务。首轮两个新用例误把普通初始化日志作为未预期日志，修正测试日志检查后整组通过。未构建 IL2CPP 或验证真机/其他平台 |
 | 2026-10-13 Editor 开发证书配置，Unity6000.3.19f1/macOS | Editor 编译及实际菜单对应配置成功；播放初始化自动追加已核验 localhost 公开证书，实际 WSS TLS/Hello 成功，关闭后 ownedBytes=0；默认验证回调未变，错误 TLS 目标仍被拒绝；正常 Domain Reload 与关闭 Domain Reload 均检查自动应用/停止恢复；无效路径和指纹更换拒绝且保留原配置；StandaloneOSX Player 脚本 43 程序集通过，GameFrame.Editor 排除 | 只验证本机 Mono TLS，不是其他 Editor 平台、IL2CPP 或真机验收；握手验证未提交玩家账号，不修改现有服务器/数据库；本机证书配置按用户要求保留 |
 | 2026-10-13 登录接入，Unity6000.3.19f1/macOS | Editor 编译通过；真实 Game.Server/WSS/PG 登录测试 6/6、生命周期与资源回归 32/32、UI/根节点 14/14，均零跳过；实际 Launch 首次建号→主界面、服务停止→清空用户并回到登录、保持登录时停止播放均通过，Console 无新增错误，Camera Stack 恰好一个 UI 相机；最终 StandaloneOSX Player 脚本 43 程序集通过 | 首轮 3 项受 Unity 不信任已有 localhost 开发证书阻断；测试临时设置已核验公开证书为进程信任锚后复验通过，证书校验未关闭。发现并修正退出时 Timer 驱动误报，运行中禁用仍使等待失败；验证后恢复场景/EditorSettings、字体自动生成内容、证书与环境设置，停止独立临时服务/数据库。未构建 IL2CPP、正式热更包或验证真机/其他平台 |
 | 2026-10-13 协议生成入口，Unity6000.3.19f1/macOS | Editor 编译通过；既有协议/MemoryPack144项、新工具3项分别通过；Generate/Check 菜单均实跑成功、运行时菜单禁用；StandaloneOSX Player 脚本43程序集通过，未包含 Editor 工具 | 进程测试覆盖空格路径、大量双管道输出和非零退出；未实跑 Windows/Linux 菜单，未构建 IL2CPP；Launch 场景及 EditorSettings 保持原值 |

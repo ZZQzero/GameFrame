@@ -28,15 +28,15 @@ handler 不接收原始帧、预算或借用 native handle。codec 在解码前�
 | hook / 能力 | 执行与约束 |
 | --- | --- |
 | session factory | WSS 在 Hello 前、KCP 在 Hello 绑定后创建；不在 host 配额锁或 native owner 内执行 |
-| `ConnectedAsync` | GFNP Hello 成功后、应用接收派发前执行；可以排队 Push；耗时等待必须使用 connection.Cancellation |
-| `Admit(header)` | IO/native owner，在 DTO 解码前准入；必须快速、线程安全，不等待数据库/网络 |
+| `ConnectedAsync` | GFNP Hello 成功后，由独立应用派发任务先执行初始化，完成后才派发业务；传输收发、心跳与带原因关闭同时运行，可以排队 Push；耗时等待必须使用 connection.Cancellation |
+| `Admit(header)` | IO/native owner，在 DTO 解码前准入；可与 ConnectedAsync 并行，必须快速、线程安全，不依赖尚未完成的初始化，不等待数据库/网络 |
 | `CheckDispatch(header)` | 同连接应用 owner，紧邻解码和 handler 前复查权限；防止排队期间身份失效 |
-| `CheckDeadline(now)` | watchdog/native owner，快速、线程安全；返回关闭原因或 null |
+| `CheckDeadline(now)` | ConnectedAsync 成功完成后，由 watchdog/native owner 调用，快速、线程安全；返回关闭原因或 null；初始化期间仍检查传输心跳期限 |
 | `ClosedAsync(context, result)` | handler 退出后调用一次；即使 Hello/Connected 未成功，只要 session 已创建也负责清理；不能再发送或提升流量 |
 | `RequiresRestrictedTraffic` | 应用选择初始受限阶段；WSS 使用独立容量/正文/速率额度，KCP 本身需 grant 绑定，使用 KcpServerOptions 的连接额度 |
 | `EnableFullTraffic()` | 应用提交权限后解除受限标识，WSS 归还受限配额；连接结束后明确失败 |
 
-同连接 handler 串行；不同连接及应用共享状态需要业务自己的同步。KCP 回调运行在托管应用任务，native owner 仅推进 socket/handle、检查头部、准入和有界队列。WSS 使用独立收/发/派发 owner。后台业务计算需要在异步提交前后检查取消与权限，不能把收包时的检查当作永久授权。
+同连接初始化与 handler 串行；初始化期间业务帧只进入有界队列，不解码或执行 handler，初始化失败则终止连接并释放队列。不同连接及应用共享状态需要业务自己的同步。KCP 回调运行在托管应用任务，native owner 仅推进 socket/handle、检查头部、准入和有界队列。WSS 使用独立收/发/派发 owner，每连接只为应用派发创建一个任务，不为每条消息创建 Task.Run。后台业务计算需要在异步提交前后检查取消与权限，不能把收包时的检查当作永久授权。
 
 ## Push、关闭与错误
 
@@ -68,5 +68,7 @@ WssServer 的 hosted lifecycle `StoppingAsync` 在 Kestrel 等所有 hosted Stop
 KCP 使用 `await using var host = new KcpListenerHost(endpoint, application, options)`；等待 Started 后读取 LocalEndpoint，通过 RegisterGrantAsync/RevokeGrantAsync 接入授权网关。TTL 从 Register 调用准入起算，排队不续期；框架只绑定 grant，不解释账号/角色。显式 Dispose 停止准入、取消并 join 应用工作、销毁 native/socket，重复调用返回一致结果。原生安装与 ABI 见 [Native/Kcp](../../Native/Kcp/README.md)。
 
 WssServerOptions/KcpServerOptions 在构造时验证并复制，固定连接数、队列数/字节数、速率和托管/native 额度。WSS 的 Kestrel 连接/TLS 额度由应用与网络选项配套配置。多个 KCP listener 共用 native 进程预算与 PSA key slots；这些选项不允许突破已验证 ABI 限制。OwnedBytes 表示框架可控托管帧当前占用，不是进程 RSS，也不包含所有 CLR/TLS/内核资源。统一的队列/native/耗时诊断快照与生产容量验收仍待完成。
+
+ABI 2 的单 listener 硬上限为：MaxConnections 1～64、MaxHandshakes 1～16、MaxGrants 1～256、NativeBytes 64 KiB～256 MiB。越界在 host 构造阶段按字段抛 ArgumentOutOfRangeException，不启动 native owner；合法边界仍须满足其他队列与内存组合约束。这些是容量上限，不表示设置到上限就已通过生产负载验收。
 
 独立框架验证入口：`dotnet test Tools/NetworkFramework.Tests`，仅引用 Server/Core，使用独立 catalog；业务与实际双端 WSS/DTLS 验证在 `Tools/NetworkServer.Tests`。协议和 native API 不因程序集拆分而改变，Unity 仍按自己的目标编译同源代码。

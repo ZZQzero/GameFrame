@@ -1477,6 +1477,9 @@ namespace GameFrame.Network.Connection
                     }
                     else
                     {
+                        // Wire validity does not depend on the current subscription. Keep
+                        // validation on the Pump owner and avoid allocating an unused DTO.
+                        catalog.Find(receive.Frame.Header.Opcode).ValidatePushBody(receive.Frame.Body);
                         Push?.Invoke(receive.Frame.Header.Opcode, receive.Frame);
                     }
                 }

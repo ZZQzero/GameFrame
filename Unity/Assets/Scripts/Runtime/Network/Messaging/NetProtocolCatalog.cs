@@ -45,7 +45,15 @@ namespace GameFrame.Network
 
         internal T Decode(ReadOnlySpan<byte> bytes)
         {
-            validateBytes(bytes);
+            ValidateBytes(bytes);
+            return DecodeValidated(bytes);
+        }
+
+        internal void ValidateBytes(ReadOnlySpan<byte> bytes) => validateBytes(bytes);
+
+        // Only the dispatch owner uses this after validating the same immutable frame body.
+        internal T DecodeValidated(ReadOnlySpan<byte> bytes)
+        {
             T value = deserialize(bytes);
             if (value == null)
             {
@@ -65,6 +73,8 @@ namespace GameFrame.Network
         internal abstract Type MessageType { get; }
         internal virtual Type? ResponseType => null;
         internal virtual int ResponseMaxBodyBytes => 0;
+        internal virtual void ValidatePushBody(ReadOnlySpan<byte> bytes) =>
+            throw new NetworkProtocolException("Expected a Push route.");
 
         private protected NetRoute(uint opcode, NetDelivery delivery, int maxBodyBytes)
         {
@@ -100,6 +110,7 @@ namespace GameFrame.Network
         public override NetRouteKind Kind => NetRouteKind.Push;
         internal NetMessageCodec<T> Codec { get; }
         internal override Type MessageType => typeof(T);
+        internal override void ValidatePushBody(ReadOnlySpan<byte> bytes) => Codec.ValidateBytes(bytes);
 
         public NetPush(uint opcode, NetDelivery delivery, int maxBodyBytes, NetMessageCodec<T> codec)
             : base(opcode, delivery, maxBodyBytes)

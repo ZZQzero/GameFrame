@@ -2,7 +2,9 @@
 
 设计契约见 [NetworkDesign.md](NetworkDesign.md)。本记录区分已实现代码、已执行验证和待实现项，不将协议单元测试视为完整网络验收。
 
-最新状态见文末“PostgreSQL 注册登录与正常服务启动”。当前服务启动不再要求预置玩家账号，数据库接入位于应用层；新增 Register 的双端 MemoryPack 协议已生成，账号与哈希持久化、会话按账号隔离。历史版本和数量保留在原记录；当前证据与边界见 [ServerAccounts.md](ServerAccounts.md) 和 [服务端审查第 10 节](NetworkServerReview.md#10-postgresql-账号接入与启动流程调整2026-10-12)。
+最新修复状态见 [客户端与服务端全量审查及修复记录](NetworkClientServerReview.md)：2026-10-13 已修复 WSS 慢初始化阻塞传输/关闭、未订阅 Push 跳过正文校验和 KCP 选项未检查 ABI 上限三项问题；Release 编译、331 项 .NET 回归、协议产物检查、Unity EditMode 144 项及 PlayMode 11 项通过。完整元数据、性能容量与平台验收仍未完成。
+
+账号接入状态见文末“PostgreSQL 注册登录与正常服务启动”。当前服务启动不再要求预置玩家账号，数据库接入位于应用层；新增 Register 的双端 MemoryPack 协议已生成，账号与哈希持久化、会话按账号隔离。历史版本和数量保留在原记录；当前证据与边界见 [ServerAccounts.md](ServerAccounts.md) 和 [服务端审查第 10 节](NetworkServerReview.md#10-postgresql-账号接入与启动流程调整2026-10-12)。
 
 ## 初次底层实现记录（2026-10-12）
 

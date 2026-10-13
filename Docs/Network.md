@@ -38,6 +38,8 @@ SendAsync 成功表示已编码并进入队列，不保证送达。调用返回�
 
 每个 Push opcode 只允许一个处理器，Subscribe 返回的 IDisposable 注销自己，关闭再连接时订阅保留。处理器抛错会故障当前连接；状态/故障观察者抛错只停止该批通知并记录原异常。主线程通过 GetMetrics 查看实际帧缓冲、pending/堆大小、超时、取消、迟到响应及发送队列年龄告警。
 
+主线程 Pump 对每条实际交付的 Push 先执行生成的正文形状校验，无订阅也一样；非法正文产生 MessageFault 并使当前连接 Faulted。合法但未订阅的 Push 不创建 DTO；有订阅时只反序列化一次，不重复扫描正文。迟到 RPC 响应、过期不可靠帧与终态清理仍按各自丢弃契约处理。
+
 运行中先停止业务，再 `await client.DisposeAsync()`，最后 `await GameRuntime.ShutdownAsync()`。CloseAsync 等待真实 IO 退出及缓冲释放，随后可重连；Dispose 注销订阅和宿主登记，不能复用。相同客户端的 Close/Dispose 幂等。传输释放异常不会跳过 IO 收尾、队列释放或 Dispose 注销；释放失败由任务传播，重复 Dispose 返回同一结果，不重试已摘除的资源。Shutdown 在发布共享任务后通知客户端，允许状态观察者重入；客户端收尾失败仍尝试停止 KCP worker。故障后显式 await Close 才允许再次 Connect；新连接使用新 context/generation，旧工作不进入新连接。框架关闭前保持 Pump 驱动，不能先销毁持久根节点。
 
 宿主 Pump/KCP worker 内部异常或网络 Runner/root 提前销毁、禁用时，宿主锁定首个故障、停止正常派发并拒绝新客户端/连接。所有客户端进入故障边界，已保留但未完成的响应也失败；清理只完成任务、释放帧与等待 IO，使用独立 PlayerLoop 路径，不依赖受损 Runner，也不执行 Push/DTO 解码。Close/Dispose/Shutdown 仍可等待完成；关闭某个客户端不能恢复整个宿主，须显式 Shutdown 后重新初始化。状态观察者收到原始异常，宿主边界记录一次；进程退出不启动等待流程。

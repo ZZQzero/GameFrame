@@ -26,8 +26,28 @@ namespace GameFrame.Server.Network
 
         internal KcpServerOptions Snapshot()
         {
-            if (MaxConnections < 1 || MaxHandshakes < 1 || MaxGrants < 1 || NativeBytes < 65536 ||
-                ConnectionNativeBytes < 65536 || ConnectionNativeBytes > 4 * 1024 * 1024 || NativeBytes < ConnectionNativeBytes ||
+            // These hard limits are part of the validated ABI 2 listener capacity.
+            if (MaxConnections < 1 || MaxConnections > 64)
+            {
+                throw new ArgumentOutOfRangeException(nameof(MaxConnections), MaxConnections, "ABI 2 supports 1 to 64 connections.");
+            }
+
+            if (MaxHandshakes < 1 || MaxHandshakes > 16)
+            {
+                throw new ArgumentOutOfRangeException(nameof(MaxHandshakes), MaxHandshakes, "ABI 2 supports 1 to 16 handshakes.");
+            }
+
+            if (MaxGrants < 1 || MaxGrants > 256)
+            {
+                throw new ArgumentOutOfRangeException(nameof(MaxGrants), MaxGrants, "ABI 2 supports 1 to 256 grants.");
+            }
+
+            if (NativeBytes < 65536 || NativeBytes > 256 * 1024 * 1024)
+            {
+                throw new ArgumentOutOfRangeException(nameof(NativeBytes), NativeBytes, "ABI 2 supports 64 KiB to 256 MiB of native memory.");
+            }
+
+            if (ConnectionNativeBytes < 65536 || ConnectionNativeBytes > 4 * 1024 * 1024 || NativeBytes < ConnectionNativeBytes ||
                 MaxOwnedBytes < ConnectionOwnedBytes || ConnectionOwnedBytes < ReceiveQueueBytes ||
                 ReceiveQueueCount < 1 || ReceiveQueueBytes < 32768 + 512 || SendQueueCount < 1 || SendQueueBytes < 32768 + 512 ||
                 UnreliableQueueCount < 1 || UnreliableQueueBytes < 1150 + 512 || ControlQueueCount < 1 || ControlQueueBytes < 96 + 512 ||

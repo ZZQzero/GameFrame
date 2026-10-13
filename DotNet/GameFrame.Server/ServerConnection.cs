@@ -54,6 +54,7 @@ namespace GameFrame.Server.Network
         private int terminating;
         private volatile bool inputCompleted;
         private volatile bool transportEnded;
+        private volatile bool applicationReady;
         private int receiveCount;
         private int receiveBytes;
         private int businessCount;
@@ -157,13 +158,14 @@ namespace GameFrame.Server.Network
                     }
                 }
 
-                await Context.Session.ConnectedAsync(Context);
                 lastPing = getMilliseconds();
                 Task sending = SendLoopAsync();
                 Task receiving = ReceiveLoopAsync();
-                Task dispatching = DispatchLoopAsync();
                 Task heartbeat = HeartbeatLoopAsync();
                 Task closing = CloseRequestedAsync();
+                // Application initialization must not hold up transport/control owners, even
+                // when a hook performs synchronous work before its first asynchronous wait.
+                Task dispatching = Task.Run(DispatchLoopAsync);
                 tasks.AddRange(new[] { sending, receiving, dispatching, heartbeat, closing });
                 Task first = await Task.WhenAny(tasks);
                 await first;
@@ -473,6 +475,19 @@ namespace GameFrame.Server.Network
 
         private async Task DispatchLoopAsync()
         {
+            lifetime.Token.ThrowIfCancellationRequested();
+            try
+            {
+                await Context.Session.ConnectedAsync(Context);
+            }
+            catch (ServerConnectionContext.ClosingException) when (Context.RequestedCloseReason != 0)
+            {
+                // Let the close owner send the selected reason before cancelling initialization.
+                await Task.Delay(Timeout.Infinite, lifetime.Token);
+            }
+
+            lifetime.Token.ThrowIfCancellationRequested();
+            applicationReady = true;
             while (await received.Reader.WaitToReadAsync(lifetime.Token))
             {
                 while (received.Reader.TryRead(out OwnedFrame? frame))
@@ -718,7 +733,7 @@ namespace GameFrame.Server.Network
         internal async Task CheckHeartbeatAsync()
         {
             long now = getMilliseconds();
-            ushort? applicationReason = Context.Session.CheckDeadline(now);
+            ushort? applicationReason = applicationReady ? Context.Session.CheckDeadline(now) : null;
             if (applicationReason.HasValue)
             {
                 Context.RequestClose(applicationReason.Value);

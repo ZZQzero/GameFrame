@@ -33,16 +33,20 @@ namespace GameFrame.Tests
             internal Func<ServerMessageHeader, ServerAdmission>? Admission;
             internal Func<ServerConnectionContext, ServerCloseInfo, ValueTask>? OnClosed;
             internal Action<ServerConnectionContext>? OnConnected;
+            internal Func<ServerConnectionContext, ValueTask>? InitializeAsync;
             internal readonly TaskCompletionSource<ServerConnectionContext> Connected = new TaskCompletionSource<ServerConnectionContext>(TaskCreationOptions.RunContinuationsAsynchronously);
             internal int Closes;
             internal bool Restricted;
             public override bool RequiresRestrictedTraffic => Restricted;
 
-            public override ValueTask ConnectedAsync(ServerConnectionContext context)
+            public override async ValueTask ConnectedAsync(ServerConnectionContext context)
             {
                 OnConnected?.Invoke(context);
                 Connected.TrySetResult(context);
-                return ValueTask.CompletedTask;
+                if (InitializeAsync != null)
+                {
+                    await InitializeAsync(context);
+                }
             }
 
             public override ServerAdmission Admit(ServerMessageHeader header) => Admission?.Invoke(header) ?? ServerAdmission.Allow;
@@ -295,13 +299,115 @@ namespace GameFrame.Tests
         }
 
         [Test]
-        public async Task ConnectedCallbackCanQueuePushBeforeOwnersStart()
+        public async Task ConnectedCallbackCanQueuePushBeforeDispatchStarts()
         {
             session.OnConnected = context => context.PushAsync(push, new Message { Value = 88 }).GetAwaiter().GetResult();
             using ClientWebSocket socket = await Connect();
             using OwnedFrame received = (await Receive(socket))!;
             Assert.That(received.Header.Kind, Is.EqualTo(FrameKind.Push));
             Assert.That(push.Codec.Decode(received.Body).Value, Is.EqualTo(88));
+        }
+
+        [Test]
+        public async Task SlowConnectedCallbackAllowsPushPongAndExternalCloseWithoutDispatchingQueuedRequests()
+        {
+            bool cancelled = false;
+            session.OnConnected = context => context.PushAsync(push, new Message { Value = 88 }).GetAwaiter().GetResult();
+            session.InitializeAsync = async context =>
+            {
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, context.Cancellation);
+                }
+                finally
+                {
+                    cancelled = context.Cancellation.IsCancellationRequested;
+                }
+            };
+            using ClientWebSocket socket = await Connect();
+            ServerConnectionContext context = await session.Connected.Task.WaitAsync(guard.Token);
+            using (OwnedFrame pushed = (await Receive(socket))!)
+            {
+                Assert.That(push.Codec.Decode(pushed.Body).Value, Is.EqualTo(88));
+            }
+
+            await Send(socket, rpc.Opcode, 1, BitConverter.GetBytes(41u));
+            using (OwnedFrame ping = memory.Allocate(40))
+            {
+                ControlCodec.WriteNonce(ping.Bytes.AsSpan(32), 77);
+                ping.Header = new FrameHeader(FrameKind.Control, (uint)ControlOpcode.Ping, 0, 8);
+                ping.Length = 40;
+                FrameCodec.WriteHeader(ping.Bytes, ping.Header);
+                await WebSocketFrameTransport.SendAsync(socket, ping, guard.Token);
+            }
+
+            using (OwnedFrame pong = (await Receive(socket))!)
+            {
+                Assert.That(pong.Header.Opcode, Is.EqualTo((uint)ControlOpcode.Pong));
+                Assert.That(ControlCodec.ReadNonce(pong.Body), Is.EqualTo(77));
+            }
+
+            Assert.That(decodes, Is.EqualTo(1), "Only the received Push was decoded; initialization still blocks RPC dispatch.");
+            context.RequestClose(9);
+            context.RequestClose(7);
+            using (OwnedFrame close = (await Receive(socket))!)
+            {
+                Assert.That(ControlCodec.ReadClose(close.Body), Is.EqualTo(9));
+            }
+
+            using OwnedFrame? end = await Receive(socket);
+            Assert.That(end, Is.Null);
+            await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, string.Empty, guard.Token);
+            ServerCloseInfo result = await context.Completion.WaitAsync(guard.Token);
+            Assert.That(result.Reason, Is.EqualTo(9));
+            Assert.That(result.Error, Is.Null);
+            Assert.That(cancelled, Is.True);
+            Assert.That(session.Closes, Is.EqualTo(1));
+            Assert.That(server.OwnedBytes, Is.Zero);
+        }
+
+        [Test]
+        public async Task InitializationCompletesBeforeQueuedRequestsAreDispatched()
+        {
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            bool initialized = false;
+            session.InitializeAsync = async context =>
+            {
+                await release.Task.WaitAsync(context.Cancellation);
+                initialized = true;
+            };
+            handler = (_, message, _) =>
+            {
+                Assert.That(initialized, Is.True);
+                return Task.FromResult(message);
+            };
+            using ClientWebSocket socket = await Connect();
+            await session.Connected.Task.WaitAsync(guard.Token);
+            await Send(socket, rpc.Opcode, 1, BitConverter.GetBytes(41u));
+            release.TrySetResult();
+            using OwnedFrame response = (await Receive(socket))!;
+            Assert.That(rpc.ResponseCodec.Decode(response.Body).Value, Is.EqualTo(41));
+        }
+
+        [Test]
+        public async Task InitializationFailureStopsDispatchAndPreservesTheOriginalError()
+        {
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var failure = new InvalidOperationException("Connection initialization failed.");
+            session.InitializeAsync = async context =>
+            {
+                await release.Task.WaitAsync(context.Cancellation);
+                throw failure;
+            };
+            using ClientWebSocket socket = await Connect();
+            ServerConnectionContext context = await session.Connected.Task.WaitAsync(guard.Token);
+            await Send(socket, rpc.Opcode, 1, BitConverter.GetBytes(41u));
+            release.TrySetResult();
+            ServerCloseInfo result = await context.Completion.WaitAsync(guard.Token);
+            Assert.That(result.Error, Is.SameAs(failure));
+            Assert.That(decodes, Is.Zero);
+            Assert.That(session.Closes, Is.EqualTo(1));
+            Assert.That(server.OwnedBytes, Is.Zero);
         }
 
         [Test]

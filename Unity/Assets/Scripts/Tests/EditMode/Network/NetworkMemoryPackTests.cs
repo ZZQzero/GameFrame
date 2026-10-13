@@ -16,6 +16,38 @@ namespace GameFrame.Tests
 {
     public sealed class NetworkMemoryPackTests
     {
+        [Test]
+        public void PushShapeValidationDoesNotAllocateDtoAndValidatedDecodeDoesNotRescan()
+        {
+            int validations = 0;
+            int decodes = 0;
+            var codec = new NetMessageCodec<WorldSnapshot>((_, _) => { }, bytes =>
+            {
+                decodes++;
+                return new WorldSnapshot();
+            }, _ => { }, bytes =>
+            {
+                validations++;
+                if (bytes.Length != 1 || bytes[0] != 0)
+                {
+                    throw new NetworkProtocolException("Invalid test Push.");
+                }
+            });
+            NetRoute route = new NetPush<WorldSnapshot>(2000, NetDelivery.Reliable, 1, codec);
+            byte[] body = { 0 };
+            route.ValidatePushBody(body);
+            Assert.AreEqual(1, validations);
+            Assert.AreEqual(0, decodes, "Unsubscribed Push needs no DTO.");
+            codec.DecodeValidated(body);
+            Assert.AreEqual(1, validations, "Dispatch must not scan an already validated body again.");
+            Assert.AreEqual(1, decodes);
+            Assert.Throws<NetworkProtocolException>(() => route.ValidatePushBody(new byte[] { 255 }));
+            Assert.AreEqual(1, decodes, "Malformed input must fail before deserialization.");
+            codec.Decode(body);
+            Assert.AreEqual(3, validations, "The normal RPC Decode path must still validate.");
+            Assert.AreEqual(2, decodes);
+        }
+
         [TestCaseSource(nameof(GoldenVectors))]
         public void AllDtoVectorsMatchDotNet10(Type type, string mode, string hex)
         {

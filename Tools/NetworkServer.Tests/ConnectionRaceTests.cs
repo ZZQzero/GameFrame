@@ -231,6 +231,65 @@ namespace GameFrame.Tests
             socket.Enqueue(frame);
         }
 
+        private void EnqueuePush(byte[] body)
+        {
+            byte[] frame = new byte[32 + body.Length];
+            FrameCodec.WriteHeader(frame, new FrameHeader(FrameKind.Push, GameNetRoutes.WorldSnapshotReliable.Opcode, 0, body.Length));
+            body.CopyTo(frame, 32);
+            socket.Enqueue(frame);
+        }
+
+        [TestCase(false, false)]
+        [TestCase(true, false)]
+        [TestCase(false, true)]
+        [TestCase(true, true)]
+        public async Task MalformedPushFaultsOnPumpEvenWithoutASubscription(bool subscribed, bool oversizedArray)
+        {
+            int calls = 0;
+            uint observedOpcode = 0;
+            Exception? observed = null;
+            if (subscribed)
+            {
+                client.Push = (_, _) => calls++;
+            }
+
+            client.MessageFault = (opcode, error) =>
+            {
+                observedOpcode = opcode;
+                observed = error;
+            };
+            byte[] body = { 255 };
+            if (oversizedArray)
+            {
+                var writer = new ArrayBufferWriter<byte>();
+                GameNetRoutes.WorldSnapshotReliable.Codec.Encode(writer, new WorldSnapshot());
+                body = writer.WrittenSpan.ToArray();
+                System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(body.AsSpan(body.Length - 4), int.MaxValue);
+            }
+
+            EnqueuePush(body);
+            await WaitFor(() => client.Metrics().ReliableReceiveCount == 1);
+            Assert.That(client.State, Is.EqualTo(NetworkClientState.Connected), "Schema validation belongs to the Pump owner.");
+            Assert.That(observed, Is.Null);
+            client.PumpOne();
+            Assert.That(client.State, Is.EqualTo(NetworkClientState.Faulted));
+            Assert.That(observed, Is.TypeOf<NetworkProtocolException>());
+            Assert.That(observedOpcode, Is.EqualTo(GameNetRoutes.WorldSnapshotReliable.Opcode));
+            Assert.That(calls, Is.Zero);
+        }
+
+        [Test]
+        public async Task UnsubscribedValidPushRemainsConnected()
+        {
+            var writer = new ArrayBufferWriter<byte>();
+            GameNetRoutes.WorldSnapshotReliable.Codec.Encode(writer, new WorldSnapshot());
+            EnqueuePush(writer.WrittenSpan.ToArray());
+            await WaitFor(() => client.Metrics().ReliableReceiveCount == 1);
+            client.PumpOne();
+            Assert.That(client.State, Is.EqualTo(NetworkClientState.Connected));
+            Assert.That(client.Metrics().ReliableReceiveCount, Is.Zero);
+        }
+
         [Test]
         public async Task RemoteTransportCloseAcknowledgesOnceAndPreservesEarlierResponse()
         {
@@ -292,9 +351,9 @@ namespace GameFrame.Tests
             client.StateChanged = (_, error) => observed = error ?? observed;
             for (int i = 0; i < 2; i++)
             {
-                byte[] frame = new byte[33];
-                FrameCodec.WriteHeader(frame, new FrameHeader(FrameKind.Push, GameNetRoutes.WorldSnapshotReliable.Opcode, 0, 1));
-                socket.Enqueue(frame);
+                var writer = new ArrayBufferWriter<byte>();
+                GameNetRoutes.WorldSnapshotReliable.Codec.Encode(writer, new WorldSnapshot());
+                EnqueuePush(writer.WrittenSpan.ToArray());
             }
 
             EnqueueClose();

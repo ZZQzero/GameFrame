@@ -147,7 +147,7 @@ namespace GameFrame.Network
                 throw new InvalidOperationException($"Opcode {route.Opcode} already has a handler.");
             }
 
-            Action<OwnedFrame> registered = frame => handler(route.Codec.Decode(frame.Body));
+            Action<OwnedFrame> registered = frame => handler(route.Codec.DecodeValidated(frame.Body));
             pushes.Add(route.Opcode, registered);
             return new Subscription(() =>
             {

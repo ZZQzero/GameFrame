@@ -6,6 +6,39 @@ namespace GameFrame.Tests
 {
     public sealed class KcpSourceBudgetTests
     {
+        [TestCase(nameof(KcpServerOptions.MaxConnections), 0)]
+        [TestCase(nameof(KcpServerOptions.MaxConnections), 65)]
+        [TestCase(nameof(KcpServerOptions.MaxHandshakes), 0)]
+        [TestCase(nameof(KcpServerOptions.MaxHandshakes), 17)]
+        [TestCase(nameof(KcpServerOptions.MaxGrants), 0)]
+        [TestCase(nameof(KcpServerOptions.MaxGrants), 257)]
+        [TestCase(nameof(KcpServerOptions.NativeBytes), 65535)]
+        [TestCase(nameof(KcpServerOptions.NativeBytes), 256 * 1024 * 1024 + 1)]
+        public void InvalidNativeCapacityFailsBeforeListenerStarts(string property, int value)
+        {
+            var options = new KcpServerOptions();
+            typeof(KcpServerOptions).GetProperty(property)!.SetValue(options, value);
+            var application = ServerCloseTests.Application((_, _, _) => Task.FromResult(new Game.Hotfix.Network.Protocol.EchoResponse()));
+            ArgumentOutOfRangeException error = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), application, options))!;
+            Assert.That(error.ParamName, Is.EqualTo(property));
+        }
+
+        [TestCase(1, 1, 1, 65536)]
+        [TestCase(64, 16, 256, 256 * 1024 * 1024)]
+        public void NativeCapacityBoundariesAreAccepted(int connections, int handshakes, int grants, int bytes)
+        {
+            var options = new KcpServerOptions
+            {
+                MaxConnections = connections,
+                MaxHandshakes = handshakes,
+                MaxGrants = grants,
+                NativeBytes = bytes,
+                ConnectionNativeBytes = 65536
+            };
+            Assert.DoesNotThrow(() => options.Snapshot());
+        }
+
         [Test]
         public void PortsCannotBypassPacketAndByteBudgets()
         {

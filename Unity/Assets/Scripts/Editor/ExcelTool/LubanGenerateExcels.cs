@@ -26,7 +26,7 @@ namespace GameFrame.Editor.Excel
             {
                 var root = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Config");
                 await RunGeneratorAsync(root);
-                Debug.Log("Gen Excel Success");
+                Debug.Log("[GameFrame] Luban 客户端和服务端配置生成成功。");
                 AssetDatabase.Refresh();
             }
             catch (Exception exception)
@@ -55,7 +55,9 @@ namespace GameFrame.Editor.Excel
 #endif
 #if UNITY_EDITOR_WIN || UNITY_EDITOR_OSX || UNITY_EDITOR_LINUX
             if (!File.Exists(script))
+            {
                 throw new FileNotFoundException("找不到 Excel 生成脚本。", script);
+            }
 
             using var process = new Process
             {
@@ -71,7 +73,9 @@ namespace GameFrame.Editor.Excel
                 }
             };
             if (!process.Start())
+            {
                 throw new InvalidOperationException($"无法启动 Excel 生成器: {script}");
+            }
 
             // 同时读取两个管道，避免输出写满导致子进程与等待方互锁。
             var output = process.StandardOutput.ReadToEndAsync();
@@ -80,8 +84,10 @@ namespace GameFrame.Editor.Excel
             var stdout = await output;
             var stderr = await error;
             if (process.ExitCode != 0)
+            {
                 throw new InvalidOperationException(
                     $"Excel 生成失败: Script={script}, ExitCode={process.ExitCode}\nstdout:\n{stdout}\nstderr:\n{stderr}");
+            }
 #endif
         }
     }

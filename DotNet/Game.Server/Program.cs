@@ -1,3 +1,6 @@
+using Game.Config.TableConfig;
+using Game.Server.Configuration;
+
 namespace Game.Server
 {
     public static class Program
@@ -8,9 +11,11 @@ namespace Game.Server
             switch (profile)
             {
                 case "local-wss":
-                    await LocalWssService.RunAsync();
+                    Tables tables = TableConfigLoader.Load(Environment.GetEnvironmentVariable("GF_CONFIG_DIR"));
+                    await LocalWssService.RunAsync(tables);
                     break;
                 case "local-kcp-dtls":
+                    TableConfigLoader.Load(Environment.GetEnvironmentVariable("GF_CONFIG_DIR"));
                     await LocalKcpService.RunAsync();
                     break;
                 default:

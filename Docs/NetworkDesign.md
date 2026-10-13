@@ -35,7 +35,7 @@
 | KCP | `Native/Kcp/third_party/kcp` 下已有 `ikcp.c`、`ikcp.h`、MIT LICENSE；已直接合入 #467 ACK 修复、分配失败处理及标准 offsetof 修正 | ABI2、UDP 集成与平台构建产物已落地；继续核对依赖锁，完成发布平台实跑验收 |
 | KCP 版本 | 上游基线为 `b1a7a2101dcbb96017681a500d6b82bbe5a88766`，包含 `IKCPOPS`/`ikcp_setcc`；本地修正与当前 c/h hash 已锁定 | 锁定基线与本地源码 hash；不得直接按旧版 C# KCP 包的内部结构接入 |
 | 生命周期 | `GameRuntime` 已可选持有网络宿主；GameEntry 当前启动本地五子棋 | 保持离线默认，业务接入 GameNetworkSession |
-| 服务端 | `DotNet` 已拆为 Core、Server、Game.Protocol、Game.Server 四工程；WSS/KCP 共用强类型应用接口，PostgreSQL 注册登录与账号会话属于业务宿主 | 生产部署/跨进程会话/世界应用接入，完整诊断和平台容量验收 |
+| 服务端 | `DotNet` 已拆为 Core、Server、Game.Protocol、Game.Config、Game.Server 与离线 NetworkProtocol 工程；WSS/KCP 共用强类型应用接口，PostgreSQL 注册登录与账号会话属于业务宿主 | 生产部署/跨进程会话/世界应用接入，完整诊断和平台容量验收 |
 
 MemoryPack 安装与当前验证边界见 [客户端依赖维护](ClientNetworkUsage.md#7-协议与依赖维护)。启动、资源所有权与失败处理以 [Launch.md](Launch.md)、[Scope.md](Scope.md)、[ErrorContract.md](ErrorContract.md) 为基础；本文补充网络模块的固定策略。
 
@@ -107,16 +107,19 @@ DotNet/DotNet.sln                 已有服务端解决方案，与 Unity/ 同�
 DotNet/GameFrame.Network.Core/    共享 wire、路由/codec 契约、缓冲预算与 native ABI
 DotNet/GameFrame.Server/          通用 WSS/KCP 服务端与强类型应用接口
 DotNet/Game.Protocol/             双端同源生成的 MemoryPack 游戏协议
+DotNet/Game.Config/               服务端 Luban 生成配置、二进制数据与固定版本运行库
 DotNet/Game.Server/               唯一业务可执行入口、local 配置、账号与处理器
 ```
 
 上述目录表达职责划分；实际文件落点与完成范围见四份规范和说明。WSS 核心、协议工具、local-wss、C KCP/DTLS bridge、C# worker 与 local-kcp-dtls 已实现；GameNetworkSession 与世界业务按当前范围延后，平台/容量发布验收仍待完成。不新建与已有模块重复的计时器、全局任务管理器或事件总线。`NetworkRuntime` 是必要的网络资源宿主，可由 `GameRuntime` 选配持有；业务只持有自己的 `NetworkClient`。
 
-服务端保留单进程、单业务入口，通过四个程序集落实职责边界。Core 不引用游戏协议/Unity/业务，Server 只依赖 Core 与 ASP.NET Core；Game.Protocol 导入生成源码并引用 Core/MemoryPack，Game.Server 组合 Server 与 Protocol。账号、恢复、顶号、登录期限和权限策略全部属于 Game.Server；网络框架仅通过 ServerSession 的头部准入、派发复查和期限 hook 接入应用策略。RPC/Notify 处理器只使用 DTO，框架负责关联、编码、队列与释放；Push 与连接关闭采用公开强类型接口，不暴露借用 native handle。具体契约见 [服务端框架 API](DotNetUsage.md#5-框架接入-api)。
+服务端保留单进程、单业务入口，通过五个运行时程序集落实职责边界。Core 不引用游戏协议/Unity/业务，Server 只依赖 Core 与 ASP.NET Core；Game.Protocol 导入生成源码并引用 Core/MemoryPack，Game.Config 独立编译服务端配置，Game.Server 组合 Server、Protocol 与 Config。账号、恢复、顶号、登录期限和权限策略全部属于 Game.Server；网络框架仅通过 ServerSession 的头部准入、派发复查和期限 hook 接入应用策略。RPC/Notify 处理器只使用 DTO，框架负责关联、编码、队列与释放；Push 与连接关闭采用公开强类型接口，不暴露借用 native handle。具体契约见 [服务端框架 API](DotNetUsage.md#5-框架接入-api)。
 
 Game.Server 使用 Web SDK/net10.0，local 功能需显式 profile；PostgreSQL 注册/密码认证已接入，生产 hosting（监听/部署与跨进程会话）未配置时拒绝启动，启动不校验玩家凭据。WssServer 通过 hosted lifecycle 的 StoppingAsync 阶段在 Kestrel 等 StopAsync 前 join 网络，不能仅依赖注册先后或 RunAsync 返回后的清理。不提前增加网关/账号/世界等可执行项目；第 14 节业务契约保留供后续实现。
 
-Game.Server 内按业务功能建目录：Login/ 集中账号、PostgreSQL 仓库、注册/登录/恢复/注销处理器和每连接登录状态。LobbyApplication 作为大厅组合入口显式注册模块与路由；Program 仅校验 profile 并选择 LocalWssService/LocalKcpService。启动入口负责配置校验、资源创建、运行及关闭所有权，不增加反射注册或额外生命周期管理器。配置或初始化失败停止后续步骤，已创建资源按原所有权释放。
+Game.Server 内按业务功能建目录：Login/ 集中账号、PostgreSQL 仓库、注册/登录/恢复/注销处理器和每连接登录状态。LobbyApplication 作为大厅组合入口显式注册模块与路由；Program 校验 profile、加载 Luban Tables 后选择 LocalWssService/LocalKcpService。启动入口负责配置校验、资源创建、运行及关闭所有权，不增加反射注册或额外生命周期管理器。配置或初始化失败停止后续步骤，已创建资源按原所有权释放。
+
+两端从同源 Excel 分别生成配置，服务端数据随构建/发布复制；启动先加载 Tables，缺文件或反序列化失败停止后续流程。配置通过重启更新，不增加通用配置管理器或热重载；分组、版本与部署细节见服务端规范和说明。
 
 账号主数据库已选定 PostgreSQL，通过应用层 Npgsql 仓库接入。服务启动校验证书、数据库连接与账号表，不接收或预置玩家账号密码；客户端通过 WSS Register/Login RPC 注册、登录。LoginOptions 只保存策略与容量，AccountService 负责密码校验与有界认证并发，PostgresAccountRepository 负责参数化持久化，AccountSessions 负责单进程的账号会话与绑定。注册不自动登录；持久化账号可在重启后登录，内存 Resume 凭据不跨重启恢复。具体初始化、密码格式、单进程边界与验证见 [服务端账号规范](DotNetDevelopment.md#4-数据库与账号业务) 和 [运行配置](DotNetUsage.md)。
 

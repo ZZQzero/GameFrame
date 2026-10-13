@@ -6,6 +6,7 @@
         <PackageReference Include="Npgsql" Version="10.0.3" />
         <ProjectReference Include="../GameFrame.Server/GameFrame.Server.csproj" />
         <ProjectReference Include="../Game.Protocol/Game.Protocol.csproj" />
+        <ProjectReference Include="../Game.Config/Game.Config.csproj" />
     </ItemGroup>
     <ItemGroup>
         <None Update="Database/*.sql" CopyToOutputDirectory="PreserveNewest" />

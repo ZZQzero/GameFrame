@@ -31,14 +31,27 @@ if [[ -z "$dotnet_executable" || ! -x "$dotnet_executable" ]]; then
     exit 127
 fi
 
-# Match gen.bat. Overrides allow verification without writing Unity assets.
+# Both targets use the same Excel source. Overrides keep verification outside the repository.
 code_output="${LUBAN_OUTPUT_CODE_DIR:-$config_root/../Assets/Scripts/Hotfix/TableConfig/Generated}"
 data_output="${LUBAN_OUTPUT_DATA_DIR:-$config_root/../Assets/Config/Excel/Bytes}"
 
-exec "$dotnet_executable" "$config_root/Luban/Luban.dll" \
-    -t all \
+server_code_output="${LUBAN_SERVER_OUTPUT_CODE_DIR:-$config_root/../../DotNet/Game.Config/Generated}"
+server_data_output="${LUBAN_SERVER_OUTPUT_DATA_DIR:-$config_root/../../DotNet/Game.Config/Bytes}"
+
+"$dotnet_executable" "$config_root/Luban/Luban.dll" \
+    -t client \
     -c cs-bin \
     -d bin \
+    --strict \
     --conf "$config_root/luban.conf" \
     -x "outputCodeDir=$code_output" \
     -x "outputDataDir=$data_output"
+
+exec "$dotnet_executable" "$config_root/Luban/Luban.dll" \
+    -t server \
+    -c cs-bin \
+    -d bin \
+    --strict \
+    --conf "$config_root/luban.conf" \
+    -x "outputCodeDir=$server_code_output" \
+    -x "outputDataDir=$server_data_output"

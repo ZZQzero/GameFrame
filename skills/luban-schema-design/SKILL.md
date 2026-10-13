@@ -11,7 +11,7 @@ description: Designs Luban schema (beans, enums, polymorphism, collections, grou
 
 - 程序维护 Schema；策划填 Data。
 - 复杂 GamePlay（技能/行为树）优先 OOP 继承/多态，而不是塞字符串。
-- 服务端字段按需求使用 `s` group，并检查实际生成目标；当前 `all` 包含 `s`，仅标记 group 不能保证不下发。
+- 服务端字段按需求使用 `s` group，并检查实际生成目标；默认发布目标已分为 client（c）和 server（s），不要用包含全部分组的 `all` 发布客户端。
 
 ## 选型
 

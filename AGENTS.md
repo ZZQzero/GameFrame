@@ -27,7 +27,7 @@
 | `Unity/Config` | Luban 配置、Excel 输入和生成脚本 |
 | `Unity/Assets/Config` | YooAsset 采集的配置数据等资源；不是 Luban 的 Excel 输入目录 |
 | `Unity/Assets/Plugins/GameFrame` | 平台插件和原生库安装产物 |
-| `DotNet` | .NET 服务端：Core/Server 为业务无关框架，Game.Protocol 为同源生成协议，Game.Server 为业务与部署入口 |
+| `DotNet` | .NET 服务端：Core/Server 为业务无关框架，Game.Protocol 为同源生成协议，Game.Config 为服务端生成配置，Game.Server 为业务与部署入口 |
 | `Docs` | 各系统的使用说明、API 与行为契约，另含启动及跨模块说明 |
 | `Tools` | 项目维护脚本与原生插件布局说明 |
 | `skills` | 仓库内的验证、原生插件和 Luban 工作流说明 |
@@ -63,7 +63,7 @@
 - 修改程序集名或命名空间时检查 asmdef/asmref、`InternalsVisibleTo`、序列化类型标识、HybridCLR 登记、DLL 加载列表、资源地址、测试和文档。
 - 程序集改名后需要重新生成对应的热更 DLL；不要仅重命名旧 DLL 来替代重新编译。
 - Luban 输入位于 `Unity/Config/Excel`，配置为 `Unity/Config/luban.conf`；代码输出为 `Unity/Assets/Scripts/Hotfix/TableConfig/Generated`，数据输出为 `Unity/Assets/Config/Excel/Bytes`。
-- Luban 表类型使用 `Game.Hotfix.TableConfig`；配置加载复用现有 `TableConfigManager` 和 `ResourceLoadManager`，不另外维护一份表名列表。
+- Luban 从同源 Excel 分别生成 client/server（`cs-bin + bin --strict`）。Unity 表类型使用 `Game.Hotfix.TableConfig`，加载复用现有 `TableConfigManager` 和 `ResourceLoadManager`；服务端生成代码/数据位于 `DotNet/Game.Config/Generated`、`DotNet/Game.Config/Bytes`，类型使用 `Game.Config.TableConfig`，Game.Server 在监听前加载 Tables，随构建/发布复制数据，不另外维护表名列表。
 - 不将手写代码放入生成目录，不手动修改生成文件，也不修改 Unity 缓存来代替修复源文件。
 - Sqlite/Backup 的原生库名和 ABI 不是程序集名，不因框架改名顺带修改；插件构建和安装遵循 [原生插件说明](Tools/README.md)。
 

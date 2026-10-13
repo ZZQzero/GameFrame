@@ -1,4 +1,5 @@
 using System.Security.Cryptography.X509Certificates;
+using Game.Config.TableConfig;
 using Game.Server.Database;
 using Game.Server.Login;
 using GameFrame.Server.Network;
@@ -7,7 +8,7 @@ namespace Game.Server
 {
     internal static class LocalWssService
     {
-        internal static async Task RunAsync()
+        internal static async Task RunAsync(Tables tables)
         {
             int port = LocalEnvironment.Port("GF_LOCAL_PORT", 7443);
             var options = new LoginOptions();
@@ -24,7 +25,7 @@ namespace Game.Server
             using var accounts = new AccountSessions(options);
             using var service = new AccountService(repository, accounts);
             var application = new LobbyApplication(accounts, service, options);
-            await using WebApplication app = CreateHost(application.Application, networkOptions, certificate, port);
+            await using WebApplication app = CreateHost(application.Application, networkOptions, certificate, port, tables);
             WssServer network = app.Services.GetRequiredService<WssServer>();
             ConfigurePipeline(app, network);
             await app.RunAsync();
@@ -45,9 +46,10 @@ namespace Game.Server
             return certificate;
         }
 
-        internal static WebApplication CreateHost(ServerApplication application, WssServerOptions networkOptions, X509Certificate2 certificate, int port)
+        internal static WebApplication CreateHost(ServerApplication application, WssServerOptions networkOptions, X509Certificate2 certificate, int port, Tables tables)
         {
             WebApplicationBuilder builder = WebApplication.CreateBuilder(Array.Empty<string>());
+            builder.Services.AddSingleton(tables);
             builder.WebHost.ConfigureKestrel(options =>
             {
                 options.Limits.MaxConcurrentConnections = networkOptions.MaxConnections;

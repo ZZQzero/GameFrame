@@ -25,6 +25,6 @@ var languageRows = Game.Hotfix.TableConfig.TableConfigManager.Tables.TbLanguage.
 2. `topModule` 为 `Game.Hotfix.TableConfig`，业务程序集为 `Game.Hotfix`，AOT 不引用生成表类型。
 3. Package 和清单已就绪，配置资源已采集为 boot，地址与生成回调一致；不用 StreamingAssets/Addressables 替换现有加载链。
 4. 语言服务在 Launch 提前初始化，GameEntry 用 AddTable 补入翻译并保留当前语言。
-5. 当前脚本使用 `all`，分组是否符合发布需求需另外检查，不能假定服务端字段已排除。
+5. 当前脚本分别生成 client/server，检查 `c/s` 分组及两端实际内容；服务端加载与部署遵循 [服务端说明](../../Docs/DotNetUsage.md)，不要将 YooAsset 加载链用于 .NET 服务端。
 
 改动后优先运行 `ResourceLoadManagerTests` 中配置与入口相关测试，确认成功读取及失败时的资源释放；不为排错添加目录回退或静默空表。

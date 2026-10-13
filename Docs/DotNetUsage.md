@@ -71,9 +71,37 @@ dotnet dev-certs https --trust
 | GF_LOCAL_CERTIFICATE | 带私钥 localhost PFX 绝对路径 |
 | GF_LOCAL_CERTIFICATE_PASSWORD | 可选 PFX 密码，按证书实际配置 |
 | GF_LOCAL_PORT | 可选，默认 7443 |
+| GF_CONFIG_DIR | 可选，两种 profile 通用；默认执行目录下 Config/Bytes，相对路径基于 AppContext.BaseDirectory |
 | GF_LOCAL_ORIGINS | 可选，逗号分隔的精确 Origin 允许列表；默认拒绝所有带 Origin 的连接 |
 
-玩家账号不属于启动配置，不再设置 GF_LOCAL_ACCOUNT/PASSWORD。服务只检查证书、数据库及账号表，然后监听等待客户端注册/登录。
+玩家账号不属于启动配置，不再设置 GF_LOCAL_ACCOUNT/PASSWORD。服务先加载游戏配置，再检查证书、数据库及账号表，然后监听等待客户端注册/登录。
+
+### Luban 配置生成与读取
+
+两端共用 `Unity/Config/Excel` 和 `luban.conf`。macOS/Linux 从仓库根目录运行：
+
+```sh
+bash Unity/Config/gen.sh
+```
+
+Windows 可在任意目录运行 `Unity\Config\gen.bat`。Unity 菜单 `Tools/GameFrame/Excel/ExcelExporter` 调用同一脚本，一次生成客户端和服务端；Windows 脚本无 pause，失败退出码会传回编辑器。需要安装 .NET 8 运行时，必要时用 `DOTNET_EXECUTABLE` 指定 dotnet 绝对路径，与服务端 SDK 10.0.401 分开。
+
+| target | 命名空间 | 代码输出 | 数据输出 |
+| --- | --- | --- | --- |
+| client（c） | Game.Hotfix.TableConfig | Unity/Assets/Scripts/Hotfix/TableConfig/Generated | Unity/Assets/Config/Excel/Bytes |
+| server（s） | Game.Config.TableConfig | DotNet/Game.Config/Generated | DotNet/Game.Config/Bytes |
+
+两次生成均启用 `--strict`；任一步失败，整个命令失败，不发布部分更新。输出目录只放生成内容，Luban 默认清理过时文件并保留 `.meta`；删除 Unity 表资产时还须检查对应 `.meta`。运行库固定在 `Game.Config/Luban`，不从 Unity 缓存引用。当前共享表为 GlobalConst、AIRobot，Language、GameScene 仅客户端导出。
+
+服务端通过 `Game.Server.Configuration.TableConfigLoader.Load` 构造一个 `Game.Config.TableConfig.Tables`，使用生成器维护的表名读取文件并解析引用。两个 local profile 都在监听前完成加载，缺失或损坏文件终止启动。WSS 的业务服务可注入该 Tables 单例，或在应用组合处通过构造参数接收同一个实例；不重新加载、维护表名清单或修改其集合。
+
+`dotnet build/publish Game.Server` 自动复制服务端数据到执行目录的 `Config/Bytes`，许可证到 `Licenses/Luban/LICENSE`，运行时不需要 Excel、生成器或 Unity。默认目录与当前工作目录无关；`GF_CONFIG_DIR` 可指定外部目录。第一版通过重启应用配置更新：仅数据变化部署匹配 bytes，表结构变化则同时生成代码/数据并重新编译发布。
+
+验证生成时可将四个环境变量 `LUBAN_OUTPUT_CODE_DIR`、`LUBAN_OUTPUT_DATA_DIR`、`LUBAN_SERVER_OUTPUT_CODE_DIR`、`LUBAN_SERVER_OUTPUT_DATA_DIR` 全部指向独立临时目录，运行脚本后分别对比两端 `.cs/.bytes`；不要只覆盖客户端目录，否则仍会写正式服务端产物。加载与部署回归测试：
+
+```sh
+(cd Tools && dotnet test NetworkServer.Tests --filter 'TableConfigTests|WssLifecycleTests')
+```
 
 ## 3. 构建、运行与停止
 
@@ -265,6 +293,7 @@ PG 测试角色需能创建 schema，测试创建随机 schema 并只删除自�
 
 | 日期与范围 | 证据 | 限制 |
 | --- | --- | --- |
+| 2026-10-13 Luban 双端接入，macOS/.NET 10.0.401、Unity 6000.3.19f1 | 六工程 Release 编译 0 警告/错误；locked restore 通过；Config/WssLifecycle10/10；双端临时生成 9+5 个 C#、4+2 个 bytes 与正式产物一致；发布目录数据/许可证一致；两个 profile 在不同工作目录加载成功，缺配置先于网络依赖失败；Unity Editor 编译、ExcelExporter 菜单双端生成成功、EditMode5/5、配置 PlayMode9/9 | PlayMode 首次受到前一轮 EditMode 的 Test Runner 状态残留影响，重新加载脚本域后通过；场景、运行设置恢复；未重跑 PG/native、Windows 脚本实跑、Player/IL2CPP/真机或远端 CI |
 | 2026-10-13 协议生成入口迁移，macOS/.NET 10.0.401 | 五工程 Release 编译 0 警告/错误；Protocol182/182、0 跳过；Generate/Check launch profile 均成功处理 5 文件；锁定依赖还原通过 | 生成 C# 仅路径注释变化，manifest/hash/vector 未变；本轮未重跑 WSS/PG/native，未执行远端 CI |
 | 2026-10-13 .NET Release | 四工程 0 警告/错误；Server136、Framework13、Protocol182 共 331 项全通过、0 跳过；check --artifacts 通过 | 独立 PG18 和 macOS native，不能代表其他平台 |
 | 2026-10-12 mbedTLS4.2 迁移后 native | macOS Release/ASan/UBSan 回归通过，动态 live bytes 归零；五组已安装库来源/二进制 hash 一致 | Windows 仅交叉编译/PE，Android/iOS 仅构建安装 |

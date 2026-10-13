@@ -13,7 +13,7 @@ description: Explains and fills Luban Excel config tables by header conventions.
 |----|------|
 | `##var` / `##` | 字段名 |
 | `##type` | 类型 |
-| `##group` | `c`/`s`/`e`；空=跟随默认 |
+| `##group` | `c`/`s`/`e`；空字段分组=所有目标可见 |
 | `##` 注释行 | 中文说明，不进逻辑 |
 | `#` 开头列名 | 注释列，不导出 |
 
@@ -26,7 +26,7 @@ description: Explains and fills Luban Excel config tables by header conventions.
 - `c`：客户端可见
 - `s`：仅服务器
 - 填错会导致缺字段或敏感数据下发
-- 当前生成脚本使用包含 `c/s/e` 的 `all`，不能仅凭 `s` 标记断言字段不会进入当前输出。
+- 当前生成脚本分别导出 client（c）和 server（s），检查两端实际输出；不要用包含 `c/s/e` 的 `all` 发布客户端。
 
 ## 复杂结构
 

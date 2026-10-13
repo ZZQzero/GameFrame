@@ -104,6 +104,9 @@
           "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
         }
       },
+      "game.config": {
+        "type": "Project"
+      },
       "game.protocol": {
         "type": "Project",
         "dependencies": {
@@ -114,6 +117,7 @@
       "game.server": {
         "type": "Project",
         "dependencies": {
+          "Game.Config": "[1.0.0, )",
           "Game.Protocol": "[1.0.0, )",
           "GameFrame.Server": "[1.0.0, )",
           "Npgsql": "[10.0.3, )"

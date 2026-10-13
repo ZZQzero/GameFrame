@@ -8,11 +8,12 @@
 | Excel 输入与 Schema | `Unity/Config/Excel`，包括 `__tables__.xlsx`、`__beans__.xlsx`、`__enums__.xlsx` |
 | 生成代码 | `Unity/Assets/Scripts/Hotfix/TableConfig/Generated` |
 | 生成数据 | `Unity/Assets/Config/Excel/Bytes` |
-| 生成格式与目标 | 当前脚本使用 `-t all -c cs-bin -d bin` |
-| 生成命名空间 | `Game.Hotfix.TableConfig` |
+| 服务端代码与数据 | `DotNet/Game.Config/Generated`、`DotNet/Game.Config/Bytes` |
+| 生成格式与目标 | 脚本依次使用 `-t client` / `-t server`，均为 `-c cs-bin -d bin --strict` |
+| 生成命名空间 | 客户端 `Game.Hotfix.TableConfig`；服务端 `Game.Config.TableConfig` |
 | 加载入口 | `TableConfigManager.Init(ResourceLoadManager, token)`，由 GameEntry 调用 |
 
-macOS/Linux 从仓库根目录运行 `bash Unity/Config/gen.sh`；Windows 在 `Unity/Config` 目录运行 `gen.bat`。依赖 .NET 8；Unity/Hub 的 PATH 可能不同，`gen.sh` 支持 `DOTNET_EXECUTABLE` 指定可执行文件。
+macOS/Linux 从仓库根目录运行 `bash Unity/Config/gen.sh`；Windows 在 `Unity/Config` 目录运行 `gen.bat`。依赖 .NET 8；Unity/Hub 的 PATH 可能不同，两个脚本支持 `DOTNET_EXECUTABLE` 指定可执行文件。
 
 只校验数据而不写生成资产时，从仓库根目录执行当前主 CLI：
 
@@ -22,9 +23,11 @@ dotnet Unity/Config/Luban/Luban.dll --conf Unity/Config/luban.conf -t all -f --s
 
 环境找不到 `dotnet` 时先检查可执行文件路径。此命令不指定代码或数据输出目标，不会重新生成资产。
 
-如需验证重新生成的输出而不覆盖 Unity 资产，`gen.sh` 支持 `LUBAN_OUTPUT_CODE_DIR`、`LUBAN_OUTPUT_DATA_DIR`，应指向本次独立的临时目录；对比输出后再决定授权范围内的修改。
+如需验证重新生成的输出而不覆盖 Unity 资产，两个脚本支持客户端 `LUBAN_OUTPUT_CODE_DIR`、`LUBAN_OUTPUT_DATA_DIR` 和服务端 `LUBAN_SERVER_OUTPUT_CODE_DIR`、`LUBAN_SERVER_OUTPUT_DATA_DIR`，四个变量应全部指向本次独立的临时目录；对比输出后再决定授权范围内的修改。
 
-当前 `all` 目标包含 `c/s/e`，不能假定已经排除服务端字段。发布分组需要单独检查需求、脚本和配置，不为填表或排错顺带改变生成目标。
+默认生成入口分别导出 client（c）和 server（s）；`all`（c/s/e）仅用于全组检查，不是发布目标。空表分组遵循 luban.conf 的 default group；空字段分组对所有目标可见。分组变更仍需检查两端实际生成内容，不为填表或排错顺带改变生成目标。
+
+服务端由 `Game.Server.Configuration.TableConfigLoader` 在监听前加载 Tables，默认读取 `AppContext.BaseDirectory/Config/Bytes`，支持 `GF_CONFIG_DIR`；源码与数据随生成同步维护，详情见 [服务端说明](../Docs/DotNetUsage.md)。
 
 保持生成代码和数据同步；不手改生成目录，也不维护额外的表名列表。需要 Unity 加载验证时阅读 [启动说明](../Docs/Launch.md)，配置以 YooAsset 地址加载，TextAsset 句柄由现有 ResourceLoadManager 释放。
 

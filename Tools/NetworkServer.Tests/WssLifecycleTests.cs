@@ -7,6 +7,7 @@ using System.Security.Cryptography.X509Certificates;
 using Game.Hotfix.Network.Generated;
 using Game.Hotfix.Network.Protocol;
 using Game.Server;
+using Game.Server.Configuration;
 using Game.Server.Login;
 using GameFrame.Network;
 using GameFrame.Network.Protocol;
@@ -71,7 +72,9 @@ namespace GameFrame.Tests
             reserve.Start();
             int port = ((IPEndPoint)reserve.LocalEndpoint).Port;
             reserve.Stop();
-            app = LocalWssService.CreateHost(application, new WssServerOptions(), certificate, port);
+            var tables = TableConfigLoader.Load(null);
+            app = LocalWssService.CreateHost(application, new WssServerOptions(), certificate, port, tables);
+            Assert.That(app.Services.GetRequiredService<Game.Config.TableConfig.Tables>(), Is.SameAs(tables));
             app.Services.GetRequiredService<ILoggerFactory>().AddProvider(logs);
             network = app.Services.GetRequiredService<WssServer>();
             LocalWssService.ConfigurePipeline(app, network);

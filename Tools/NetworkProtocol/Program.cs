@@ -70,7 +70,8 @@ namespace GameFrame.ProtocolTools
         {
             for (DirectoryInfo? directory = new DirectoryInfo(AppContext.BaseDirectory); directory != null; directory = directory.Parent)
             {
-                if (File.Exists(Path.Combine(directory.FullName, "Docs", "NetworkDesign.md")))
+                if (File.Exists(Path.Combine(directory.FullName, "Protocol", "GameFrame.Protocol.projitems")) &&
+                    File.Exists(Path.Combine(directory.FullName, "DotNet", "DotNet.sln")))
                 {
                     return directory.FullName;
                 }

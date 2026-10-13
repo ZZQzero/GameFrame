@@ -11,23 +11,14 @@ Build and install Sqlite first, then build MediaBackup against that same core bu
 and install it. Keep binaries together with their `.meta`, `artifact.json` and
 `build-manifest.json` files. Restart Unity after replacing a loaded native library.
 
-KCP source-fix notes and native regression tests live in
-`Native/Kcp`.
-Its [README](../Native/Kcp/README.md)
-documents the integrated fast-ACK and allocation-safety fixes, hash-locked source copying
-and native regression commands. The shared native directory also contains the only KCP sources under `third_party/kcp`.
-The C gfnet/mbedTLS library, managed UDP bridge,
-`build/build.py` and `build/install.py` are implemented; KCP installs to
-`Unity/Assets/Plugins/GameFrame/Native/Kcp`. macOS universal, Android arm64 and
-iOS device/simulator arm64 artifacts are installed; the simulator archive is
-disabled by default. Windows x64 is also built and installed locally using the
-same explicit LLVM-MinGW UCRT cross-toolchain as Sqlite (`--llvm-mingw`). The
-installer verifies PE architecture, ABI exports and system-only dependencies.
-Cross-built tests are marked built but not executed. The MSVC CI runner provides
-Windows execution, with Linux and macOS native/UDP jobs alongside it. CI
-configuration is not evidence of a run.
-The implementation plan, C/C# boundary and platform gates are documented in
-[NetworkNativeDesign.md](../Docs/NetworkNativeDesign.md).
+KCP's only C sources, dependency locks, bridge and build/install scripts live in
+`Native/Kcp`; Unity and .NET consume matching artifacts from the same build.
+The C/C# boundary, integrated source fixes and ABI are maintained in
+[.NET development rules](../Docs/DotNetDevelopment.md#7-共享-c-kcpdtls-实现规则).
+Platform build/install commands, server deployment and actual verification
+limits are in [server usage](../Docs/DotNetUsage.md#原生构建与部署);
+Unity plugin installation is in [client usage](../Docs/ClientNetworkUsage.md#原生插件安装).
+The overall [NetworkDesign](../Docs/NetworkDesign.md) remains the design contract.
 
 On macOS, Backup searches `@loader_path` for a built Player's adjacent SQLite
 library, and `@loader_path/../../Sqlite/macOS` for the Editor directory layout.
@@ -52,7 +43,7 @@ and the exact allowed source transformations. It replaces the macOS binary
 atomically rather than modifying an inode that Unity may have loaded.
 
 
-Network generation/check is in `NetworkProtocol`; the real Kestrel/WSS and pure client-core integration tests are in `NetworkServer.Tests`. Run `(cd Tools && dotnet test NetworkServer.Tests)` from the repository root. This project references Game.Server and links the same connection-core sources without a Unity/UniTask shim; runtime usage and remaining platform gates are documented in [Network.md](../Docs/Network.md).
+Network generation/check is in `NetworkProtocol`; the real Kestrel/WSS and pure client-core integration tests are in `NetworkServer.Tests`. Run `(cd Tools && dotnet test NetworkServer.Tests)` from the repository root. This project references Game.Server and links the same connection-core sources without a Unity/UniTask shim; runtime usage and remaining platform gates are documented in [client usage](../Docs/ClientNetworkUsage.md) and [server usage](../Docs/DotNetUsage.md#验证与现有证据).
 
 `.github/workflows/network.yml` checks locked dependency restoration, generated protocol drift, .NET protocol/WSS tests and native KCP regressions on network changes. Native safety verification runs both assertions/NDEBUG and ASan/UBSan with sanitizer errors treated as failures. Unity Editor, Player/IL2CPP and device gates remain separate.
 

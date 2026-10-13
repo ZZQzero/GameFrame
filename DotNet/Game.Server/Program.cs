@@ -24,7 +24,7 @@ namespace Game.Server
             {
                 throw new InvalidOperationException("Production hosting is not configured. Only explicit local profiles are available. " +
                     "For local development, select the local-wss/local-kcp-dtls launch profile or pass --profile local-wss|local-kcp-dtls, " +
-                    "and configure the selected profile as documented in DotNet/README.md.");
+                    "and configure the selected profile as documented in Docs/DotNetUsage.md.");
             }
 
             if (args.Length != 2 || args[0] != "--profile")

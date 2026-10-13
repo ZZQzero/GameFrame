@@ -43,6 +43,8 @@
 
 常用入口：UI 为 `Docs/USAGE.md`，启动为 `Docs/Launch.md`；Timer、Input、Audio、Pool、Scene、EventSystem、Fsm、RedDot 分别有同名系统文档。Media/备份参考 `Docs/Gallery.md` 与 `Docs/GalleryDesign.md`；Sqlite 的说明为 `Docs/Sqlite.md`、`Docs/SqliteDesign.md` 和 `Docs/SqliteValidation.md`。原生 ABI 协议、第三方声明和示例说明保留在 Sqlite 模块内，与对应源码配套。
 
+网络总体设计保留在 [NetworkDesign](Docs/NetworkDesign.md)。修改 `DotNet/` 或共享协议/原生网络部分前阅读 [服务端 .NET 全局开发规范](Docs/DotNetDevelopment.md)，运行、数据库、证书、生成和构建步骤见 [服务端使用说明](Docs/DotNetUsage.md)。修改 Unity 网络及 Hotfix 接入前阅读 [客户端网络开发规范](Docs/ClientNetworkDevelopment.md)，调用与验证见 [客户端网络使用说明](Docs/ClientNetworkUsage.md)。网络只维护这份设计和四份规范/说明；当前进度、待验收项与证据更新对应章节，历史审查过程由 Git 保留，不另增重复文档。
+
 `Docs/Scope.md`、`Docs/ErrorContract.md` 说明跨模块约定。Skill 负责开发和验证流程，通过引用这些系统说明获取行为契约，不另外复制一套系统文档。文档与实现冲突时先说明差异，再按用户要求确认或修正行为。
 
 ## 启动与生命周期

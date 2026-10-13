@@ -1,8 +1,10 @@
 # GameFrame 商业网络模块设计
 
-> 状态：分阶段实施中，2026-10-12。本文定义第一版实现与验收契约；已完成项与验证范围见 [实施记录](NetworkImplementation.md)，不代表完整模块已经通过正式包验证。
+> 状态：分阶段实施中，2026-10-13。本文保留总体设计与第一版验收契约；已完成项与验证范围见双方使用说明，不代表完整模块已经通过正式包验证。
 > 技术基线：WebSocket/WSS、MemoryPack 1.21.4、原版 C KCP；服务端已确定为 C#/.NET 10。
 > 会话入口：WSS 建连与协议握手 → 登录 RPC → 大厅会话；战斗按配置复用 WSS，或通过大厅申请授权后建立 KCP/DTLS。
+
+> 文档入口：[服务端 .NET 全局开发规范](DotNetDevelopment.md)、[服务端使用说明](DotNetUsage.md)、[客户端网络开发规范](ClientNetworkDevelopment.md)、[客户端网络使用说明](ClientNetworkUsage.md)。本文定义总体架构、目标与业务接入契约；四份文档说明开发规则、实现细节和操作步骤。设计变化同步修改相关文档，未实现或未验收项不能据设计描述认定完成。
 
 ## 1. 目标与范围
 
@@ -28,14 +30,14 @@
 
 | 项目 | 当前事实 | 本设计的后续工作 |
 | --- | --- | --- |
-| GameFrame 网络 | `GameFrame.Network` 已实现桌面 WSS、RPC、缓冲预算与主线程派发；`GameMediaNetwork` 是独立的媒体网络策略工具 | 补齐 KCP/DTLS、业务会话与完整验收；WebGL WSS 延后 |
+| GameFrame 网络 | `GameFrame.Network` 已实现 WSS、C KCP/DTLS 双通道、RPC、缓冲预算与主线程派发；`GameMediaNetwork` 是独立的媒体网络策略工具 | 补齐完整计账、诊断与平台/容量验收；世界业务会话与 WebGL WSS 延后 |
 | MemoryPack | 已安装 1.21.4；Editor 和 StandaloneOSX Player 脚本编译通过 | 已有同源 DTO/生成检查/跨端向量；补齐 HybridCLR 实机测试 |
-| KCP | `Native/Kcp/third_party/kcp` 下已有 `ikcp.c`、`ikcp.h`、MIT LICENSE；已直接合入 #467 ACK 修复、分配失败处理及标准 offsetof 修正 | 公共目录维护唯一源码，保留迁移前源码字节及 GUID 记录；固定 ABI、UDP 集成及构建产物 |
+| KCP | `Native/Kcp/third_party/kcp` 下已有 `ikcp.c`、`ikcp.h`、MIT LICENSE；已直接合入 #467 ACK 修复、分配失败处理及标准 offsetof 修正 | ABI2、UDP 集成与平台构建产物已落地；继续核对依赖锁，完成发布平台实跑验收 |
 | KCP 版本 | 上游基线为 `b1a7a2101dcbb96017681a500d6b82bbe5a88766`，包含 `IKCPOPS`/`ikcp_setcc`；本地修正与当前 c/h hash 已锁定 | 锁定基线与本地源码 hash；不得直接按旧版 C# KCP 包的内部结构接入 |
 | 生命周期 | `GameRuntime` 已可选持有网络宿主；GameEntry 当前启动本地五子棋 | 保持离线默认，业务接入 GameNetworkSession |
 | 服务端 | `DotNet` 已拆为 Core、Server、Game.Protocol、Game.Server 四工程；WSS/KCP 共用强类型应用接口，PostgreSQL 注册登录与账号会话属于业务宿主 | 生产部署/跨进程会话/世界应用接入，完整诊断和平台容量验收 |
 
-MemoryPack 安装与当前验证边界见 [MemoryPack.md](MemoryPack.md)。启动、资源所有权与失败处理以 [Launch.md](Launch.md)、[Scope.md](Scope.md)、[ErrorContract.md](ErrorContract.md) 为基础；本文补充网络模块的固定策略。
+MemoryPack 安装与当前验证边界见 [客户端依赖维护](ClientNetworkUsage.md#7-协议与依赖维护)。启动、资源所有权与失败处理以 [Launch.md](Launch.md)、[Scope.md](Scope.md)、[ErrorContract.md](ErrorContract.md) 为基础；本文补充网络模块的固定策略。
 
 ### 2.1 `unitygame` 参考结论
 
@@ -108,15 +110,15 @@ DotNet/Game.Protocol/             双端同源生成的 MemoryPack 游戏协议
 DotNet/Game.Server/               唯一业务可执行入口、local 配置、账号与处理器
 ```
 
-上述目录表达职责划分；实际文件落点与完成范围见实施记录。WSS 核心、协议工具、local-wss、C KCP/DTLS bridge、C# worker 与 local-kcp-dtls 已实现；GameNetworkSession 与世界业务按当前范围延后，平台/容量发布验收仍待完成。不新建与已有模块重复的计时器、全局任务管理器或事件总线。`NetworkRuntime` 是必要的网络资源宿主，可由 `GameRuntime` 选配持有；业务只持有自己的 `NetworkClient`。
+上述目录表达职责划分；实际文件落点与完成范围见四份规范和说明。WSS 核心、协议工具、local-wss、C KCP/DTLS bridge、C# worker 与 local-kcp-dtls 已实现；GameNetworkSession 与世界业务按当前范围延后，平台/容量发布验收仍待完成。不新建与已有模块重复的计时器、全局任务管理器或事件总线。`NetworkRuntime` 是必要的网络资源宿主，可由 `GameRuntime` 选配持有；业务只持有自己的 `NetworkClient`。
 
-服务端保留单进程、单业务入口，通过四个程序集落实职责边界。Core 不引用游戏协议/Unity/业务，Server 只依赖 Core 与 ASP.NET Core；Game.Protocol 导入生成源码并引用 Core/MemoryPack，Game.Server 组合 Server 与 Protocol。账号、恢复、顶号、登录期限和权限策略全部属于 Game.Server；网络框架仅通过 ServerSession 的头部准入、派发复查和期限 hook 接入应用策略。RPC/Notify 处理器只使用 DTO，框架负责关联、编码、队列与释放；Push 与连接关闭采用公开强类型接口，不暴露借用 native handle。具体契约见 [服务端框架 API](../DotNet/GameFrame.Server/README.md)。
+服务端保留单进程、单业务入口，通过四个程序集落实职责边界。Core 不引用游戏协议/Unity/业务，Server 只依赖 Core 与 ASP.NET Core；Game.Protocol 导入生成源码并引用 Core/MemoryPack，Game.Server 组合 Server 与 Protocol。账号、恢复、顶号、登录期限和权限策略全部属于 Game.Server；网络框架仅通过 ServerSession 的头部准入、派发复查和期限 hook 接入应用策略。RPC/Notify 处理器只使用 DTO，框架负责关联、编码、队列与释放；Push 与连接关闭采用公开强类型接口，不暴露借用 native handle。具体契约见 [服务端框架 API](DotNetUsage.md#5-框架接入-api)。
 
 Game.Server 使用 Web SDK/net10.0，local 功能需显式 profile；PostgreSQL 注册/密码认证已接入，生产 hosting（监听/部署与跨进程会话）未配置时拒绝启动，启动不校验玩家凭据。WssServer 通过 hosted lifecycle 的 StoppingAsync 阶段在 Kestrel 等 StopAsync 前 join 网络，不能仅依赖注册先后或 RunAsync 返回后的清理。不提前增加网关/账号/世界等可执行项目；第 14 节业务契约保留供后续实现。
 
 Game.Server 内按业务功能建目录：Login/ 集中账号、PostgreSQL 仓库、注册/登录/恢复/注销处理器和每连接登录状态。LobbyApplication 作为大厅组合入口显式注册模块与路由；Program 仅校验 profile 并选择 LocalWssService/LocalKcpService。启动入口负责配置校验、资源创建、运行及关闭所有权，不增加反射注册或额外生命周期管理器。配置或初始化失败停止后续步骤，已创建资源按原所有权释放。
 
-账号主数据库已选定 PostgreSQL，通过应用层 Npgsql 仓库接入。服务启动校验证书、数据库连接与账号表，不接收或预置玩家账号密码；客户端通过 WSS Register/Login RPC 注册、登录。LoginOptions 只保存策略与容量，AccountService 负责密码校验与有界认证并发，PostgresAccountRepository 负责参数化持久化，AccountSessions 负责单进程的账号会话与绑定。注册不自动登录；持久化账号可在重启后登录，内存 Resume 凭据不跨重启恢复。具体初始化、密码格式、单进程边界与验证见 [ServerAccounts.md](ServerAccounts.md)。
+账号主数据库已选定 PostgreSQL，通过应用层 Npgsql 仓库接入。服务启动校验证书、数据库连接与账号表，不接收或预置玩家账号密码；客户端通过 WSS Register/Login RPC 注册、登录。LoginOptions 只保存策略与容量，AccountService 负责密码校验与有界认证并发，PostgresAccountRepository 负责参数化持久化，AccountSessions 负责单进程的账号会话与绑定。注册不自动登录；持久化账号可在重启后登录，内存 Resume 凭据不跨重启恢复。具体初始化、密码格式、单进程边界与验证见 [服务端账号规范](DotNetDevelopment.md#4-数据库与账号业务) 和 [运行配置](DotNetUsage.md)。
 
 Git 保留 DotNet 源码、解决方案、项目和依赖锁文件；忽略其 bin/obj、artifacts、TestResults、日志及 IDE 本地配置。Tools 下的 .NET 工程采用相同过滤，公共 Native/Kcp/build 中维护的构建脚本与已安装插件产物继续保留。
 
@@ -307,7 +309,7 @@ Hello 完成前仅允许当前握手所需控制包。Hello 完成后，WSS 进�
 
 服务端、协议工具与联调测试工程统一使用 `TargetFramework=net10.0`。实施时分别在 `DotNet/` 与 `Tools/` 下通过 `global.json` 锁定同一 .NET 10 SDK 补丁版本，构建命令从对应目录执行，避免影响 `Unity/Config` 的 .NET 8 生成环境；已锁定 SDK 10.0.401。共享生成 DTO/约束属性源码仍限制在当前 Unity 支持的 C# 语法与 API 范围；服务端独有代码可使用 .NET 10 能力。Unity 保持 MemoryPack.Core 的 `.NET Standard 2.1` 版本，不因服务端升级而替换为 .NET 10 DLL。MemoryPack 继续固定 1.21.4，实际互通以 Unity/.NET 10 golden vectors 和 IL2CPP 测试为准。
 
-字段号必须从 1 连续编号，生成 `[MemoryPackOrder(n - 1)]` 与 `[MemoryPackable(SerializeLayout.Explicit)]`。字段名称使用 snake_case，生成 C# PascalCase 属性；字符串、数组限额与引用可空性以自定义 FieldOptions 声明。路由 opcode、类型、通道与正文上限以 service method 的 MethodOptions 声明；完整规则和命令见 [Protocol/README.md](../Protocol/README.md)。例如：
+字段号必须从 1 连续编号，生成 `[MemoryPackOrder(n - 1)]` 与 `[MemoryPackable(SerializeLayout.Explicit)]`。字段名称使用 snake_case，生成 C# PascalCase 属性；字符串、数组限额与引用可空性以自定义 FieldOptions 声明。路由 opcode、类型、通道与正文上限以 service method 的 MethodOptions 声明；完整规则和命令见 [共享协议规范](DotNetDevelopment.md#6-共享-protomemorypack-编写规则) 和 [生成命令](DotNetUsage.md#协议生成与验证)。例如：
 
 ```proto
 syntax = "proto3";
@@ -351,7 +353,7 @@ message MoveInput {
 
 帧长度上限不足以限制 MemoryPack 字段数量声明导致的分配。必须在反序列化前用生成的 schema-aware 校验器遍历 Body：严格验证对象成员数、null 标识、字符串/数组长度、剩余字节、递归深度和元素总量，再交给 MemoryPack。
 
-第一版固定 MemoryPack 字符串写入 UTF-8；校验器只接受该策略的合法格式，区分 UTF-8 字节数与字符数，禁止根据未验证的数量创建数组/字符串。校验器按 1.21.4 实际格式实现并对照上游编码测试，不另造一个外观类似 MemoryPack 的格式。默认每字符串最多 256 个 UTF-16 code units、1024 个 UTF-8 字节；每数组最多 512 项；对象嵌套最多 8 层；每帧最多 2048 个 DTO 节点。业务可收紧，放宽必须修改 manifest 和硬预算审核。
+第一版固定 MemoryPack 字符串写入 UTF-8；校验器只接受该策略的合法格式，区分 UTF-8 字节数与字符数，禁止根据未验证的数量创建数组/字符串。校验器按 1.21.4 实际格式实现并对照上游编码测试，不另造一个外观类似 MemoryPack 的格式。V1 硬上限为每字符串最多 256 个 UTF-16 code units、1024 个 UTF-8 字节；每数组最多 512 项；对象嵌套最多 8 层；每帧最多 2048 个 DTO 节点。字段必须显式声明限额，业务可收紧；放宽必须修改硬预算与 manifest 并重新审核。
 
 所有业务入口的根 DTO 必须非 null；字段可空性由 manifest 声明。编码显式传入 `MemoryPackSerializerOptions.Utf8`，不依赖以后可能变化的默认设置。
 
@@ -502,7 +504,7 @@ WebSocket 库本身负责标准 ping/close 帧。应用 Ping/Pong 仍保留，�
 
 ## 12. 原版 C KCP 与 DTLS 原生集成
 
-具体落地方案见 [C KCP / DTLS 底层实施方案](NetworkNativeDesign.md)，细化 C/C# 职责、listener 绑定、跨层额度、文件落点与构建验收。当前先实现框架底层，游戏世界业务与 WebGL WSS 延后；该方案不表示插件已经完成。
+C/C# 职责、listener 绑定、跨层额度与 ABI 细节集中在 [共享 C KCP/DTLS 规范](DotNetDevelopment.md#7-共享-c-kcpdtls-实现规则)，命令与平台证据见 [原生构建与部署](DotNetUsage.md#原生构建与部署)。底层实现已落地，完整计账、诊断与平台/容量验收仍待完成；游戏世界业务与 WebGL WSS 延后。
 
 ### 12.1 组合关系
 
@@ -558,7 +560,7 @@ int32_t gfnet_get_state(void* handle, int32_t* state);
 int32_t gfnet_destroy(void* handle);
 ```
 
-config/stats 首字段为 struct_size 与 abi_version；显式规定字段偏移、对齐和所有 bool 的 u32 表示，由 C 静态断言与 C# size/offset 测试锁定。配置传入 conv、角色 client/server、限额、参数、PSK/identity 的指针长度；create 同步复制，不能持有托管临时指针。MTU、时钟定时、错误码、state 枚举精确布局与函数状态矩阵见 [ABI.md](../Native/Kcp/ABI.md)。
+config/stats 首字段为 struct_size 与 abi_version；显式规定字段偏移、对齐和所有 bool 的 u32 表示，由 C 静态断言与 C# size/offset 测试锁定。配置传入 conv、角色 client/server、限额、参数、PSK/identity 的指针长度；create 同步复制，不能持有托管临时指针。MTU、时钟定时、错误码、state 枚举精确布局与函数状态矩阵见 [共享原生 ABI2](DotNetDevelopment.md#8-共享原生-abi-2)。
 
 包装 send 成功统一返回 0，错误返回固定负码。**不能因此假设原版 `ikcp_send` 成功返回 0**：当前源码返回实际接收字节数；包装层只有返回值等于输入长度才成功，负数/短写一律标记句柄 fatal。分配失败可能已经入队部分 segment，不能对同一请求再调用一次 send。
 
@@ -576,7 +578,7 @@ KCP output 副本先进入有界明文队列，再由 owner 的 DTLS 阶段加�
 
 已确认采用 [PR #467](https://github.com/skywind3000/kcp/pull/467)，直接将 ACK 聚合中 `_itimediff(ts, latest_ts) > 0` 改为 `>= 0`。同一次 flush 产生的 ACK 可具有相同时间戳，应允许更大序号成为 maxack；仍保留逐 segment 的旧时间戳检查和每次 input 最多一次 fastack 增量。此修复不改变线协议、ABI 或拥塞算法，不再保存独立补丁供构建重复应用；其余扩展 PR 不纳入第一版。
 
-分配安全修正也已直接合入 c/h：ACK 扩容和接收 segment 检查分配失败，send 不在 NULL 检查前 assert，队列偏移使用标准 offsetof。input 分配失败返回 -4、send/setmtu 返回 -2、create 返回 NULL；发生局部状态修改的失败必须由包装层锁定 fatal 后销毁，禁止重试。这些修正不改变线协议、结构布局、重传或拥塞算法。`prepare_kcp.py` 校验当前 c/h hash 后仅向 Unity 外的新目录逐字节复制，不应用独立补丁。上游基线、本地来源/hash 和逐分配点回归证据统一见 [KCP 原生说明](../Native/Kcp/README.md)；DTLS 分配与 gfnet Fatal 边界已落地；源码回归和 host harness 不等于完整平台安全验收。
+分配安全修正也已直接合入 c/h：ACK 扩容和接收 segment 检查分配失败，send 不在 NULL 检查前 assert，队列偏移使用标准 offsetof。input 分配失败返回 -4、send/setmtu 返回 -2、create 返回 NULL；发生局部状态修改的失败必须由包装层锁定 fatal 后销毁，禁止重试。这些修正不改变线协议、结构布局、重传或拥塞算法。`prepare_kcp.py` 校验当前 c/h hash 后仅向 Unity 外的新目录逐字节复制，不应用独立补丁。上游基线、本地来源/hash 和逐分配点回归证据统一见 [共享 C 规范](DotNetDevelopment.md#7-共享-c-kcpdtls-实现规则) 和 [服务端验证说明](DotNetUsage.md#验证与现有证据)；DTLS 分配与 gfnet Fatal 边界已落地；源码回归和 host harness 不等于完整平台安全验收。
 
 认证后的 KCP datagram 仍须在 input 前完整检查 segment 头、长度、conv、command、PUSH 分片范围及尾随字节；`ikcp_input` 成功不替代项目边界验证。非法数据故障当前连接，不改变正常 KCP 算法。
 
@@ -595,7 +597,7 @@ KCP 自身不加密。第一版安全适配锁定 **mbedTLS 4.2.0 stable + TF-PS
 
 第 12.3 节是已知凭据的单连接 ABI；服务端不能在收到陌生 UDP 后预先知道 PSK。P3 同时新增 server-listener ABI：create/destroy listener、register/revoke grant、feed UDP(peer,data,now)、poll UDP(peer,dst)、poll connection event、release connection。所有 peer 使用固定 addressFamily、16-byte 地址和 u16 port 结构，不把平台 sockaddr 布局暴露给 C#。
 
-listener 还提供统一 tick 和 confirm/reject Hello binding；子 handle 仅借用应用帧收发/状态接口，不重复执行单连接 tick/feed/poll UDP。Hello 校验通过后由 owner 原子确认一次性授权绑定，细节见 [底层实施方案](NetworkNativeDesign.md)。客户端 create 前在托管连接/宿主预算中预留完整 native allowance，C 分配器在 allowance 内检查实际容量；预留与使用指标分开，避免跨层配额依赖统计采样或反向回调。
+listener 还提供统一 tick 和 confirm/reject Hello binding；子 handle 仅借用应用帧收发/状态接口，不重复执行单连接 tick/feed/poll UDP。Hello 校验通过后由 owner 原子确认一次性授权绑定，细节见 [共享 C KCP/DTLS 规范](DotNetDevelopment.md#7-共享-c-kcpdtls-实现规则)。客户端 create 前在托管连接/宿主预算中预留完整 native allowance，C 分配器在 allowance 内检查实际容量；预留与使用指标分开，避免跨层配额依赖统计采样或反向回调。
 
 listener output 同时提供 connectionId/generation 和原始入队时间，托管在途 datagram 保留这些元数据；关闭或槽位复用后不得继续发送旧连接数据，总队龄不能因 poll 转移到 C# 而重置。
 
@@ -871,7 +873,7 @@ StopSessionAsync(requestLogout)
   5. 最后传播主异常
 ```
 
-这里的 Login、ResumeLogin、RequestWorldGrant、EnterWorld/RestoreWorld、LeaveWorld、Logout 和快照处理都是需新增的 Hotfix/.NET 业务实现，不是当前仓库已有 API。启动/恢复失败停止当前流程；调用者显式清理该流程已获得的资源。KCP 世界启动失败不隐式注销账号或关闭独立大厅。
+上述 GameNetworkSession、世界入场/恢复/离场与快照处理是后续 Hotfix/.NET 业务接入流程。当前已生成相关路由，并实现服务端 Register/Login/ResumeLogin/Logout；RequestWorldGrant 返回 WorldUnavailable，其余世界入站路由显式拒绝，尚无世界处理器和客户端业务会话封装。启动/恢复失败停止当前流程；调用者显式清理已获得的资源。KCP 世界启动失败不隐式注销账号或关闭独立大厅。
 
 WSS 共享连接的状态流不能假装独立：EnterWorld/LeaveWorld 超时、取消或处理器失败导致世界状态不确定时，不能先注销处理器再继续使用大厅 socket；该次共享 WSS 必须停止业务并关闭，大厅可通过显式 ResumeLogin 恢复账号。业务明确拒绝入场且尚未改变状态时可保留大厅。StopSession 将关闭全部连接，不重复发 LeaveWorld；所有失败均保留原异常，不自动执行恢复或入场回滚。
 
@@ -928,7 +930,7 @@ KCP MIT、MemoryPack MIT 及 mbedTLS 对应版本许可证/第三方声明随安
 
 各阶段都应形成可评审变更；未通过前一阶段契约验证不直接进入业务接入。
 
-下表为完整项目路线；当前按用户要求只推进框架底层，P5 及 P4 中实际入场/世界业务部分延后。底层 P3/P4 先以受控授权、Hello/Echo、双通道和撤销完成验收，实施顺序见 [底层实施方案](NetworkNativeDesign.md)。
+下表保留完整项目路线与各阶段退出条件，不是当前完成清单。P0～P2 核心及 P3/P4 底层已实现并有本地验证；P3/P4 的跨平台/容量门禁仍未全部通过。P5 及 P4 中入场/世界授权业务延后，P6 仍需发布平台验收。当前缺口见 [服务端开发规范](DotNetDevelopment.md#当前范围与待完成项2026-10-13)，底层规则见 [共享 C KCP/DTLS 规范](DotNetDevelopment.md#7-共享-c-kcpdtls-实现规则)。
 
 | 阶段 | 具体任务与主要文件 | 退出条件 |
 | --- | --- | --- |
@@ -937,12 +939,12 @@ KCP MIT、MemoryPack MIT 及 mbedTLS 对应版本许可证/第三方声明随安
 | P2 MemoryPack 工具 | Proto 解析/DTO 生成、实际序列化成员分析、路由/catalog、字节验证器、manifest/check、跨端向量 | Unity/.NET 字节完全一致；恶意长度不会触发超额分配；CI 能发现漏生成 |
 | P3 原生与安全 | gfnet ABI/listener、KCP 安全补丁、DTLS、分配统计、原生 build/install/test | macOS/Windows 本地 UDP 安全闭环；错误 PSK/重放失败；逐分配点故障注入、native 配额与清理通过 |
 | P4 KCP 整合 | KcpTransport、worker、业务入口限流、两个 channel、WSS 授权与撤销链路 | WSS 取 grant→KCP 入场闭环；整窗 flush、慢 socket、丢包/乱序/拥塞/回绕、注销撤销通过 |
-| P5 会话与样例 | GameRuntime 可选配置、Hotfix 双连接状态、入场/离场/恢复/幂等示例、Docs/Network.md | 离线行为保留；WSS-only/KCP 两模式、故障隔离、恢复不重复结算 |
+| P5 会话与样例 | GameRuntime 可选配置、Hotfix 双连接状态、入场/离场/恢复/幂等示例、客户端使用说明 | 离线行为保留；WSS-only/KCP 两模式、故障隔离、恢复不重复结算 |
 | P6 平台与发布 | Android/iOS、HybridCLR、新 DTO、压测/浸泡/部署演练；WebGL WSS 延后 | 所有第一版发布平台门禁通过，形成实际设备与容量报告 |
 
-P1 可使用手工固定测试 DTO，不能因此绕过 P2 直接投产。P3 原生安全任务可在 P0 冻结后独立推进，但 P4 依赖 P1/P2/P3。第一版交付需包括 Native/Kcp/ABI.md、Docs/Network.md（公开使用说明）与 DotNet/README.md（服务端运行、配置和联调 profile），并同步更新 Launch/Tools 中实际变化的契约。
+P1 阶段的临时测试 DTO 不能绕过 P2 直接投产；当前双方正式协议统一由 Proto 生成。P3 原生安全任务可在 P0 冻结后独立推进，P4 依赖 P1/P2/P3。交付文档保留本文与四份规范/说明，ABI 纳入服务端开发规范，操作步骤纳入双方使用说明，并同步更新 Launch/Tools 中变化的契约。
 
-命令入口如下，从仓库根目录进入对应目录执行。协议工具已实现，默认仅生成或检查正式 C#；`--artifacts` 额外生成或检查仓库根 `Protocol/Generated/` 下的 manifest/hash/vector，供开发验证与 CI 使用。辅助文件不进入正式运行资源，协议指纹始终内嵌于 C# catalog。DotNet 的 `local-wss`、`local-kcp-dtls` 与 gfnet 构建/安装脚本均已实现（配置见 `DotNet/README.md` 与 `Native/Kcp/README.md`）。KCP profile 仍是显式凭据的底层联调入口，账号到世界的业务授权延后；实际平台验证与剩余门禁见 [实施记录](NetworkImplementation.md)，以下命令示例不表示所有平台已执行：
+命令入口如下，从仓库根目录进入对应目录执行。协议工具已实现，默认仅生成或检查正式 C#；`--artifacts` 额外生成或检查仓库根 `Protocol/Generated/` 下的 manifest/hash/vector，供开发验证与 CI 使用。辅助文件不进入正式运行资源，协议指纹始终内嵌于 C# catalog。DotNet 的 `local-wss`、`local-kcp-dtls` 与 gfnet 构建/安装脚本均已实现（配置见 [服务端使用说明](DotNetUsage.md)）。KCP profile 仍是显式凭据的底层联调入口，账号到世界的业务授权延后；实际平台验证与剩余门禁见 [服务端验证范围](DotNetUsage.md#验证与现有证据) 和 [客户端验证范围](ClientNetworkUsage.md#验证与现有证据)，以下命令示例不表示所有平台已执行：
 
 ```sh
 (cd Tools && dotnet run --project NetworkProtocol -- generate)
@@ -956,7 +958,7 @@ python3 Native/Kcp/build/build.py --help
 python3 Native/Kcp/build/install.py --help
 ```
 
-本地 WSS 使用显式信任的开发证书，不修改生产证书验证。联调服务提供测试 Login/ResumeLogin、RequestWorldGrant、Logout、入场/离场、echo RPC、顺序 Push、错误响应与延迟/断线注入。完整业务联调阶段再由同一profile接入WSS大厅与UDP listener，并从已登录WSS取得ticket/PSK；当前按用户确认只实现底层，`local-kcp-dtls`仅监听loopback，以显式短时测试凭据验证Hello/Echo/撤销，不提供取票HTTP接口，也不实施世界入场。生产未配置认证/授权provider拒绝启动；测试账号/密钥不进入正式资源。服务端本机可走 loopback，但仍应有真实 IPv6/WAN 网络阶段。
+本地 WSS 使用显式信任的开发证书，不修改生产证书验证；已实现 PostgreSQL Register/Login/ResumeLogin/Logout 和 Echo。RequestWorldGrant 当前返回 WorldUnavailable，其他世界入站路由显式拒绝。顺序 Push、异常/断线及撤销由框架集成测试验证，不能视为已部署世界业务。后续业务阶段再接入 WSS 大厅与 UDP listener，并从已登录 WSS 取得 ticket/PSK。当前 `local-kcp-dtls` 仅监听 loopback，用显式短时测试凭据验证 Hello/Echo，不提供取票 HTTP 接口或世界入场。生产 hosting 未配置时拒绝启动；测试账号/密钥不进入正式资源。后续仍需真实 IPv6/WAN 网络验收。
 
 ## 19. 测试矩阵与商业发布门禁
 
@@ -984,7 +986,7 @@ python3 Native/Kcp/build/install.py --help
 python3 Native/Kcp/tests/verify_fastack.py
 ```
 
-该入口仅覆盖已合入的 ACK 修复和原生调度条件，不代表 UDP/DTLS、Unity 工作线程或完整原生模块已实现。
+该入口仅覆盖已合入的 ACK 修复和原生调度条件，不能单独证明 UDP/DTLS、Unity 工作线程或完整原生模块的验收；其他已执行验证见双方使用说明。
 
 Unity 测试按现有 `GameFrame.Tests.EditMode`/PlayMode 边界组织；若直接使用 MemoryPack.Core，因测试 asmdef 启用 overrideReferences，必须补正确 precompiled reference。程序集/条件编译改变时运行 Player 脚本编译；不得把 .NET 工具测试当成 Unity 或 IL2CPP 验证。
 
@@ -1035,4 +1037,4 @@ Unity 测试按现有 `GameFrame.Tests.EditMode`/PlayMode 边界组织；若直�
 - [mbedTLS](https://github.com/Mbed-TLS/mbedtls)、[4.2.0 套件定义参考](https://github.com/Mbed-TLS/mbedtls/blob/mbedtls-4.2.0/include/mbedtls/ssl_ciphersuites.h)。
 - 本地参考：`/Users/zzq/unitygame/Assets/Scripts/AOT/Network`、`AOT/NetCore`、`Hotfix/Network` 及该项目网络/协议文档。
 
-设计冻结时已有 KCP #467 修复与原生回归测试，DotNet 工程当时仍为控制台入口。后续按 P0～P6 实施，实际代码与测试结果统一记录在 [实施记录](NetworkImplementation.md)；不将此前 MemoryPack 安装验证或 ACK 原生回归算作完整网络验收。
+当前维护本文与四份规范/说明，历史实施和审查过程由 Git 保留。实际代码与测试结果分别记录在双方使用说明，剩余工作列在双方开发规范；不将 MemoryPack 安装、ACK 原生回归或交叉编译算作完整网络发布验收。

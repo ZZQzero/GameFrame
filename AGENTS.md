@@ -142,6 +142,7 @@ if (config.Enabled) { Initialize(config); }
 | 任务 | Skill |
 | --- | --- |
 | 修改后检查、Unity 回归测试、启动验证 | [gameframe-validate](skills/gameframe-validate/SKILL.md) |
+| UIFrame 生成 Panel/Item 脚本、维护控件绑定与编译后回填 | [gameframe-ui-codegen](skills/gameframe-ui-codegen/SKILL.md) |
 | PrimeTween 动画、UI 缩放旋转与飘字 | [unity-primetween](skills/unity-primetween/SKILL.md) |
 | Sqlite/Backup 原生库加载诊断、构建安装 | [gameframe-native-plugin](skills/gameframe-native-plugin/SKILL.md) |
 | 新增 Luban 配置表 | [luban-add-table](skills/luban-add-table/SKILL.md) |

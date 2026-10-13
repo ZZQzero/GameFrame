@@ -1,4 +1,6 @@
 using System.Net;
+using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Threading.Channels;
@@ -126,6 +128,267 @@ namespace GameFrame.Tests
                 Interlocked.Increment(ref Closed);
                 return ValueTask.CompletedTask;
             }
+        }
+
+        private sealed class InitializingSession : ServerSession
+        {
+            internal readonly TaskCompletionSource<ServerConnectionContext> Entered =
+                new TaskCompletionSource<ServerConnectionContext>(TaskCreationOptions.RunContinuationsAsynchronously);
+            internal readonly TaskCompletionSource Release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            internal readonly Channel<ServerMessageHeader> Admissions = Channel.CreateBounded<ServerMessageHeader>(4);
+            internal int DeadlineChecks;
+            internal int Closes;
+
+            public override async ValueTask ConnectedAsync(ServerConnectionContext connection)
+            {
+                Entered.TrySetResult(connection);
+                await Release.Task.WaitAsync(connection.Cancellation);
+            }
+
+            public override ServerAdmission Admit(ServerMessageHeader header)
+            {
+                Assert.That(Thread.CurrentThread.Name, Is.EqualTo("GameFrame KCP Listener"));
+                Assert.That(Admissions.Writer.TryWrite(header), Is.True);
+                return ServerAdmission.Allow;
+            }
+
+            public override ushort? CheckDeadline(long nowMilliseconds)
+            {
+                Interlocked.Increment(ref DeadlineChecks);
+                return null;
+            }
+
+            public override ValueTask ClosedAsync(ServerConnectionContext connection, ServerCloseInfo result)
+            {
+                Interlocked.Increment(ref Closes);
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        [Test]
+        public async Task HeartbeatAndAdmissionContinueDuringSlowInitializationAndDispatchStaysOrdered()
+        {
+            var session = new InitializingSession();
+            var calls = new ConcurrentQueue<string>();
+            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), Application(
+                (_, request, _) =>
+                {
+                    calls.Enqueue(request.Text);
+                    return Task.FromResult(new EchoResponse { Text = request.Text });
+                }, session: _ => session));
+            var grant = await Grant(host, 891);
+            var memory = new FrameMemoryBudget(64 * 1024 * 1024);
+            var worker = new KcpWorker();
+            ConnectionContext client = Context(grant.Connect, memory, worker);
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(35));
+                await PumpUntil(client, client.ConnectTask);
+                ServerConnectionContext server = await session.Entered.Task.WaitAsync(timeout.Token);
+                Task<EchoResponse> first = client.Request(GameNetRoutes.Echo, new EchoRequest { Text = "first" }, TimeSpan.FromSeconds(30), default);
+                Task<EchoResponse> second = client.Request(GameNetRoutes.Echo, new EchoRequest { Text = "second" }, TimeSpan.FromSeconds(30), default);
+                ServerMessageHeader one = await session.Admissions.Reader.ReadAsync(timeout.Token);
+                ServerMessageHeader two = await session.Admissions.Reader.ReadAsync(timeout.Token);
+                Assert.That(two.CorrelationId, Is.GreaterThan(one.CorrelationId));
+                // Cross the first Ping + Pong deadline with business frames ahead of control traffic.
+                // Client application Pump stays paused while both transport owners keep running.
+                await Task.Delay(21500, timeout.Token);
+                Assert.That(server.Completion.IsCompleted, Is.False);
+                Assert.That(client.IoTask.IsCompleted, Is.False);
+                Assert.That(calls, Is.Empty);
+                Assert.That(first.IsCompleted, Is.False);
+                Assert.That(session.DeadlineChecks, Is.Zero);
+                session.Release.TrySetResult();
+                await PumpUntil(client, Task.WhenAll(first, second));
+                Assert.That(first.Result.Text, Is.EqualTo("first"));
+                Assert.That(second.Result.Text, Is.EqualTo("second"));
+                Assert.That(calls.ToArray(), Is.EqualTo(new[] { "first", "second" }));
+                await Close(client);
+                await server.Completion.WaitAsync(timeout.Token);
+                Assert.That(session.Closes, Is.EqualTo(1));
+            }
+            finally
+            {
+                session.Release.TrySetResult();
+                client.FailHost(new NetworkException("Test cleanup."));
+                await worker.ShutdownAsync();
+            }
+
+            await host.DisposeAsync();
+            Assert.That(host.OwnedBytes, Is.Zero);
+            Assert.That(memory.OwnedBytes, Is.Zero);
+        }
+
+        [TestCase("failure")]
+        [TestCase("request")]
+        [TestCase("peer")]
+        public async Task InitializationShutdownPreservesTheFailureCancellationAndOrderlyDrainContracts(string shutdown)
+        {
+            var session = new InitializingSession();
+            int calls = 0;
+            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), Application(
+                (_, _, _) =>
+                {
+                    Interlocked.Increment(ref calls);
+                    return Task.FromResult(new EchoResponse());
+                }, session: _ => session));
+            var grant = await Grant(host, 892);
+            var memory = new FrameMemoryBudget(64 * 1024 * 1024);
+            var worker = new KcpWorker();
+            ConnectionContext client = Context(grant.Connect, memory, worker);
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await PumpUntil(client, client.ConnectTask);
+                ServerConnectionContext server = await session.Entered.Task.WaitAsync(timeout.Token);
+                Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(5), default);
+                await session.Admissions.Reader.ReadAsync(timeout.Token);
+                var failure = new InvalidOperationException("Initialization failed.");
+                if (shutdown == "failure")
+                {
+                    session.Release.TrySetException(failure);
+                }
+                else if (shutdown == "request")
+                {
+                    server.RequestClose(2);
+                }
+                else
+                {
+                    await Close(client);
+                    // An orderly peer close preserves accepted reliable work, including
+                    // initialization. Only failures and explicit server shutdown cancel it.
+                    Assert.That(server.Completion.IsCompleted, Is.False);
+                    Assert.That(calls, Is.Zero);
+                    session.Release.TrySetResult();
+                }
+
+                ServerCloseInfo result = await server.Completion.WaitAsync(timeout.Token);
+                Assert.That(result.Error, shutdown == "failure" ? Is.SameAs(failure) : Is.Null);
+                Assert.That(result.Reason, Is.EqualTo(shutdown == "request" ? 2 : shutdown == "peer" ? 1 : 0));
+                Assert.That(calls, Is.EqualTo(shutdown == "peer" ? 1 : 0));
+                Assert.That(session.Closes, Is.EqualTo(1));
+                Assert.CatchAsync<NetworkException>(async () => await PumpUntil(client, request));
+                await Close(client);
+            }
+            finally
+            {
+                session.Release.TrySetResult();
+                client.FailHost(new NetworkException("Test cleanup."));
+                await worker.ShutdownAsync();
+            }
+
+            await host.DisposeAsync();
+            Assert.That(host.OwnedBytes, Is.Zero);
+            Assert.That(memory.OwnedBytes, Is.Zero);
+        }
+
+        [Test]
+        public async Task EnabledMetricsObserveNormalLoopbackWorkAndQueuesWithoutRetainingFrames()
+        {
+            var measurements = new ConcurrentQueue<(string Name, double Value)>();
+            using var listener = new MeterListener();
+            listener.InstrumentPublished = (instrument, observer) =>
+            {
+                if (instrument.Meter.Name == "GameFrame.Server.Network.Kcp")
+                {
+                    observer.EnableMeasurementEvents(instrument);
+                }
+            };
+            listener.SetMeasurementEventCallback<double>((instrument, value, _, _) => measurements.Enqueue((instrument.Name, value)));
+            listener.SetMeasurementEventCallback<long>((instrument, value, _, _) => measurements.Enqueue((instrument.Name, value)));
+            listener.Start();
+            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), Application());
+            var grant = await Grant(host, 894);
+            var memory = new FrameMemoryBudget(64 * 1024 * 1024);
+            var worker = new KcpWorker();
+            ConnectionContext client = Context(grant.Connect, memory, worker);
+            try
+            {
+                await PumpUntil(client, client.ConnectTask);
+                // A small single-connection sample validates instruments; it is not a capacity gate.
+                for (int i = 0; i < 144; i++)
+                {
+                    long start = System.Diagnostics.Stopwatch.GetTimestamp();
+                    string text = $"sample-{i}";
+                    Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest { Text = text }, TimeSpan.FromSeconds(2), default);
+                    await PumpUntil(client, request);
+                    Assert.That(request.Result.Text, Is.EqualTo(text));
+                    if (i == 15)
+                    {
+                        measurements.Clear();
+                    }
+                    else if (i >= 16)
+                    {
+                        measurements.Enqueue(("loopback.rpc.rtt", System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds));
+                    }
+                }
+
+                var sample = measurements.ToArray();
+                foreach (string name in new[] { "gameframe.kcp.owner.work", "gameframe.kcp.owner.interval",
+                    "gameframe.kcp.owner.allocated", "gameframe.kcp.send.queue", "gameframe.kcp.dispatch.queue", "loopback.rpc.rtt" })
+                {
+                    double[] values = sample.Where(item => item.Name == name).Select(item => item.Value).Order().ToArray();
+                    Assert.That(values, Is.Not.Empty, name);
+                    Assert.That(values.All(value => value >= 0 && double.IsFinite(value)), Is.True, name);
+                    TestContext.WriteLine($"Loopback sample {name}: count={values.Length}, p50={values[values.Length / 2]:F3}, p95={values[(values.Length - 1) * 95 / 100]:F3}, max={values[^1]:F3}");
+                }
+                await Close(client);
+            }
+            finally
+            {
+                client.FailHost(new NetworkException("Test cleanup."));
+                await worker.ShutdownAsync();
+            }
+
+            await host.DisposeAsync();
+            Assert.That(host.OwnedBytes, Is.Zero);
+            Assert.That(memory.OwnedBytes, Is.Zero);
+        }
+
+        [Test]
+        public async Task ServerHelloWaitsForSessionPublicationAndFactoryDoesNotBlockListener()
+        {
+            using var release = new ManualResetEventSlim(false);
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), Application(session: _ =>
+            {
+                Assert.That(Thread.CurrentThread.Name, Is.Not.EqualTo("GameFrame KCP Listener"));
+                entered.TrySetResult();
+                if (!release.Wait(TimeSpan.FromSeconds(5)))
+                {
+                    throw new TimeoutException("Factory test release timed out.");
+                }
+                return new ServerSession();
+            }));
+            var grant = await Grant(host, 893);
+            var memory = new FrameMemoryBudget(64 * 1024 * 1024);
+            var worker = new KcpWorker();
+            ConnectionContext client = Context(grant.Connect, memory, worker);
+            try
+            {
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await OnListener(host, _ =>
+                {
+                }).WaitAsync(TimeSpan.FromSeconds(1));
+                await Task.Delay(100);
+                Assert.That(client.ConnectTask.IsCompleted, Is.False);
+                release.Set();
+                await PumpUntil(client, client.ConnectTask);
+                Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest { Text = "published" }, TimeSpan.FromSeconds(2), default);
+                await PumpUntil(client, request);
+                Assert.That(request.Result.Text, Is.EqualTo("published"));
+                await Close(client);
+            }
+            finally
+            {
+                release.Set();
+                client.FailHost(new NetworkException("Test cleanup."));
+                await worker.ShutdownAsync();
+            }
+
+            await host.DisposeAsync();
+            Assert.That(host.OwnedBytes, Is.Zero);
+            Assert.That(memory.OwnedBytes, Is.Zero);
         }
 
         [Test]

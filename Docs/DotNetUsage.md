@@ -113,7 +113,7 @@ Windows 可在任意目录运行 `Unity\Config\gen.bat`。Unity 菜单 `Tools/Ga
 
 两次生成均启用 `--strict`；任一步失败即停止后续目标并保留 Luban 退出码。Generate All 的两个目标顺序写入，失败不会回滚已生成目标。输出目录只放生成内容，Luban 默认清理过时文件并保留 `.meta`；删除 Unity 表资产时还须检查对应 `.meta`。运行库固定在 `Game.Config/Luban`，不从 Unity 缓存引用。当前共享表为 GlobalConst、AIRobot，Language、GameScene 仅客户端导出。
 
-Check 比较文件集合与二进制内容，忽略 `.meta/.uid`；缺失、多余或变化的产物返回 1，参数错误返回 2，Ctrl+C 返回 130。成功、失败或取消均清理临时输出；取消时先终止并等待 Luban 子进程退出。Check 可用于提交前或 CI 校验。
+Check 比较文件集合与二进制内容，忽略 `.meta/.uid`；缺失、多余或变化的产物返回 1，参数错误返回 2，Ctrl+C 返回 130。成功、失败或取消均清理临时输出；取消时先终止并等待 Luban 子进程退出。`.github/workflows/network.yml` 在配置输入、生成器、Unity 配置工具或产物变更时执行双端 Check 与 ConfigGenerator.Tests；CI 同时安装 global.json 固定的 SDK 和 .NET 8，不通过重新生成正式产物掩盖漂移。
 
 服务端通过 `Game.Server.Configuration.TableConfigLoader.Load` 构造一个 `Game.Config.TableConfig.Tables`，使用生成器维护的表名读取文件并解析引用。两个 local profile 都在监听前完成加载，缺失或损坏文件终止启动。WSS 的业务服务可注入该 Tables 单例，或在应用组合处通过构造参数接收同一个实例；不重新加载、维护表名清单或修改其集合。
 
@@ -190,6 +190,8 @@ Echo 只在 local 注册，DelayMs=0～5000。RequestWorldGrant 当前返回 Wor
 | KCP 原生 | 单连接 4MiB、listener256MiB；来源 IP 每秒 2048 包/2MiB、记录 1024 个 |
 
 数值是上限，不预分配全部容量，不是生产人数承诺；选项真源为 WssServerOptions/KcpServerOptions/LoginOptions。应用心跳 5 秒，一个未确认 nonce；移交后 15 秒 Pong 期限，控制排队/发送另限 15 秒。停止后在 Completion 观察关闭原因与首因。
+
+WSS 的 ReceiveQueueBytes 最小为 33,824 字节：最大帧 32,768 + 初始帧头 32 + 两份帧记录 reservation（各 512）。接收正文扩容时旧、新缓冲同时占用额度，33,280 只能容纳最终帧，构造选项时即拒绝。单连接与全局额度还须容纳并行发送、控制和排队工作，最小接收额度不是完整连接容量建议。
 
 ## 5. 框架接入 API
 
@@ -297,6 +299,20 @@ grant 注册后 30 秒内完成 DTLS+GFNP Hello 单次绑定，过期不自动�
 
 实际应用可创建 KcpListenerHost 并等待 Started，读取 LocalEndpoint，再 await RegisterGrantAsync(conv, identity, psk, ticket, ttlMs)，取得 grantId；显式 RevokeGrantAsync(grantId)撤销。TTL 从调用准入起算，排队不续期。应用 await using 拥有 host，Stopped 报告 owner 终态；授权业务在网关注册确认后才能回复客户端。ABI/handle 规则见 [共享原生规范](DotNetDevelopment.md#8-共享原生-abi-2)。
 
+### KCP 性能测量
+
+meter 为 `GameFrame.Server.Network.Kcp`，使用 MeterListener 或现有 .NET 指标采集器订阅。安装了 dotnet-counters 的环境可运行 `dotnet-counters monitor --process-id <PID> --counters GameFrame.Server.Network.Kcp`；该工具是额外诊断依赖，不是服务启动依赖。
+
+| Histogram | 单位 | 采样范围 |
+| --- | --- | --- |
+| gameframe.kcp.owner.work | ms | 每轮命令、UDP、native tick、子连接推进与清理，排除 WaitOne 与 owner 指标回调 |
+| gameframe.kcp.owner.interval | ms | 相邻 owner 循环开始的间隔，包含工作、等待与线程调度 |
+| gameframe.kcp.owner.allocated | By | 每轮 owner 线程新增托管分配，排除 owner 指标回调、应用任务及 native 分配 |
+| gameframe.kcp.send.queue | ms | 业务帧入发送队列至 native 接受，排除控制帧；不代表客户端收到 |
+| gameframe.kcp.dispatch.queue | ms | 入站业务帧 native 时间戳至开始派发，包含初始化/应用排队；过期不可靠帧不采样 |
+
+指标只在订阅启用时采样，按进程聚合，不含账号或连接标签。owner 工作/分配仍包含循环内 Admit/CheckDeadline 和发送排队指标回调的成本，采集器回调应保持轻量；另测进程 CPU/RSS、.NET GC/停顿与应用/数据库阶段。当前保留 10ms 轮询策略；性能调整需结合目标连接数、业务量和弱网样本，不能用单连接 loopback 数据推断生产容量。
+
 <a id="验证与现有证据"></a>
 
 ## 9. 验证与现有证据
@@ -316,6 +332,8 @@ PG 测试角色需能创建 schema，测试创建随机 schema 并只删除自�
 
 | 日期与范围 | 证据 | 限制 |
 | --- | --- | --- |
+| 2026-10-13 服务端传输修正与测量，macOS/.NET 10.0.401 | 七工程 Release 编译 0 警告/错误，解决方案与四测试工程 locked restore 通过；Server150、Framework13、Protocol182、ConfigGenerator15 共 360/360、0 跳过，使用独立 PG18 与本机 Release native；真实 UDP/DTLS 验证 21.5 秒初始化期间心跳/准入、业务 FIFO、factory 发布、失败/主动关闭取消与正常关闭排空，完成后 owned 归零；WSS33,824 最小额度接收最大帧及双 lease 清理通过；协议 check --artifacts 与 Luban check --target all 通过；CI YAML 解析、路径/检查入口与 setup-dotnet 双版本安装语义核对通过 | 未执行远端 CI、Unity/Player/IL2CPP/真机、Windows/Linux 服务端实跑、新 native 构建/sanitizer、容量或 soak；新增指标不是完整服务端诊断 |
+| 2026-10-13 KCP 单连接低负载样本，同上环境 | 16 次 Echo 预热后 128 次串行小消息；owner 工作 P95=0.244ms、循环间隔 P95=11.262ms、owner 分配 P95=1,256By/轮、发送排队 P95=11ms、派发排队 P95=1ms；含客户端 Pump 的 RPC RTT P95=57.581ms | 开启 MeterListener 的 loopback 功能样本，非容量/生产延迟门禁；包含采集开销，不代表纯框架分配或 WAN 性能；保留现有调度与内存策略 |
 | 2026-10-13 配置生成统一入口，macOS/.NET 10.0.401、Unity 6000.3.19f1 | 七工程 Release 编译 0 警告/错误；解决方案及 ConfigGenerator.Tests locked restore 通过；工具测试 15/15、0 跳过（双管道、退出码、取消与清理）；dotnet run 三个 launch profile 成功；脚本从其他工作目录向带空格路径导出 9+5 个 C#、4+2 个 bytes，与正式产物一致；真实 Check 成功及缺失/多余/变化失败返回 1，文件内容与 mtime 不变；空产物 checkout 可生成服务端配置；Unity ExcelExporter 成功，相关 EditMode 1/1、Console 无错误，场景/设置保持原值 | 未实测 Rider/Visual Studio UI、Windows/Linux 脚本或服务端、Player/IL2CPP/真机；未重跑 PG/native、运行时 PlayMode 或远端 CI |
 | 2026-10-13 Luban 双端接入，macOS/.NET 10.0.401、Unity 6000.3.19f1 | 六工程 Release 编译 0 警告/错误；locked restore 通过；Config/WssLifecycle10/10；双端临时生成 9+5 个 C#、4+2 个 bytes 与正式产物一致；发布目录数据/许可证一致；两个 profile 在不同工作目录加载成功，缺配置先于网络依赖失败；Unity Editor 编译、ExcelExporter 菜单双端生成成功、EditMode5/5、配置 PlayMode9/9 | PlayMode 首次受到前一轮 EditMode 的 Test Runner 状态残留影响，重新加载脚本域后通过；场景、运行设置恢复；未重跑 PG/native、Windows 脚本实跑、Player/IL2CPP/真机或远端 CI |
 | 2026-10-13 协议生成入口迁移，macOS/.NET 10.0.401 | 五工程 Release 编译 0 警告/错误；Protocol182/182、0 跳过；Generate/Check launch profile 均成功处理 5 文件；锁定依赖还原通过 | 生成 C# 仅路径注释变化，manifest/hash/vector 未变；本轮未重跑 WSS/PG/native，未执行远端 CI |

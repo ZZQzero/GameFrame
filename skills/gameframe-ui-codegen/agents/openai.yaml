@@ -1,0 +1,4 @@
+interface:
+  display_name: "GameFrame UI 代码生成与回填"
+  short_description: "使用项目 UIFrame 生成 Panel 或 Item 脚本、维护控件绑定并验证编译后引用回填"
+  default_prompt: "使用 $gameframe-ui-codegen 为指定 UI Prefab 生成脚本、维护控件绑定，并验证编译后的引用回填。"

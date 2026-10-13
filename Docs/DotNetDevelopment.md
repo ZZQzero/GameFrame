@@ -47,7 +47,7 @@ SDK 由 `DotNet/global.json`、`Tools/global.json` 锁定为 10.0.401，工程�
 
 服务启动验证运行依赖，不验证玩家账号、角色或其他玩家数据。认证仅由客户端 Register/Login/ResumeLogin 触发；框架不认识账号。生产监听、容量与跨进程会话未配置时，当前入口明确拒绝生产启动。
 
-WSS session factory 在 Hello 前创建，KCP 在 Hello 绑定后创建；不在 host 配额锁或 native owner 中调用业务 factory。Hello 成功后传输收发、心跳和关闭 owner 独立运行，ConnectedAsync 是每连接应用派发任务的首个阶段。初始化成功后才解码/派发排队业务；失败结束连接。每连接一个应用派发任务，不按包 Task.Run。
+WSS session factory 在 Hello 前创建，KCP 在 ClientHello 绑定后由应用任务创建；不在 host 配额锁或 native owner 中调用业务 factory。KCP session 安全发布后才排队 ServerHello，确保回复前已有可用的 Admit 策略；factory 保持短小，不承担异步初始化。ConnectedAsync 是每连接应用派发任务的首个阶段，ServerHello 不等待它完成。native owner 在 factory/初始化期间继续接收并处理控制帧；Hello 后接收入站业务有界队列，初始化成功后才解码/派发，失败结束连接。每连接一个应用派发任务，不按包 Task.Run。
 
 | 会话 hook / 能力 | 执行约束 |
 | --- | --- |
@@ -365,6 +365,8 @@ OwnedBytes 包含可控帧实际容量与保守 reservation，不是精确托管
 
 指标区分 wire、应用帧、正文、Ping RTT、RPC 处理与排队；日志只记录 opcode、长度、correlation、代际、时间/码，不输出密码、token、ticket、PSK、完整正文。未知 DTLS 细分丢弃明确 unavailable，不用 0 伪装测量。业务标签有界，不按每账号生成无界指标。
 
+KcpListenerHost 通过 System.Diagnostics.Metrics 的 `GameFrame.Server.Network.Kcp` meter 输出 owner 工作耗时、循环间隔、当前 owner 线程托管分配与业务发送/派发排队耗时。仅启用的 instrument 才采样，没有连接或账号标签；观测回调在记录线程同步执行，需快速且不抛异常。分配指标不包含应用任务、native、内核或完整进程内存，不能代替 GC/RSS 测量。指标名、单位与实际采样范围见 [服务端使用说明](DotNetUsage.md#kcp-性能测量)。
+
 验证要求：
 
 - 编译/locked restore、独立框架 catalog 测试、协议/schema/golden vectors/check、真实 WSS、数据库、UDP/DTLS 分别验证。缺少 PG/native 变量而跳过的测试不算通过该能力验收。
@@ -376,7 +378,7 @@ OwnedBytes 包含可控帧实际容量与保守 reservation，不是精确托管
 
 ### 当前范围与待完成项（2026-10-13）
 
-已实现：五个运行时工程与离线协议/配置工具分层、Luban 双端生成和服务端加载、配置 IDE 启动项与只读产物检查、强类型框架接口、WSS/KCP 底层、Proto→MemoryPack、PostgreSQL 账号、local 启动、原生构建安装和主要生命周期回归；已修复慢 Connected 阻塞传输、未订阅 Push 漏校验、KCP 容量越界，以及账号迟到 epoch/认证收尾/关闭原因/logger 问题。
+已实现：五个运行时工程与离线协议/配置工具分层、Luban 双端生成和服务端加载、配置 IDE 启动项与 CI 只读产物检查、强类型框架接口、WSS/KCP 底层、Proto→MemoryPack、PostgreSQL 账号、local 启动、原生构建安装、KCP owner/业务队列测量和主要生命周期回归；已修复 WSS/KCP 慢 Connected 阻塞传输、WSS 最小接收额度遗漏扩容峰值、未订阅 Push 漏校验、KCP 容量越界，以及账号迟到 epoch/认证收尾/关闭原因/logger 问题。
 
 未完成：生产 hosting/跨进程账号仲裁，账号到世界 grant 注册及撤销链路、世界/角色/AOI/移动/恢复业务，完整元数据计账、RPC 分阶段/分位耗时与统一服务端诊断、精细期限调度、帧池化/零逐包分配目标、构建输入指纹拆分、生产容量与 soak。先补测量再决定池化、编码长度预计算、采样或锁/调度调整。
 

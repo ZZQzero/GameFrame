@@ -25,6 +25,19 @@ MonoBehaviour:
     AutoCollectShaders: 1
     IgnoreRuleName: NormalIgnoreRule
     Groups:
+    - GroupName: Login
+      GroupDesc:
+      AssetTags: boot
+      ActiveRuleName: EnableGroup
+      Collectors:
+      - CollectPath: Assets/Prefab/HitfixPrefab
+        CollectorGUID: 4437c5229b8f749eaba252b17847e5ee
+        CollectorType: 0
+        AddressRuleName: AddressByFileName
+        PackRuleName: PackSeparately
+        FilterRuleName: CollectAll
+        AssetTags:
+        UserData:
     - GroupName: Config
       GroupDesc: 
       AssetTags: 

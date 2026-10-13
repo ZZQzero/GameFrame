@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -14,6 +16,13 @@ namespace GameFrame.Server.Network
     // The listener owns the socket and every child native handle. Application handlers never call native.
     public sealed class KcpListenerHost : IAsyncDisposable
     {
+        private static readonly Meter Metrics = new Meter("GameFrame.Server.Network.Kcp");
+        private static readonly Histogram<double> OwnerWork = Metrics.CreateHistogram<double>("gameframe.kcp.owner.work", "ms");
+        private static readonly Histogram<double> OwnerInterval = Metrics.CreateHistogram<double>("gameframe.kcp.owner.interval", "ms");
+        private static readonly Histogram<long> OwnerAllocated = Metrics.CreateHistogram<long>("gameframe.kcp.owner.allocated", "By");
+        private static readonly Histogram<double> SendQueueAge = Metrics.CreateHistogram<double>("gameframe.kcp.send.queue", "ms");
+        private static readonly Histogram<double> DispatchQueueAge = Metrics.CreateHistogram<double>("gameframe.kcp.dispatch.queue", "ms");
+
         // Listener source policy. Ports share one source budget; a full table rejects new sources.
         internal sealed class SourceBudget
         {
@@ -69,6 +78,7 @@ namespace GameFrame.Server.Network
             internal Task? Dispatch;
             internal Task? Finalizing;
             internal ServerConnectionContext? Context;
+            internal volatile bool SessionReady;
             internal volatile bool ApplicationReady;
             internal volatile bool Retired;
             internal volatile bool StopRequested;
@@ -88,6 +98,8 @@ namespace GameFrame.Server.Network
                 }
             }
             internal bool Bound, RemoteClosed;
+            internal bool ServerHelloQueued;
+            internal uint Features;
             internal bool ServerClosing, CloseSent;
             internal volatile bool DiscardInput;
             internal volatile bool TransportEnded;
@@ -240,6 +252,7 @@ namespace GameFrame.Server.Network
             int outputLength = 0;
             var metadata = new KcpNative.UdpMetadata { Size = 64, Version = KcpNative.Version };
             long previous = 0;
+            long previousMeasurement = 0;
             try
             {
                 KcpNative.ValidateAbi();
@@ -262,6 +275,19 @@ namespace GameFrame.Server.Network
                 EndPoint source = new IPEndPoint(endpoint.AddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0);
                 while (!Volatile.Read(ref stopping))
                 {
+                    bool measureWork = OwnerWork.Enabled;
+                    bool measureInterval = OwnerInterval.Enabled;
+                    bool measureAllocation = OwnerAllocated.Enabled;
+                    long intervalStart = measureInterval ? Stopwatch.GetTimestamp() : 0;
+                    if (measureInterval && previousMeasurement != 0)
+                    {
+                        OwnerInterval.Record(Stopwatch.GetElapsedTime(previousMeasurement, intervalStart).TotalMilliseconds);
+                    }
+
+                    previousMeasurement = intervalStart;
+                    long allocatedStart = measureAllocation ? GC.GetAllocatedBytesForCurrentThread() : 0;
+                    long measurementStart = measureWork ? Stopwatch.GetTimestamp() : 0;
+
                     long now = NetworkClock.GetMilliseconds();
                     if (previous != 0 && (now < previous || now - previous >= int.MaxValue))
                     {
@@ -349,6 +375,17 @@ namespace GameFrame.Server.Network
                     PollEvents(listener);
                     FlushUdp(socket, listener, output, ref outputLength, ref metadata, now, ref outputBudget);
                     ReapRetired();
+                    // Capture both values before their observers run; observers can allocate on this thread.
+                    double workMilliseconds = measureWork ? Stopwatch.GetElapsedTime(measurementStart).TotalMilliseconds : 0;
+                    long allocatedBytes = measureAllocation ? GC.GetAllocatedBytesForCurrentThread() - allocatedStart : 0;
+                    if (measureWork)
+                    {
+                        OwnerWork.Record(workMilliseconds);
+                    }
+                    if (measureAllocation)
+                    {
+                        OwnerAllocated.Record(allocatedBytes);
+                    }
                     wake.WaitOne(10);
                 }
             }
@@ -542,7 +579,15 @@ namespace GameFrame.Server.Network
                 CompleteInput(child);
             }
 
-            for (int i = 0; i < 16 && !child.RemoteClosed && (!child.Bound || child.ApplicationReady); i++)
+            // Publish the session before acknowledging Hello, so a conforming peer cannot
+            // submit business frames before its admission policy exists.
+            if (child.SessionReady && !child.ServerHelloQueued && !child.RemoteClosed && !child.TransportEnded)
+            {
+                QueueServerHello(child);
+                child.ServerHelloQueued = true;
+            }
+
+            for (int i = 0; i < 16 && !child.RemoteClosed; i++)
             {
                 int result = KcpNative.Peek(child.Event.Connection, out int channel, out int length, out uint born);
                 KcpNative.Check(result, "child peek");
@@ -571,6 +616,11 @@ namespace GameFrame.Server.Network
                     (channel == 1 ? child.ReliableLimit : child.UnreliableLimit) : 32768, delivery,
                     FrameDirection.ClientToServer, !child.Bound);
                 ValidateHeader(decoded, delivery, child.Bound);
+                if (decoded.Kind != FrameKind.Control && !child.ServerHelloQueued)
+                {
+                    throw new NetworkProtocolException("Business frame arrived before ServerHello.");
+                }
+
                 if (length != 32 + decoded.BodyLength)
                 {
                     throw new NetworkProtocolException("Child frame length mismatch.");
@@ -710,7 +760,7 @@ namespace GameFrame.Server.Network
                 return;
             }
 
-            if (child.Bound && !child.RemoteClosed && now - child.PingAt >= 5000 && child.Nonce == 0)
+            if (child.ServerHelloQueued && !child.RemoteClosed && now - child.PingAt >= 5000 && child.Nonce == 0)
             {
                 child.PingAt = now;
                 child.Nonce = checked(child.NonceSequence + 1);
@@ -734,11 +784,11 @@ namespace GameFrame.Server.Network
                     }
                     child.Controls.Dequeue();
                 }
-                else if (child.Outgoing.Reader.TryPeek(out OwnedFrame? reliable) && TrySendQueued(child, reliable, now))
+                else if (child.ServerHelloQueued && child.Outgoing.Reader.TryPeek(out OwnedFrame? reliable) && TrySendQueued(child, reliable, now))
                 {
                     child.Outgoing.Reader.TryRead(out _);
                 }
-                else if (child.OutgoingUnreliable.Reader.TryPeek(out OwnedFrame? unreliable) && TrySendQueued(child, unreliable, now))
+                else if (child.ServerHelloQueued && child.OutgoingUnreliable.Reader.TryPeek(out OwnedFrame? unreliable) && TrySendQueued(child, unreliable, now))
                 {
                     child.OutgoingUnreliable.Reader.TryRead(out _);
                 }
@@ -801,6 +851,10 @@ namespace GameFrame.Server.Network
             }
 
             KcpNative.Check(result, "child send");
+            if (frame.Header.Kind != FrameKind.Control && SendQueueAge.Enabled)
+            {
+                SendQueueAge.Record(Math.Max(0, now - frame.AdmittedAt));
+            }
             if (frame.Header.Kind == FrameKind.Control && frame.Header.Opcode == (uint)ControlOpcode.Ping)
             {
                 child.PingAt = NetworkClock.GetMilliseconds();
@@ -854,22 +908,7 @@ namespace GameFrame.Server.Network
                 child.Bound = true;
                 child.ReliableLimit = hello.ReliableLimit;
                 child.UnreliableLimit = hello.UnreliableLimit;
-                OwnedFrame reply = child.ControlMemory.Allocate(96);
-                try
-                {
-                    byte[] session = RandomNumberGenerator.GetBytes(16);
-                    ControlCodec.WriteServerHello(reply.Bytes.AsSpan(32), catalog.Hash, session, hello.ReliableLimit,
-                        hello.UnreliableLimit, hello.Features, NetworkTransportKind.Kcp);
-                    reply.Header = new FrameHeader(FrameKind.Control, 2, 0, 64);
-                    reply.Length = 96;
-                    FrameCodec.WriteHeader(reply.Bytes, reply.Header);
-                    QueueControl(child, reply);
-                }
-                catch
-                {
-                    reply.Dispose();
-                    throw;
-                }
+                child.Features = hello.Features;
 
                 child.Context = new ServerConnectionContext(child.Event.Id, child.Event.Generation, child.Event.GrantId,
                     NetworkTransportKind.Kcp, FromPeer(child.Event.Peer), catalog, child.SendMemory, child.Lifetime.Token,
@@ -921,6 +960,26 @@ namespace GameFrame.Server.Network
             }
         }
 
+        private void QueueServerHello(Child child)
+        {
+            OwnedFrame reply = child.ControlMemory.Allocate(96);
+            try
+            {
+                byte[] session = RandomNumberGenerator.GetBytes(16);
+                ControlCodec.WriteServerHello(reply.Bytes.AsSpan(32), catalog.Hash, session, child.ReliableLimit,
+                    child.UnreliableLimit, child.Features, NetworkTransportKind.Kcp);
+                reply.Header = new FrameHeader(FrameKind.Control, (uint)ControlOpcode.ServerHello, 0, 64);
+                reply.Length = 96;
+                FrameCodec.WriteHeader(reply.Bytes, reply.Header);
+                QueueControl(child, reply);
+            }
+            catch
+            {
+                reply.Dispose();
+                throw;
+            }
+        }
+
         private void QueueNonce(Child child, ControlOpcode opcode, ulong nonce)
         {
             OwnedFrame reply = child.ControlMemory.Allocate(40);
@@ -955,6 +1014,7 @@ namespace GameFrame.Server.Network
             try
             {
                 application.Initialize(child.Context!);
+                child.SessionReady = true;
                 await child.Context!.Session.ConnectedAsync(child.Context).ConfigureAwait(false);
                 child.ApplicationReady = true;
                 int reliableCount = 0;
@@ -994,6 +1054,11 @@ namespace GameFrame.Server.Network
                         if (frame.Delivery == NetDelivery.Unreliable && NetworkClock.GetMilliseconds() - frame.AdmittedAt > 250)
                         {
                             continue;
+                        }
+
+                        if (DispatchQueueAge.Enabled)
+                        {
+                            DispatchQueueAge.Record(Math.Max(0, NetworkClock.GetMilliseconds() - frame.AdmittedAt));
                         }
 
                         OwnedFrame? reply = await application.DispatchAsync(child.Context!, frame, child.SendMemory).ConfigureAwait(false);

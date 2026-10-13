@@ -1,3 +1,6 @@
+using GameFrame.Network.Protocol;
+using GameFrame.Network.Transport;
+
 namespace GameFrame.Server.Network
 {
     public sealed class WssServerOptions
@@ -29,9 +32,11 @@ namespace GameFrame.Server.Network
 
         internal WssServerOptions Snapshot()
         {
+            // Receiving a maximum frame temporarily owns both the header lease and its replacement.
             if (MaxConnections < 1 || MaxConnectionsPerIp < 1 || MaxRestrictedConnections < 1 || MaxRestrictedConnectionsPerIp < 1 ||
                 MaxPacketsPerSecond < 1 || MaxBytesPerSecond < 1 || RestrictedPacketsPerSecond < 1 || RestrictedBytesPerSecond < 1 ||
-                RestrictedBodyBytes < 1 || RestrictedBodyBytes > 32736 || ReceiveQueueCount < 1 || ReceiveQueueBytes < 32768 + 512 ||
+                RestrictedBodyBytes < 1 || RestrictedBodyBytes > 32736 || ReceiveQueueCount < 1 ||
+                ReceiveQueueBytes < 32768 + FrameCodec.HeaderBytes + 2 * FrameMemoryBudget.FrameRecordReservation ||
                 BusinessQueueCount < 1 || BusinessQueueBytes < 32768 + 512 || ControlQueueCount < 1 || ControlQueueBytes < 96 + 512 ||
                 MaxConnectionOwnedBytes < ReceiveQueueBytes || MaxGlobalOwnedBytes < MaxConnectionOwnedBytes ||
                 HelloTimeout <= TimeSpan.Zero || HelloTimeout > TimeSpan.FromSeconds(5) || AllowedOrigins == null)

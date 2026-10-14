@@ -355,7 +355,7 @@ namespace GameFrame.Tests
         private void EnqueuePush(byte[] body)
         {
             byte[] frame = new byte[32 + body.Length];
-            FrameCodec.WriteHeader(frame, new FrameHeader(FrameKind.Push, GameNetRoutes.WorldSnapshotReliable.Opcode, 0, body.Length));
+            FrameCodec.WriteHeader(frame, new FrameHeader(FrameKind.Push, GameNetRoutes.GomokuRoomSnapshot.Opcode, 0, body.Length));
             body.CopyTo(frame, 32);
             socket.Enqueue(frame);
         }
@@ -383,9 +383,10 @@ namespace GameFrame.Tests
             if (oversizedArray)
             {
                 var writer = new ArrayBufferWriter<byte>();
-                GameNetRoutes.WorldSnapshotReliable.Codec.Encode(writer, new WorldSnapshot());
+                GameNetRoutes.GomokuRoomSnapshot.Codec.Encode(writer, new GomokuSnapshot());
                 body = writer.WrittenSpan.ToArray();
-                System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(body.AsSpan(body.Length - 4), int.MaxValue);
+                // Empty Moves count precedes the four recipient/admission uint64 fields.
+                System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(body.AsSpan(body.Length - 36), int.MaxValue);
             }
 
             EnqueuePush(body);
@@ -395,7 +396,7 @@ namespace GameFrame.Tests
             client.PumpOne();
             Assert.That(client.State, Is.EqualTo(NetworkClientState.Faulted));
             Assert.That(observed, Is.TypeOf<NetworkProtocolException>());
-            Assert.That(observedOpcode, Is.EqualTo(GameNetRoutes.WorldSnapshotReliable.Opcode));
+            Assert.That(observedOpcode, Is.EqualTo(GameNetRoutes.GomokuRoomSnapshot.Opcode));
             Assert.That(calls, Is.Zero);
         }
 
@@ -403,7 +404,7 @@ namespace GameFrame.Tests
         public async Task UnsubscribedValidPushRemainsConnected()
         {
             var writer = new ArrayBufferWriter<byte>();
-            GameNetRoutes.WorldSnapshotReliable.Codec.Encode(writer, new WorldSnapshot());
+            GameNetRoutes.GomokuRoomSnapshot.Codec.Encode(writer, new GomokuSnapshot());
             EnqueuePush(writer.WrittenSpan.ToArray());
             await WaitFor(() => client.Metrics().ReliableReceiveCount == 1);
             client.PumpOne();
@@ -473,7 +474,7 @@ namespace GameFrame.Tests
             for (int i = 0; i < 2; i++)
             {
                 var writer = new ArrayBufferWriter<byte>();
-                GameNetRoutes.WorldSnapshotReliable.Codec.Encode(writer, new WorldSnapshot());
+                GameNetRoutes.GomokuRoomSnapshot.Codec.Encode(writer, new GomokuSnapshot());
                 EnqueuePush(writer.WrittenSpan.ToArray());
             }
 

@@ -91,12 +91,13 @@ namespace Game.Server
             application.Reject(GameNetRoutes.Register);
             application.Reject(GameNetRoutes.ResumeLogin);
             application.Reject(GameNetRoutes.Logout);
-            application.Reject(GameNetRoutes.RequestWorldGrant);
-            application.Reject(GameNetRoutes.EnterWorld);
-            application.Reject(GameNetRoutes.RestoreWorld);
-            application.Reject(GameNetRoutes.LeaveWorld);
-            application.Reject(GameNetRoutes.MoveInput);
-            application.Reject(GameNetRoutes.MoveInputReliable);
+            application.Reject(GameNetRoutes.CreateGomokuRoom);
+            application.Reject(GameNetRoutes.JoinGomokuRoom);
+            application.Reject(GameNetRoutes.SetGomokuReady);
+            application.Reject(GameNetRoutes.StartGomokuGame);
+            application.Reject(GameNetRoutes.PlaceGomokuMove);
+            application.Reject(GameNetRoutes.LeaveGomokuRoom);
+            application.Reject(GameNetRoutes.QueryMyGomokuRoom);
             return application;
         }
     }

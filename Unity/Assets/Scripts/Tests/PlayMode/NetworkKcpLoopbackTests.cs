@@ -35,7 +35,17 @@ namespace GameFrame.Tests
         }
 
         [UnityTearDown]
-        public IEnumerator Shutdown() => UniTask.ToCoroutine(async () => await GameRuntime.ShutdownAsync());
+        public IEnumerator Shutdown()
+        {
+            // Unity's teardown runner can resume only compiler-generated iterators.
+            var shutdown = GameRuntime.ShutdownAsync().AsTask();
+            while (!shutdown.IsCompleted)
+            {
+                yield return null;
+            }
+
+            shutdown.GetAwaiter().GetResult();
+        }
 
         [UnityTest]
         public IEnumerator NativeUdpHelloEchoAndRelease() => UniTask.ToCoroutine(async () =>

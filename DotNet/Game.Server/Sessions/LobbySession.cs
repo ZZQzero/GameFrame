@@ -18,13 +18,21 @@ namespace Game.Server.Sessions
         private int closing;
         public override bool RequiresRestrictedTraffic => true;
         internal long Binding => Volatile.Read(ref binding)?.Id ?? 0;
+        private readonly Action<long>? bindingEnded;
 
-        internal LobbySession(ServerConnectionContext connection, AccountSessions accounts, LoginOptions options, Func<IPAddress, bool> admitLogin)
+        internal AccountSessions.Binding RequireBinding()
+        {
+            RequireIdentity();
+            return Volatile.Read(ref binding)!;
+        }
+
+        internal LobbySession(ServerConnectionContext connection, AccountSessions accounts, LoginOptions options, Func<IPAddress, bool> admitLogin, Action<long>? bindingEnded = null)
         {
             this.accounts = accounts;
             this.options = options;
             this.admitLogin = admitLogin;
             this.connection = connection;
+            this.bindingEnded = bindingEnded;
         }
 
         public override ValueTask ConnectedAsync(ServerConnectionContext context)
@@ -131,7 +139,11 @@ namespace Game.Server.Sessions
             return current.Identity;
         }
 
-        internal void RequestClose(AccountSessionEndReason reason) => connection.RequestClose(CloseCode(reason)!.Value);
+        internal void RequestClose(AccountSessionEndReason reason)
+        {
+            bindingEnded?.Invoke(Binding);
+            connection.RequestClose(CloseCode(reason)!.Value);
+        }
 
         private static ushort? CloseCode(AccountSessionEndReason? reason) => reason switch
         {
@@ -151,6 +163,7 @@ namespace Game.Server.Sessions
 
         public override ValueTask ClosedAsync(ServerConnectionContext context, ServerCloseInfo result)
         {
+            bindingEnded?.Invoke(Binding);
             accounts.Detach(Binding);
             return ValueTask.CompletedTask;
         }

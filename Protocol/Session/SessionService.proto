@@ -30,14 +30,6 @@ service SessionService {
     option (game.net.response_max_body) = 256;
   }
 
-  rpc RequestWorldGrant(RequestWorldGrantRequest) returns (WorldGrantResponse) {
-    option (game.net.opcode) = 1002;
-    option (game.net.route_kind) = ROUTE_KIND_RPC;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 128;
-    option (game.net.response_max_body) = 2048;
-  }
-
   rpc Logout(LogoutRequest) returns (game.protocol.common.OperationResponse) {
     option (game.net.opcode) = 1003;
     option (game.net.route_kind) = ROUTE_KIND_RPC;

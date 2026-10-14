@@ -8,13 +8,6 @@ enum ResultCode {
   InvalidCredentials = 1;
   SessionExpired = 2;
   SessionRevoked = 3;
-  CharacterNotOwned = 4;
-  WorldUnavailable = 5;
-  GrantExpired = 6;
-  GrantConsumed = 7;
-  ConflictingRequest = 8;
-  InvalidWorldSession = 9;
-  TooManyEntities = 10;
   InvalidInput = 11;
   AccountAlreadyExists = 12;
 }

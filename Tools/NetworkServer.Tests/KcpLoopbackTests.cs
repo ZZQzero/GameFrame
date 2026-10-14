@@ -42,21 +42,20 @@ namespace GameFrame.Tests
 
         private static ServerApplication Application(
             Func<ServerConnectionContext, EchoRequest, CancellationToken, Task<EchoResponse>>? echo = null,
-            Func<ServerConnectionContext, MoveInput, CancellationToken, Task>? move = null,
+            Func<ServerConnectionContext, EchoRequest, CancellationToken, Task>? move = null,
             Func<ServerConnectionContext, ServerSession>? session = null)
         {
-            var application = new ServerApplication(GameNetProtocol.Catalog, session);
+            var application = new ServerApplication(TransportTestProtocol.Catalog, session);
             application.Rpc(GameNetRoutes.Echo, echo ?? Echo);
-            application.Notify(GameNetRoutes.MoveInput, move ?? ((_, _, _) => Task.CompletedTask));
-            application.Notify(GameNetRoutes.MoveInputReliable, move ?? ((_, _, _) => Task.CompletedTask));
-            application.Reject(GameNetRoutes.Login);
-            application.Reject(GameNetRoutes.Register);
-            application.Reject(GameNetRoutes.ResumeLogin);
-            application.Reject(GameNetRoutes.Logout);
-            application.Reject(GameNetRoutes.RequestWorldGrant);
-            application.Reject(GameNetRoutes.EnterWorld);
-            application.Reject(GameNetRoutes.RestoreWorld);
-            application.Reject(GameNetRoutes.LeaveWorld);
+            application.Notify(TransportTestProtocol.UnreliableSend, move ?? ((_, _, _) => Task.CompletedTask));
+            application.Notify(TransportTestProtocol.ReliableSend, move ?? ((_, _, _) => Task.CompletedTask));
+            foreach (NetRoute route in GameNetProtocol.Catalog.Routes)
+            {
+                if (route.Kind != NetRouteKind.Push && route != GameNetRoutes.Echo)
+                {
+                    application.Reject(route);
+                }
+            }
             return application;
         }
 
@@ -94,7 +93,7 @@ namespace GameFrame.Tests
         private static ConnectionContext Context(NetworkConnectOptions connect, FrameMemoryBudget memory, KcpWorker worker)
         {
             var options = new NetworkClientOptions { TrustedUdpEndpoints = new[] { connect.Endpoint } };
-            var context = new ConnectionContext(1, options, GameNetProtocol.Catalog, connect, memory, default, kcpWorker: worker);
+            var context = new ConnectionContext(1, options, TransportTestProtocol.Catalog, connect, memory, default, kcpWorker: worker);
             context.Start();
             return context;
         }
@@ -421,19 +420,19 @@ namespace GameFrame.Tests
                 ServerConnectionContext two = await connected.Reader.ReadAsync(timeout.Token);
                 ServerConnectionContext firstServer = one.GrantId == firstGrant.Grant ? one : two;
                 ServerConnectionContext secondServer = one.GrantId == firstGrant.Grant ? two : one;
-                var received = new TaskCompletionSource<WorldSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
-                second.Push = (_, frame) => received.TrySetResult(GameNetRoutes.WorldSnapshotReliable.Codec.Decode(frame.Body));
-                await secondServer.PushAsync(GameNetRoutes.WorldSnapshotReliable,
-                    new WorldSnapshot { ServerTick = 91, Entities = Array.Empty<EntityState>() });
+                var received = new TaskCompletionSource<EchoRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
+                second.Push = (_, frame) => received.TrySetResult(TransportTestProtocol.ReliablePush.Codec.Decode(frame.Body));
+                await secondServer.PushAsync(TransportTestProtocol.ReliablePush,
+                    new EchoRequest { DelayMs = 91 });
                 await PumpUntil(second, received.Task);
-                Assert.That(received.Task.Result.ServerTick, Is.EqualTo(91));
-                Assert.Throws<ArgumentException>(() => secondServer.TryPushUnreliable(GameNetRoutes.WorldSnapshotReliable, new WorldSnapshot()));
+                Assert.That(received.Task.Result.DelayMs, Is.EqualTo(91));
+                Assert.Throws<ArgumentException>(() => secondServer.TryPushUnreliable(TransportTestProtocol.ReliablePush, new EchoRequest()));
                 await firstServer.CloseAsync().WaitAsync(timeout.Token);
                 await firstServer.CloseAsync().WaitAsync(timeout.Token);
                 Task<EchoResponse> rpc = second.Request(GameNetRoutes.Echo, new EchoRequest { Text = "isolated" }, TimeSpan.FromSeconds(2), default);
                 await PumpUntil(second, rpc);
                 Assert.That(rpc.Result.Text, Is.EqualTo("isolated"));
-                Assert.Throws<OperationCanceledException>(() => firstServer.PushAsync(GameNetRoutes.WorldSnapshotReliable, new WorldSnapshot()));
+                Assert.Throws<OperationCanceledException>(() => firstServer.PushAsync(TransportTestProtocol.ReliablePush, new EchoRequest()));
                 await Close(first);
                 await Close(second);
                 await secondServer.Completion.WaitAsync(timeout.Token);
@@ -472,7 +471,7 @@ namespace GameFrame.Tests
                         await release.Task.WaitAsync(token);
                         if (pushAfterClose)
                         {
-                            await connection.PushAsync(GameNetRoutes.WorldSnapshotReliable, new WorldSnapshot());
+                            await connection.PushAsync(TransportTestProtocol.ReliablePush, new EchoRequest());
                         }
                         else
                         {
@@ -712,7 +711,7 @@ namespace GameFrame.Tests
             var memory = new FrameMemoryBudget(64 * 1024 * 1024);
             var worker = new KcpWorker();
             var options = new NetworkClientOptions { BusinessBytesPerSecond = 1, BusinessBurstBytes = 8192 };
-            var context = new ConnectionContext(1, options, GameNetProtocol.Catalog, grant.Connect, memory, default, kcpWorker: worker);
+            var context = new ConnectionContext(1, options, TransportTestProtocol.Catalog, grant.Connect, memory, default, kcpWorker: worker);
             var requests = new List<Task<EchoResponse>>();
             context.Start();
             try
@@ -763,7 +762,7 @@ namespace GameFrame.Tests
             var memory = new FrameMemoryBudget(64 * 1024 * 1024);
             var worker = new KcpWorker();
             var options = new NetworkClientOptions { UnreliableBytesPerSecond = 1, UnreliableBurstBytes = 1150 };
-            var context = new ConnectionContext(1, options, GameNetProtocol.Catalog, grant.Connect, memory, default, kcpWorker: worker);
+            var context = new ConnectionContext(1, options, TransportTestProtocol.Catalog, grant.Connect, memory, default, kcpWorker: worker);
             context.Start();
             try
             {
@@ -772,11 +771,11 @@ namespace GameFrame.Tests
                     System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(context)!;
                 // Consume the real transport bucket while the Context sender is idle. This creates
                 // a delayed handoff without mutating owner state or replacing the native library.
-                using (OwnedFrame probe = memory.Allocate(32 + GameNetRoutes.MoveInput.MaxBodyBytes))
+                using (OwnedFrame probe = memory.Allocate(32 + TransportTestProtocol.UnreliableSend.MaxBodyBytes))
                 {
                     var writer = new BoundedFrameWriter(probe);
-                    GameNetRoutes.MoveInput.Codec.Encode(writer, new MoveInput());
-                    writer.Complete(FrameKind.Notify, GameNetRoutes.MoveInput.Opcode, 0);
+                    TransportTestProtocol.UnreliableSend.Codec.Encode(writer, new EchoRequest());
+                    writer.Complete(FrameKind.Notify, TransportTestProtocol.UnreliableSend.Opcode, 0);
                     probe.Delivery = NetDelivery.Unreliable;
                     bool blocked = false;
                     for (int i = 0; i < 64; i++)
@@ -789,7 +788,7 @@ namespace GameFrame.Tests
                     }
                     Assert.That(blocked, Is.True);
                 }
-                Assert.That(context.TrySendUnreliable(GameNetRoutes.MoveInput, new MoveInput()), Is.True);
+                Assert.That(context.TrySendUnreliable(TransportTestProtocol.UnreliableSend, new EchoRequest()), Is.True);
                 Task<EchoResponse> reliable = context.Request(GameNetRoutes.Echo, new EchoRequest { Text = "priority" },
                     TimeSpan.FromSeconds(2), default);
                 await PumpUntil(context, reliable);
@@ -1024,10 +1023,10 @@ namespace GameFrame.Tests
         [Test]
         public async Task UnreliableNotifyAndPushUseTheSameDtlsSession()
         {
-            Task Handler(ServerConnectionContext connection, MoveInput move, CancellationToken token)
+            Task Handler(ServerConnectionContext connection, EchoRequest move, CancellationToken token)
             {
-                Assert.That(connection.TryPushUnreliable(GameNetRoutes.WorldSnapshot,
-                    new WorldSnapshot { ServerTick = move.ClientTick, Entities = Array.Empty<EntityState>() }), Is.True);
+                Assert.That(connection.TryPushUnreliable(TransportTestProtocol.UnreliablePush,
+                    new EchoRequest { DelayMs = move.DelayMs }), Is.True);
                 return Task.CompletedTask;
             }
 
@@ -1036,14 +1035,14 @@ namespace GameFrame.Tests
             var memory = new FrameMemoryBudget(64 * 1024 * 1024);
             var worker = new KcpWorker();
             ConnectionContext context = Context(grant.Connect, memory, worker);
-            var received = new TaskCompletionSource<WorldSnapshot>();
-            context.Push = (opcode, frame) => received.TrySetResult(GameNetRoutes.WorldSnapshot.Codec.Decode(frame.Body));
+            var received = new TaskCompletionSource<EchoRequest>();
+            context.Push = (opcode, frame) => received.TrySetResult(TransportTestProtocol.UnreliablePush.Codec.Decode(frame.Body));
             try
             {
                 await PumpUntil(context, context.ConnectTask);
-                Assert.That(context.TrySendUnreliable(GameNetRoutes.MoveInput, new MoveInput { ClientTick = 77 }), Is.True);
+                Assert.That(context.TrySendUnreliable(TransportTestProtocol.UnreliableSend, new EchoRequest { DelayMs = 77 }), Is.True);
                 await PumpUntil(context, received.Task);
-                Assert.That(received.Task.Result.ServerTick, Is.EqualTo(77));
+                Assert.That(received.Task.Result.DelayMs, Is.EqualTo(77));
                 await Close(context);
                 Assert.That(memory.OwnedBytes, Is.Zero);
             }

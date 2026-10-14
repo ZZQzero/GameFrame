@@ -15,6 +15,12 @@ namespace GameFrame.Tests
     [TestFixture]
     public sealed class AccountLifecycleTests
     {
+        [Test]
+        public void LocalKcpApplicationExplicitlyHandlesEveryInboundProductionRoute()
+        {
+            Assert.DoesNotThrow(() => LocalKcpService.CreateApplication().Freeze());
+        }
+
         private static TaskCompletionSource<ulong> PendingEpoch() => new(TaskCreationOptions.RunContinuationsAsynchronously);
         private static Task<AuthenticationResult> Login(AccountSessions sessions, ulong epoch,
             Action<AccountSessionEndReason>? close = null, ulong account = 1) =>

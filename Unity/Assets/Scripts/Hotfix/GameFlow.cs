@@ -13,16 +13,19 @@ namespace Game.Hotfix
     public sealed class GameFlow
     {
         readonly GameLoginSession loginSession;
+        readonly GomokuRoomSession gomoku;
         AsyncLazy enteringMain;
+        AsyncLazy enteringGomoku;
         Task stopping;
         bool started;
 
         // 退出回调顺序不固定，框架可能先于业务流程关闭。
         bool CanNavigate => started && GameRuntime.IsInited && GameUI.IsInited;
 
-        public GameFlow(GameLoginSession loginSession)
+        public GameFlow(GameLoginSession loginSession, GomokuRoomSession gomoku)
         {
             this.loginSession = loginSession ?? throw new ArgumentNullException(nameof(loginSession));
+            this.gomoku = gomoku ?? throw new ArgumentNullException(nameof(gomoku));
         }
 
         public UniTask StartAsync()
@@ -120,7 +123,7 @@ namespace Game.Hotfix
                 return;
             }
 
-            await GameUI.Push<MainPanel>();
+            await GameUI.Push<MainPanel, MainPanelArgs>(new MainPanelArgs(OpenGomokuAsync));
             if (!CanNavigate || !ReferenceEquals(loginSession.CurrentUser, user))
             {
                 if (GameUI.IsInited)
@@ -132,6 +135,49 @@ namespace Game.Hotfix
             }
 
             GameUI.Close<LoginPanel>();
+        }
+
+        async UniTask OpenGomokuAsync()
+        {
+            if (enteringGomoku != null)
+            {
+                await enteringGomoku.Task;
+                return;
+            }
+
+            if (!CanNavigate)
+            {
+                return;
+            }
+
+            var pending = UniTask.Lazy(OpenGomokuCoreAsync);
+            enteringGomoku = pending;
+            try
+            {
+                await pending.Task;
+            }
+            finally
+            {
+                if (ReferenceEquals(enteringGomoku, pending))
+                {
+                    enteringGomoku = null;
+                }
+            }
+        }
+
+        async UniTask OpenGomokuCoreAsync()
+        {
+            if (!CanNavigate || !loginSession.IsAuthenticated)
+            {
+                return;
+            }
+
+            GameUser user = loginSession.CurrentUser;
+            await GameUI.Push<GomokuLobbyPanel, GomokuRoomSession>(gomoku);
+            if ((!CanNavigate || !ReferenceEquals(user, loginSession.CurrentUser)) && GameUI.IsInited)
+            {
+                GameUI.Close<GomokuLobbyPanel>();
+            }
         }
 
         void OnAuthenticationLost()
@@ -181,6 +227,29 @@ namespace Game.Hotfix
                 {
                     await enteringMain.Task;
                 }
+            }
+            catch (Exception error)
+            {
+                if (failure == null)
+                {
+                    failure = error;
+                }
+                else
+                {
+                    Debug.LogException(error);
+                }
+            }
+
+            try
+            {
+                if (enteringGomoku != null)
+                {
+                    await enteringGomoku.Task;
+                }
+            }
+            catch (OperationCanceledException) when (!started)
+            {
+                // CloseGroup cancels the UI load started by this flow.
             }
             catch (Exception error)
             {

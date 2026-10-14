@@ -41,8 +41,17 @@ namespace Game.Hotfix
         }
     }
 
+    public interface IGomokuGameView
+    {
+        int Size { get; }
+        GomokuStone CurrentTurn { get; }
+        GomokuGameState State { get; }
+        IReadOnlyList<GomokuMove> Moves { get; }
+        GomokuStone GetStone(int column, int row);
+    }
+
     /// <summary>自由五子棋：黑方先行，无禁手，连续五子及以上获胜。不依赖 Unity。</summary>
-    public sealed class GomokuGame
+    public sealed class GomokuGame : IGomokuGameView
     {
         readonly GomokuStone[,] board;
         readonly List<GomokuMove> moves = new List<GomokuMove>();

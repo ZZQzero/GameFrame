@@ -20,8 +20,8 @@ namespace Game.Server.Login
             handlers = new LoginHandlers(service);
         }
 
-        internal ServerSession CreateSession(ServerConnectionContext connection) =>
-            new LobbySession(connection, accounts, options, service.AdmitConnection);
+        internal ServerSession CreateSession(ServerConnectionContext connection, Action<long>? bindingEnded = null) =>
+            new LobbySession(connection, accounts, options, service.AdmitConnection, bindingEnded);
 
         internal void Register(ServerApplication application)
         {

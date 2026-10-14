@@ -12,6 +12,7 @@ using GameFrame.Network.Connection;
 using GameFrame.Server.Network;
 using Game.Server;
 using Game.Server.Login;
+using Game.Server.Gomoku;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -34,6 +35,7 @@ namespace GameFrame.Tests
         private LoginOptions settings = null!;
         private AccountSessions accounts = null!;
         private AuthenticationService service = null!;
+        private GomokuRooms rooms = null!;
         private TestAccountRepository repository = null!;
         private X509Certificate2 certificate = null!;
         private Uri endpoint = null!;
@@ -82,7 +84,8 @@ namespace GameFrame.Tests
             accounts = new AccountSessions(settings);
             service = new AuthenticationService(storage, accounts, settings);
             await service.RegisterAsync("local-test", "local-secret", timeout.Token);
-            server = new WssServer(new LobbyApplication(new LoginModule(accounts, service, settings)).Application, new WssServerOptions { HelloTimeout = TimeSpan.FromMilliseconds(500) });
+            rooms = new GomokuRooms();
+            server = new WssServer(new LobbyApplication(new LoginModule(accounts, service, settings), rooms).Application, new WssServerOptions { HelloTimeout = TimeSpan.FromMilliseconds(500) });
             WebApplicationBuilder builder = WebApplication.CreateBuilder();
             builder.Logging.ClearProviders();
             builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0, listen => listen.UseHttps(certificate)));
@@ -111,6 +114,7 @@ namespace GameFrame.Tests
             await server.DisposeAsync();
             await app.StopAsync();
             await app.DisposeAsync();
+            await rooms.DisposeAsync();
             certificate.Dispose();
             accounts.Dispose();
             service.Dispose();
@@ -274,8 +278,6 @@ namespace GameFrame.Tests
             Assert.That(login.AccountRemainingTtlMs, Is.InRange(1, 86400000));
             EchoResponse echo = await Rpc(socket, GameNetRoutes.Echo, new EchoRequest { Text = "你好 WSS" });
             Assert.That(echo.Text, Is.EqualTo("你好 WSS"));
-            WorldGrantResponse grant = await Rpc(socket, GameNetRoutes.RequestWorldGrant, new RequestWorldGrantRequest());
-            Assert.That(grant.ResultCode, Is.EqualTo(ResultCode.WorldUnavailable));
             OperationResponse logout = await Rpc(socket, GameNetRoutes.Logout, new LogoutRequest());
             Assert.That(logout.ResultCode, Is.EqualTo(ResultCode.Success));
             using OwnedFrame close = (await Receive(socket))!;
@@ -488,6 +490,103 @@ namespace GameFrame.Tests
                 new LoginRequest { Account = "local-test", Password = "local-secret" }, TimeSpan.FromSeconds(1), default);
             await PumpUntil(client, login);
             Assert.That(login.Result.ResultCode, Is.EqualTo(ResultCode.Success));
+        }
+
+        [Test]
+        public async Task CanceledRoomResponseCanBeResolvedWithoutResendingCreate()
+        {
+            ConnectionContext client = await StartClient();
+            await LoginClient(client);
+            using var cancellation = new CancellationTokenSource();
+            var create = client.Request(GameNetRoutes.CreateGomokuRoom, new GomokuCommand { CommandId = 1 },
+                TimeSpan.FromSeconds(5), cancellation.Token);
+            // IO has received/reserved the reply, so server submission is already certain.
+            await WaitFor(() => client.Metrics().DeadlineCount == 0 && client.Metrics().PendingCount == 1);
+            cancellation.Cancel();
+            Assert.CatchAsync<OperationCanceledException>(async () => await PumpUntil(client, create));
+            var query = client.Request(GameNetRoutes.QueryMyGomokuRoom, new GomokuQuery { CommandId = 1 },
+                TimeSpan.FromSeconds(5), default);
+            await PumpUntil(client, query);
+            Assert.That(query.Result.CommandKnown, Is.True);
+            Assert.That(query.Result.Result, Is.EqualTo(GomokuResult.Ok));
+            Assert.That(query.Result.Snapshot, Is.Not.Null);
+            Assert.That(rooms.RoomCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public async Task TwoWssPlayersCreateJoinAndFinishOneAuthoritativeGame()
+        {
+            ConnectionContext a = await StartClient();
+            ConnectionContext b = await StartClient();
+            async Task Authenticate(ConnectionContext client, string account)
+            {
+                var task = client.Request(GameNetRoutes.Login, new LoginRequest
+                {
+                    Account = account, Password = "gomoku-password"
+                }, TimeSpan.FromSeconds(5), default);
+                await PumpUntil(client, task);
+                Assert.That(task.Result.ResultCode, Is.EqualTo(ResultCode.Success));
+            }
+
+            await Authenticate(a, "gomoku-a");
+            await Authenticate(b, "gomoku-b");
+            GomokuSnapshot? pushedA = null;
+            GomokuSnapshot? pushedB = null;
+            a.Push = (_, frame) => pushedA = GameNetRoutes.GomokuRoomSnapshot.Codec.Decode(frame.Body);
+            b.Push = (_, frame) => pushedB = GameNetRoutes.GomokuRoomSnapshot.Codec.Decode(frame.Body);
+            ulong idA = 0;
+            ulong idB = 0;
+            async Task<GomokuSnapshot> QueryRoom(ConnectionContext client)
+            {
+                var task = client.Request(GameNetRoutes.QueryMyGomokuRoom, new GomokuQuery(), TimeSpan.FromSeconds(5), default);
+                await PumpUntil(client, task);
+                return task.Result.Snapshot!;
+            }
+
+            async Task<GomokuResponse> SendRoom(ConnectionContext client, NetRpc<GomokuCommand, GomokuResponse> route,
+                ulong id, GomokuSnapshot? baseline = null, string code = "", bool ready = false, int column = 0, int row = 0)
+            {
+                var task = client.Request(route, new GomokuCommand
+                {
+                    CommandId = id, RoomId = baseline?.RoomId ?? "", ExpectedVersion = baseline?.Version ?? 0,
+                    RoomCode = code, Ready = ready, Column = column, Row = row
+                }, TimeSpan.FromSeconds(5), default);
+                await PumpUntil(client, task);
+                Assert.That(task.Result.Result, Is.EqualTo(GomokuResult.Ok));
+                return task.Result;
+            }
+
+            GomokuSnapshot created = (await SendRoom(a, GameNetRoutes.CreateGomokuRoom, ++idA)).Snapshot!;
+            await SendRoom(b, GameNetRoutes.JoinGomokuRoom, ++idB, code: created.RoomCode);
+            await SendRoom(a, GameNetRoutes.SetGomokuReady, ++idA, await QueryRoom(a), ready: true);
+            await SendRoom(b, GameNetRoutes.SetGomokuReady, ++idB, await QueryRoom(b), ready: true);
+            await SendRoom(a, GameNetRoutes.StartGomokuGame, ++idA, await QueryRoom(a));
+            for (int i = 0; i < 5; i++)
+            {
+                await SendRoom(a, GameNetRoutes.PlaceGomokuMove, ++idA, await QueryRoom(a), column: i, row: 0);
+                if (i < 4)
+                {
+                    await SendRoom(b, GameNetRoutes.PlaceGomokuMove, ++idB, await QueryRoom(b), column: i, row: 2);
+                }
+            }
+
+            var stateA = await QueryRoom(a);
+            var stateB = await QueryRoom(b);
+            Assert.That(stateA.RoomId, Is.EqualTo(stateB.RoomId));
+            Assert.That(stateA.Version, Is.EqualTo(stateB.Version));
+            Assert.That(stateB.Outcome, Is.EqualTo(GomokuOutcome.BlackVictory));
+            Assert.That(stateB.Moves.Length, Is.EqualTo(9));
+            while (pushedA?.Version != stateA.Version || pushedB?.Version != stateB.Version)
+            {
+                a.PumpOne();
+                b.PumpOne();
+                await Task.Delay(5, timeout.Token);
+            }
+
+            Assert.That(pushedA!.Outcome, Is.EqualTo(pushedB!.Outcome));
+            await SendRoom(a, GameNetRoutes.LeaveGomokuRoom, ++idA, stateA);
+            await SendRoom(b, GameNetRoutes.LeaveGomokuRoom, ++idB, stateB);
+            Assert.That(rooms.RoomCount, Is.Zero);
         }
 
         [Test]

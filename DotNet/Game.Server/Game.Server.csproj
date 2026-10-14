@@ -10,5 +10,6 @@
     </ItemGroup>
     <ItemGroup>
         <None Update="Database/*.sql" CopyToOutputDirectory="PreserveNewest" />
+        <Compile Include="../../Unity/Assets/Scripts/Hotfix/Gomoku/GomokuGame.cs" Link="Gomoku/GomokuGame.cs" />
     </ItemGroup>
 </Project>

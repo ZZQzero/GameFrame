@@ -82,7 +82,7 @@ Input / Audio 在 Launch 的 Inspector 绑定配置后才启用。GameEntry 在 
 启动完成后在 Launch 场景打开 `LoginPanel`，用户输入账号和密码后才连接 WSS；不存在的账号由服务端创建并登录。
 成功后通过 `GameScene.LoadAsync("Main", LoadSceneMode.Single)` 进入 `Assets/Scenes/MainScene/Main.unity`，
 重新将持久 UI 相机绑定到 Main 的主相机，打开 `MainPanel` 成功后关闭登录面板。
-主界面位于 `Assets/Prefab/HitfixPrefab/MainPanel.prefab`，通过窗口栈打开 `GomokuMainPanel` 或 `WoodenFishMainPanel`；两个游戏的“退出”关闭当前面板并恢复主界面，保留缓存中的棋局和功德计数。
+主界面位于 `Assets/Prefab/HitfixPrefab/MainPanel.prefab`，通过注入的导航回调打开 `GomokuLobbyPanel` 或通过窗口栈打开 `WoodenFishMainPanel`；五子棋入口再选择本地棋盘或创建 / 加入联机房间。本地游戏“退出”关闭当前面板并恢复上一个窗口，保留缓存中的棋局和功德计数；联机退出先等待服务器确认。
 Launch 和其子节点 GameEntry 跨切场保留，账号会话与框架不重新初始化；内置 Launch 场景由 Single 加载卸载。
 连接失效后在当前 Main 场景打开登录面板，重新登录复用已加载的 Main，不重新加载 Launch。
 场景加载失败保留已认证会话与登录面板，玩家再次点击确定只重新执行进入主场景，不重复登录或自动重试。
@@ -188,3 +188,6 @@ Editor 重新播放使用默认 Domain Reload 重置静态状态。
 
 
 网络是 `GameRuntimeConfig.NetworkOptions` 控制的可选模块，框架默认 null；项目 Launch 显式启用，GameEntry 创建账号客户端，点击登录才连服。启用时驱动挂在既有持久根上；Hotfix 先停止业务并 await 客户端 Dispose，框架 Shutdown 再等待网络宿主关闭，最后释放 Timer/root 与资源包。网络业务初始化不增加 Launch 反射入口。API 与当前平台范围见 [客户端网络使用说明](ClientNetworkUsage.md)。
+
+
+五子棋联机复用登录 WSS：GameEntry 创建 GomokuRoomSession 并注入 GameFlow，MainPanel 通过 MainPanelArgs 回调打开入口。停止时 GameFlow 关闭 Scene 组、等待主场景 / 五子棋入口打开，随后 GameEntry 等待房间任务与订阅释放，再释放账号。缓存面板不持有独立连接，普通关面板不等于已退出服务端房间。

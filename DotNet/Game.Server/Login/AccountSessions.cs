@@ -9,6 +9,9 @@ namespace Game.Server.Login
         // The connection owns this lease even after the session indexes remove its binding.
         internal sealed class Binding
         {
+            // Room commits take their collection gate, then this gate. Revocation takes
+            // only this gate; room code must never acquire the AccountSessions gate.
+            internal object CommitGate { get; } = new object();
             private int closeReason;
             internal long Id => Identity.BindingId;
             internal AccountIdentity Identity { get; }
@@ -28,7 +31,13 @@ namespace Game.Server.Login
                 this.deadline = deadline;
             }
 
-            internal void Revoke(AccountSessionEndReason reason) => Interlocked.CompareExchange(ref closeReason, (int)reason, 0);
+            internal void Revoke(AccountSessionEndReason reason)
+            {
+                lock (CommitGate)
+                {
+                    Interlocked.CompareExchange(ref closeReason, (int)reason, 0);
+                }
+            }
         }
 
         private sealed class Session

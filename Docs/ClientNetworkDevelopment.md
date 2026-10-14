@@ -177,3 +177,12 @@ Unity MemoryPack 固定 1.21.4、Core 为.NET Standard2.1，Generator 保留 Ros
 当前剩余工作：完整托管元数据预约、全部发送/Push/Pump 与失败路径耗时、分位采样与统一诊断、池化/性能测量、精细期限调度和全部平台/容量验收。World/GameNetworkSession 与 WebGL WSS 继续延后。既有平台证据见 [客户端使用说明](ClientNetworkUsage.md#验证与现有证据)，以日期/版本/实际执行范围为准。
 
 2026-10-14 实施优先级：按 [NetworkDesign 第 18.1 节](NetworkDesign.md#181-当前优先路线底层框架完善)先完善现有网络底层、诊断和验证。当前五子棋保持既有业务接入，双连接世界会话、世界恢复、移动同步、插值/预测与 AOI 在实际多人玩法需要时扩展；不为将来玩法预先增加 Runtime 业务状态、通用调度器或管理层。
+
+
+### 五子棋客户端接入（2026-10-14）
+
+GameEntry 持有 GomokuRoomSession，借用同一个 GameLoginSession.LobbyClient；GameFlow 为 MainPanelArgs 注入入口回调。入口 / 等待共用 GomokuLobbyPanel，棋盘用 GomokuOnlinePanel；面板只拥有 OpenScope 订阅 / 取消，不关闭 WSS。
+
+每个 Push opcode 唯一订阅，RPC / Push 更新同一模型；基线前只保留匹配 admissionCommandId 的一份快照。关闭成员保留最近关闭版本，迟到旧 RPC 不复活成员。取消 / 超时后停冲突操作，玩家显式 Query，不自动重发。重复版本与基线重放不重复播放音效。停止先取消 UI / 等待导航与房间任务，再释放房间订阅，最后释放账号。
+
+当前五子棋房间实现通过业务会话借用账号 WSS，公开只读房间和棋局视图；面板每次操作固定 OpenScope token 与会话。实时世界恢复表是候选设计，世界授权 / 入场 / 移动 / AOI 消息未保留在生产生成产物中。当前 14 条路由全部可靠，不可靠生产正文上限为 0；KCP 双通道能力由独立测试协议验证。

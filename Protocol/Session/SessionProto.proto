@@ -18,7 +18,7 @@ message LoginRequest {
 message LoginResponse {
   game.protocol.common.ResultCode result_code = 1;
   uint64 account_id = 2;
-  // Exactly 16 bytes on success; separate from transport and world session IDs.
+  // Exactly 16 bytes on success; separate from transport session IDs.
   bytes account_session_id = 3 [(game.net.max_count) = 16];
   // Server-owned account generation. Resume preserves it; a new Login replaces it.
   uint64 auth_epoch = 4;
@@ -34,30 +34,6 @@ message LoginResponse {
 message ResumeLoginRequest {
   bytes account_session_id = 1 [(game.net.max_count) = 16];
   bytes resume_token = 2 [(game.net.max_count) = 32];
-}
-
-// The authenticated WSS binding supplies account identity and permissions.
-message RequestWorldGrantRequest {
-  // Retained per explicit request attempt for server idempotency; not correlationId.
-  uint64 grant_request_id = 1;
-  uint64 character_id = 2;
-  uint64 world_id = 3;
-  bytes protocol_hash = 4 [(game.net.max_count) = 32];
-}
-
-message WorldGrantResponse {
-  game.protocol.common.ResultCode result_code = 1;
-  uint64 grant_id = 2;
-  string host = 3 [(game.net.max_utf16) = 256, (game.net.max_utf8) = 1024];
-  uint32 port = 4 [(game.net.scalar) = "uint16"];
-  bytes ticket = 5 [(game.net.max_count) = 512];
-  uint32 conv = 6;
-  bytes psk_identity = 7 [(game.net.max_count) = 16];
-  bytes psk = 8 [(game.net.max_count) = 32];
-  int64 expires_at_utc_ms = 9;
-  uint32 remaining_ttl_ms = 10;
-  uint32 reliable_limit = 11;
-  uint32 unreliable_limit = 12;
 }
 
 message LogoutRequest {

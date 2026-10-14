@@ -42,7 +42,10 @@ namespace GameFrame.Tests
             GameScene.Init(resources.Package);
             await GameScene.LoadAsync("Main", LoadSceneMode.Single);
             GameUI.ConfigureURPCameraStack(Camera.main);
-            main = await GameUI.Push<MainPanel>();
+            main = await GameUI.Push<MainPanel, MainPanelArgs>(new MainPanelArgs(async () =>
+            {
+                await GameUI.Push<GomokuMainPanel>();
+            }));
             await UniTask.NextFrame();
             Assert.AreEqual("Main", SceneManager.GetActiveScene().name);
             CollectionAssert.AreEqual(new[] { GameUI.UICamera },
@@ -140,7 +143,10 @@ namespace GameFrame.Tests
             Assert.IsFalse(GameUI.IsOpen<GomokuMainPanel>());
             Assert.IsFalse(GameUI.IsOpen<WoodenFishMainPanel>());
             Assert.IsFalse(main.gameObject.activeInHierarchy);
-            Assert.AreSame(main, await GameUI.Push<MainPanel>());
+            Assert.AreSame(main, await GameUI.Push<MainPanel, MainPanelArgs>(new MainPanelArgs(async () =>
+            {
+                await GameUI.Push<GomokuMainPanel>();
+            })));
             Assert.IsTrue(main.gameObject.activeInHierarchy);
             Assert.IsTrue(MainButton("GomokuButton").interactable);
             Assert.IsTrue(MainButton("WoodenFishButton").interactable);

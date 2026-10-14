@@ -1,0 +1,61 @@
+syntax = "proto3";
+package game.protocol.gomoku;
+option csharp_namespace = "Game.Hotfix.Network.Protocol";
+import "Common/net_options.proto";
+
+enum GomokuRoomState { Waiting = 0; Playing = 1; Finished = 2; Closed = 3; }
+enum GomokuOutcome { NoOutcome = 0; BlackVictory = 1; WhiteVictory = 2; Draw = 3; Aborted = 4; }
+enum GomokuEndReason { NoReason = 0; FiveInRow = 1; BoardFull = 2; PlayerLeft = 3; Disconnected = 4; Expired = 5; ServiceStopped = 6; }
+enum GomokuResult {
+  Ok = 0; RoomNotFound = 1; RoomFull = 2; AlreadyInRoom = 3; InvalidState = 4;
+  NotHost = 5; NotReady = 6; StaleVersion = 7; InvalidMove = 8; InvalidCommand = 9;
+  Overloaded = 10; RateLimited = 11; UnknownCommand = 12;
+}
+
+// Command IDs strictly increase for one authenticated binding. Old IDs are never
+// executed after cache eviction. Only Query is used to resolve uncertain outcomes.
+message GomokuCommand {
+  uint64 command_id = 1;
+  string room_id = 2 [(game.net.max_utf16) = 32, (game.net.max_utf8) = 32];
+  uint64 expected_version = 3;
+  string room_code = 4 [(game.net.max_utf16) = 8, (game.net.max_utf8) = 8];
+  bool ready = 5;
+  int32 column = 6;
+  int32 row = 7;
+}
+message GomokuQuery {
+  uint64 command_id = 1;
+}
+message GomokuMember {
+  uint64 account_id = 1;
+  uint64 member_id = 2;
+  bool ready = 3;
+  bool is_host = 4;
+}
+message GomokuMoveData {
+  int32 column = 1;
+  int32 row = 2;
+  int32 stone = 3;
+}
+message GomokuSnapshot {
+  string room_id = 1 [(game.net.max_utf16) = 32, (game.net.max_utf8) = 32];
+  string room_code = 2 [(game.net.max_utf16) = 8, (game.net.max_utf8) = 8];
+  uint64 version = 3;
+  GomokuRoomState state = 4;
+  GomokuOutcome outcome = 5;
+  GomokuEndReason end_reason = 6;
+  repeated GomokuMember members = 7 [(game.net.max_count) = 2];
+  repeated GomokuMoveData moves = 8 [(game.net.max_count) = 225];
+  // Recipient membership, not transport correlation. Used before admission response.
+  uint64 recipient_account_id = 9;
+  uint64 recipient_auth_epoch = 10;
+  uint64 recipient_member_id = 11;
+  uint64 admission_command_id = 12;
+}
+message GomokuResponse {
+  GomokuResult result = 1;
+  uint64 command_id = 2;
+  bool command_known = 3;
+  // Null explicitly means this binding currently belongs to no room.
+  GomokuSnapshot snapshot = 4 [(game.net.nullable) = true];
+}

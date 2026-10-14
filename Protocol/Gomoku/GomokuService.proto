@@ -1,0 +1,70 @@
+syntax = "proto3";
+package game.protocol.gomoku;
+option csharp_namespace = "Game.Hotfix.Network.Protocol";
+import "Common/net_options.proto";
+import "Gomoku/GomokuProto.proto";
+import "google/protobuf/empty.proto";
+
+service GomokuService {
+  rpc CreateGomokuRoom(GomokuCommand) returns (GomokuResponse) {
+    option (game.net.opcode) = 3000;
+    option (game.net.route_kind) = ROUTE_KIND_RPC;
+    option (game.net.delivery) = DELIVERY_RELIABLE;
+    option (game.net.max_body) = 128;
+    option (game.net.response_max_body) = 4096;
+  }
+  rpc JoinGomokuRoom(GomokuCommand) returns (GomokuResponse) {
+    option (game.net.opcode) = 3001;
+    option (game.net.route_kind) = ROUTE_KIND_RPC;
+    option (game.net.delivery) = DELIVERY_RELIABLE;
+    option (game.net.max_body) = 128;
+    option (game.net.response_max_body) = 4096;
+  }
+  rpc QueryMyGomokuRoom(GomokuQuery) returns (GomokuResponse) {
+    option (game.net.opcode) = 3002;
+    option (game.net.route_kind) = ROUTE_KIND_RPC;
+    option (game.net.delivery) = DELIVERY_RELIABLE;
+    option (game.net.max_body) = 128;
+    option (game.net.response_max_body) = 4096;
+  }
+  rpc SetGomokuReady(GomokuCommand) returns (GomokuResponse) {
+    option (game.net.opcode) = 3003;
+    option (game.net.route_kind) = ROUTE_KIND_RPC;
+    option (game.net.delivery) = DELIVERY_RELIABLE;
+    option (game.net.max_body) = 128;
+    option (game.net.response_max_body) = 4096;
+  }
+  rpc StartGomokuGame(GomokuCommand) returns (GomokuResponse) {
+    option (game.net.opcode) = 3004;
+    option (game.net.route_kind) = ROUTE_KIND_RPC;
+    option (game.net.delivery) = DELIVERY_RELIABLE;
+    option (game.net.max_body) = 128;
+    option (game.net.response_max_body) = 4096;
+  }
+  rpc PlaceGomokuMove(GomokuCommand) returns (GomokuResponse) {
+    option (game.net.opcode) = 3005;
+    option (game.net.route_kind) = ROUTE_KIND_RPC;
+    option (game.net.delivery) = DELIVERY_RELIABLE;
+    option (game.net.max_body) = 128;
+    option (game.net.response_max_body) = 4096;
+  }
+  rpc LeaveGomokuRoom(GomokuCommand) returns (GomokuResponse) {
+    option (game.net.opcode) = 3006;
+    option (game.net.route_kind) = ROUTE_KIND_RPC;
+    option (game.net.delivery) = DELIVERY_RELIABLE;
+    option (game.net.max_body) = 128;
+    option (game.net.response_max_body) = 4096;
+  }
+  rpc GomokuRoomSnapshot(GomokuSnapshot) returns (google.protobuf.Empty) {
+    option (game.net.opcode) = 3010;
+    option (game.net.route_kind) = ROUTE_KIND_SERVER_PUSH;
+    option (game.net.delivery) = DELIVERY_RELIABLE;
+    option (game.net.max_body) = 4096;
+  }
+  rpc GomokuRoomClosed(GomokuSnapshot) returns (google.protobuf.Empty) {
+    option (game.net.opcode) = 3011;
+    option (game.net.route_kind) = ROUTE_KIND_SERVER_PUSH;
+    option (game.net.delivery) = DELIVERY_RELIABLE;
+    option (game.net.max_body) = 4096;
+  }
+}

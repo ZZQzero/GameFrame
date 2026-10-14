@@ -21,10 +21,10 @@ namespace GameFrame.Tests
         {
             int validations = 0;
             int decodes = 0;
-            var codec = new NetMessageCodec<WorldSnapshot>((_, _) => { }, bytes =>
+            var codec = new NetMessageCodec<GomokuSnapshot>((_, _) => { }, bytes =>
             {
                 decodes++;
-                return new WorldSnapshot();
+                return new GomokuSnapshot();
             }, _ => { }, bytes =>
             {
                 validations++;
@@ -33,7 +33,7 @@ namespace GameFrame.Tests
                     throw new NetworkProtocolException("Invalid test Push.");
                 }
             });
-            NetRoute route = new NetPush<WorldSnapshot>(2000, NetDelivery.Reliable, 1, codec);
+            NetRoute route = new NetPush<GomokuSnapshot>(2000, NetDelivery.Reliable, 1, codec);
             byte[] body = { 0 };
             route.ValidatePushBody(body);
             Assert.AreEqual(1, validations);
@@ -61,9 +61,9 @@ namespace GameFrame.Tests
         public void RouteFirstInitializationDoesNotCreateNullCatalogEntries()
         {
             Assert.AreEqual(1000u, GameNetRoutes.Login.Opcode);
-            Assert.AreEqual(15, GameNetProtocol.Catalog.RouteCount);
-            Assert.AreEqual(8192, GameNetProtocol.Catalog.MaxReliableBodyBytes);
-            Assert.AreEqual(1118, GameNetProtocol.Catalog.MaxUnreliableBodyBytes);
+            Assert.AreEqual(14, GameNetProtocol.Catalog.RouteCount);
+            Assert.AreEqual(4096, GameNetProtocol.Catalog.MaxReliableBodyBytes);
+            Assert.AreEqual(0, GameNetProtocol.Catalog.MaxUnreliableBodyBytes);
             GameNetProtocol.Catalog.RequireRegistered(GameNetRoutes.Login);
         }
 
@@ -76,10 +76,10 @@ namespace GameFrame.Tests
             LoginRequest decoded = GameNetRoutes.Login.RequestCodec.Decode(writer.WrittenSpan);
             Assert.AreEqual(login.Account, decoded.Account);
             Assert.AreEqual(login.Password, decoded.Password);
-            var world = new WorldResponse { Entities = new[] { new EntityState { EntityId = 42, Incarnation = 1, PositionXMm = 1250 } } };
+            var snapshot = new GomokuSnapshot { Members = new[] { new GomokuMember { AccountId = 42, MemberId = 1250 } } };
             writer.Clear();
-            GameNetRoutes.EnterWorld.ResponseCodec.Encode(writer, world);
-            Assert.AreEqual(1250, GameNetRoutes.EnterWorld.ResponseCodec.Decode(writer.WrittenSpan).Entities[0].PositionXMm);
+            GameNetRoutes.GomokuRoomSnapshot.Codec.Encode(writer, snapshot);
+            Assert.AreEqual(1250, GameNetRoutes.GomokuRoomSnapshot.Codec.Decode(writer.WrittenSpan).Members[0].MemberId);
         }
 
         [Test]
@@ -95,9 +95,10 @@ namespace GameFrame.Tests
         [Test]
         public void HugeArrayDeclarationIsRejectedBeforeDeserialization()
         {
-            byte[] bytes = MemoryPackSerializer.Serialize(new WorldResponse(), MemoryPackSerializerOptions.Utf8);
-            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(bytes.Length - 4), int.MaxValue);
-            Assert.Throws<NetworkProtocolException>(() => GameNetRoutes.EnterWorld.ResponseCodec.Decode(bytes));
+            byte[] bytes = MemoryPackSerializer.Serialize(new GomokuSnapshot(), MemoryPackSerializerOptions.Utf8);
+            // Empty Moves count precedes the four recipient/admission uint64 fields.
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(bytes.Length - 36), int.MaxValue);
+            Assert.Throws<NetworkProtocolException>(() => GameNetRoutes.GomokuRoomSnapshot.Codec.Decode(bytes));
         }
 
         [Test]
@@ -115,8 +116,8 @@ namespace GameFrame.Tests
         public void NullRootNullElementsAndTrailingBytesAreRejected()
         {
             Assert.Throws<NetworkProtocolException>(() => GameNetRoutes.Login.RequestCodec.Decode(new byte[] { 255 }));
-            byte[] world = MemoryPackSerializer.Serialize(new WorldResponse { Entities = new EntityState[] { null } }, MemoryPackSerializerOptions.Utf8);
-            Assert.Throws<NetworkProtocolException>(() => GameNetRoutes.EnterWorld.ResponseCodec.Decode(world));
+            byte[] snapshot = MemoryPackSerializer.Serialize(new GomokuSnapshot { Members = new GomokuMember[] { null } }, MemoryPackSerializerOptions.Utf8);
+            Assert.Throws<NetworkProtocolException>(() => GameNetRoutes.GomokuRoomSnapshot.Codec.Decode(snapshot));
             byte[] bytes = MemoryPackSerializer.Serialize(new LoginRequest(), MemoryPackSerializerOptions.Utf8);
             Array.Resize(ref bytes, bytes.Length + 1);
             Assert.Throws<NetworkProtocolException>(() => GameNetRoutes.Login.RequestCodec.Decode(bytes));
@@ -169,17 +170,14 @@ namespace GameFrame.Tests
         }
 
         [Test]
-        public void WorldModesUseDistinctRoutesWithSharedCodecs()
+        public void RoomPushesUseDistinctRoutesWithSharedCodecs()
         {
-            Assert.AreEqual(NetDelivery.Unreliable, GameNetRoutes.WorldSnapshot.Delivery);
-            Assert.AreEqual(NetDelivery.Reliable, GameNetRoutes.WorldSnapshotReliable.Delivery);
-            Assert.AreNotEqual(GameNetRoutes.WorldSnapshot.Opcode, GameNetRoutes.WorldSnapshotReliable.Opcode);
-            Assert.AreSame(GameNetRoutes.WorldSnapshot.Codec, GameNetRoutes.WorldSnapshotReliable.Codec);
-            Assert.AreEqual(NetDelivery.Unreliable, GameNetRoutes.MoveInput.Delivery);
-            Assert.AreEqual(NetDelivery.Reliable, GameNetRoutes.MoveInputReliable.Delivery);
-            Assert.AreSame(GameNetRoutes.MoveInput.Codec, GameNetRoutes.MoveInputReliable.Codec);
-            GameNetProtocol.Catalog.RequireRegistered(GameNetRoutes.WorldSnapshotReliable);
-            GameNetProtocol.Catalog.RequireRegistered(GameNetRoutes.MoveInputReliable);
+            Assert.AreEqual(NetDelivery.Reliable, GameNetRoutes.GomokuRoomSnapshot.Delivery);
+            Assert.AreEqual(NetDelivery.Reliable, GameNetRoutes.GomokuRoomClosed.Delivery);
+            Assert.AreNotEqual(GameNetRoutes.GomokuRoomSnapshot.Opcode, GameNetRoutes.GomokuRoomClosed.Opcode);
+            Assert.AreSame(GameNetRoutes.GomokuRoomSnapshot.Codec, GameNetRoutes.GomokuRoomClosed.Codec);
+            Assert.AreEqual(0, GameNetProtocol.Catalog.MaxUnreliableBodyBytes);
+            GameNetProtocol.Catalog.RequireRegistered(GameNetRoutes.GomokuRoomClosed);
         }
 
         private static IEnumerable<TestCaseData> GoldenVectors()

@@ -19,6 +19,7 @@ namespace Game.Hotfix
         [SerializeField] string loginEndpoint = "wss://localhost:7443/network";
         GameLoginSession loginSession;
         GameFlow flow;
+        GomokuRoomSession gomoku;
         Task stopping;
 
         public bool IsReady { get; private set; }
@@ -62,7 +63,8 @@ namespace Game.Hotfix
             LanguageManager.AddTable(languages);
             GameUIRegistration.RegisterAll();
             loginSession = new GameLoginSession(GameRuntime.Network, new Uri(loginEndpoint));
-            flow = new GameFlow(loginSession);
+            gomoku = new GomokuRoomSession(loginSession);
+            flow = new GameFlow(loginSession, gomoku);
             IsReady = true;
             Debug.Log("[GameEntry] Hotfix 初始化完成。");
         }
@@ -113,6 +115,29 @@ namespace Game.Hotfix
             finally
             {
                 flow = null;
+            }
+
+            try
+            {
+                if (gomoku != null)
+                {
+                    await gomoku.DisposeAsync();
+                }
+            }
+            catch (Exception error)
+            {
+                if (failure == null)
+                {
+                    failure = error;
+                }
+                else
+                {
+                    Debug.LogException(error);
+                }
+            }
+            finally
+            {
+                gomoku = null;
             }
 
             try

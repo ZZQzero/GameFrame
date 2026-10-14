@@ -1,7 +1,7 @@
 using Game.Hotfix.Network.Generated;
 using Game.Server.Diagnostics;
 using Game.Server.Login;
-using Game.Server.World;
+using Game.Server.Gomoku;
 using GameFrame.Server.Network;
 
 namespace Game.Server
@@ -10,12 +10,13 @@ namespace Game.Server
     {
         internal ServerApplication Application { get; }
 
-        internal LobbyApplication(LoginModule login)
+        internal LobbyApplication(LoginModule login, GomokuRooms? rooms = null)
         {
-            Application = new ServerApplication(GameNetProtocol.Catalog, login.CreateSession);
+            Application = new ServerApplication(GameNetProtocol.Catalog, connection =>
+                login.CreateSession(connection, rooms == null ? null : rooms.Detach));
             login.Register(Application);
             EchoModule.Register(Application);
-            WorldModule.Register(Application);
+            GomokuModule.Register(Application, rooms);
         }
     }
 }

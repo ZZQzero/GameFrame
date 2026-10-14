@@ -5,6 +5,11 @@ using System.Reflection;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using Game.Hotfix;
+using Game.AOT;
+using GameFrame.Audio;
+using GameFrame.Scene;
+using UnityEngine.SceneManagement;
+using YooAsset;
 using Game.Hotfix.Network.Generated;
 using Game.Hotfix.Network.Protocol;
 using GameFrame.Network;
@@ -21,6 +26,7 @@ namespace GameFrame.Tests
     {
         private readonly List<GameLoginSession> sessions = new List<GameLoginSession>();
         private LoginPanel panel;
+        private readonly List<GomokuRoomSession> gomokuRooms = new List<GomokuRoomSession>();
 #if UNITY_EDITOR
         private object tlsSettings;
         private PropertyInfo trustAnchors;
@@ -53,6 +59,12 @@ namespace GameFrame.Tests
                 EnableUI = false,
                 NetworkOptions = new NetworkRuntimeOptions()
             });
+            if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GF_LOGIN_TEST_ENDPOINT")))
+            {
+                // One shared local server enforces 5 authentications/s per IP.
+                // Fixtures isolate their admission windows instead of retrying rejected login.
+                await UniTask.Delay(1100, ignoreTimeScale: true);
+            }
         });
 
         [UnityTearDown]
@@ -64,6 +76,12 @@ namespace GameFrame.Tests
                 UnityEngine.Object.Destroy(panel.gameObject);
             }
 
+            foreach (GomokuRoomSession room in gomokuRooms)
+            {
+                await room.DisposeAsync();
+            }
+
+            gomokuRooms.Clear();
             foreach (GameLoginSession session in sessions)
             {
                 await session.DisposeAsync();
@@ -95,6 +113,220 @@ namespace GameFrame.Tests
         }
 
         private static string Account() => "unity_" + Guid.NewGuid().ToString("N");
+
+        [UnityTest]
+        public IEnumerator CanceledGomokuAdmissionRequiresExplicitQueryBeforeMoreCommands() => UniTask.ToCoroutine(async () =>
+        {
+            GameLoginSession login = CreateSession();
+            Assert.AreEqual(ResultCode.Success, await login.LoginAsync(Account(), "test-password"));
+            var room = new GomokuRoomSession(login);
+            gomokuRooms.Add(room);
+            using var cancellation = new CancellationTokenSource();
+            UniTask<GomokuResult> create = room.CreateAsync(cancellation.Token);
+            cancellation.Cancel();
+            bool canceled = false;
+            try
+            {
+                await create;
+            }
+            catch (OperationCanceledException)
+            {
+                canceled = true;
+            }
+
+            Assert.IsTrue(canceled);
+            Assert.IsTrue(room.NeedsQuery);
+            Assert.IsFalse(room.IsBusy);
+            await room.QueryAsync();
+            Assert.IsFalse(room.NeedsQuery);
+            if (room.Snapshot != null)
+            {
+                Assert.AreEqual(GomokuResult.Ok, await room.LeaveAsync());
+            }
+        });
+
+        [UnityTest]
+        public IEnumerator GomokuLobbyButtonsOpenAuthoritativeBoardAndLeaveBeforeReturning() => UniTask.ToCoroutine(async () =>
+        {
+#if UNITY_EDITOR
+            GameLoginSession a = CreateSession();
+            GameLoginSession b = CreateSession();
+            Assert.AreEqual(ResultCode.Success, await a.LoginAsync(Account(), "test-password"));
+            Assert.AreEqual(ResultCode.Success, await b.LoginAsync(Account(), "test-password"));
+            var roomA = new GomokuRoomSession(a);
+            var roomB = new GomokuRoomSession(b);
+            gomokuRooms.Add(roomA);
+            gomokuRooms.Add(roomB);
+            var config = ScriptableObject.CreateInstance<GlobalConfig>();
+            config.PlayMode = EPlayMode.EditorSimulateMode;
+            var resources = new ResourceLoadManager();
+            var previousScene = SceneManager.GetActiveScene();
+            GameFlow flow = null;
+            try
+            {
+                await resources.InitializeAsync(config);
+                await resources.UpdatePackageManifestAsync();
+                GameUI.Init(resources.Package);
+                GameUIRegistration.RegisterAll();
+                var audio = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioRuntimeConfig>("Assets/Config/Audio/GameAudioConfig.asset");
+                await GameAudio.InitAsync(resources.Package, audio);
+                GameScene.Init(resources.Package);
+                flow = new GameFlow(a, roomA);
+                await flow.StartAsync();
+                GameUI.Get<LoginPanel>().transform.Find("Card/ConfirmLoginButton").GetComponent<Button>().onClick.Invoke();
+                await UniTask.WaitUntil(() => GameUI.IsOpen<MainPanel>()).Timeout(TimeSpan.FromSeconds(10));
+                GameUI.Get<MainPanel>().transform.Find("Content/Card/GomokuButton").GetComponent<Button>().onClick.Invoke();
+                await UniTask.WaitUntil(() => GameUI.IsOpen<GomokuLobbyPanel>()).Timeout(TimeSpan.FromSeconds(5));
+                var lobby = GameUI.Get<GomokuLobbyPanel>();
+                lobby.transform.Find("Card/CreateButton").GetComponent<Button>().onClick.Invoke();
+                await UniTask.WaitUntil(() => roomA.Snapshot != null && !roomA.IsBusy).Timeout(TimeSpan.FromSeconds(5));
+                Assert.AreEqual(GomokuRoomState.Waiting, roomA.Snapshot.State);
+                Assert.IsTrue(lobby.transform.Find("Card/StatusText").GetComponent<TextMeshProUGUI>().text.Contains(roomA.Snapshot.RoomCode));
+                Assert.AreEqual(GomokuResult.Ok, await roomB.JoinAsync(roomA.Snapshot.RoomCode));
+                await UniTask.WaitUntil(() => roomA.Snapshot.Members.Count == 2).Timeout(TimeSpan.FromSeconds(5));
+                lobby.transform.Find("Card/ReadyButton").GetComponent<Button>().onClick.Invoke();
+                await UniTask.WaitUntil(() => !roomA.IsBusy).Timeout(TimeSpan.FromSeconds(5));
+                await roomB.QueryAsync();
+                Assert.AreEqual(GomokuResult.Ok, await roomB.ReadyAsync(true));
+                Button start = lobby.transform.Find("Card/StartButton").GetComponent<Button>();
+                await UniTask.WaitUntil(() => start.interactable).Timeout(TimeSpan.FromSeconds(5));
+                start.onClick.Invoke();
+                await UniTask.WaitUntil(() => GameUI.IsOpen<GomokuOnlinePanel>()).Timeout(TimeSpan.FromSeconds(5));
+                Assert.IsFalse(lobby.gameObject.activeInHierarchy);
+                Assert.AreEqual(GomokuRoomState.Playing, roomA.Snapshot.State);
+                var online = GameUI.Get<GomokuOnlinePanel>();
+                Assert.IsTrue(online.GetComponentInChildren<GomokuBoardView>().Interactable);
+                Assert.AreEqual(GomokuResult.Ok, await roomA.MoveAsync(7, 7));
+                Assert.IsFalse(online.GetComponentInChildren<GomokuBoardView>().Interactable);
+                await roomB.QueryAsync();
+                Assert.AreEqual(GomokuResult.Ok, await roomB.MoveAsync(7, 8));
+                await UniTask.WaitUntil(() => roomA.Game.Moves.Count == 2).Timeout(TimeSpan.FromSeconds(5));
+                Assert.IsTrue(online.GetComponentInChildren<GomokuBoardView>().Interactable);
+                online.transform.Find("GomokuBg/Content/ExitButton").GetComponent<Button>().onClick.Invoke();
+                await UniTask.WaitUntil(() => !GameUI.IsOpen<GomokuOnlinePanel>()).Timeout(TimeSpan.FromSeconds(5));
+                Assert.IsNull(roomA.Snapshot);
+                Assert.IsTrue(lobby.gameObject.activeInHierarchy);
+                await roomB.QueryAsync();
+                Assert.AreEqual(GomokuOutcome.WhiteVictory, roomB.Snapshot.Outcome);
+                Assert.AreEqual(GomokuResult.Ok, await roomB.LeaveAsync());
+                lobby.transform.Find("Card/LocalButton").GetComponent<Button>().onClick.Invoke();
+                await UniTask.WaitUntil(() => GameUI.IsOpen<GomokuMainPanel>()).Timeout(TimeSpan.FromSeconds(5));
+                GameUI.Get<GomokuMainPanel>().ApplyMove(0, 0, GomokuStone.Black);
+                Assert.AreEqual(1, GameUI.Get<GomokuMainPanel>().Game.Moves.Count);
+            }
+            finally
+            {
+                if (flow != null)
+                {
+                    await flow.StopAsync();
+                }
+
+                GameUI.Shutdown();
+                if (GameScene.IsInited)
+                {
+                    if (GameScene.IsLoaded("Main"))
+                    {
+                        SceneManager.SetActiveScene(previousScene.IsValid() && previousScene.isLoaded
+                            ? previousScene : SceneManager.CreateScene("GomokuFlowTests"));
+                        await GameScene.UnloadAsync("Main");
+                    }
+
+                    await GameScene.ShutdownAsync();
+                }
+
+                if (GameAudio.IsInited)
+                {
+                    await GameAudio.ShutdownAsync();
+                }
+
+                await resources.ShutdownAsync();
+                UnityEngine.Object.Destroy(config);
+            }
+#else
+            Assert.Ignore("Gomoku UI test requires Editor simulated assets.");
+            await UniTask.CompletedTask;
+#endif
+        });
+
+        [UnityTest]
+        public IEnumerator TwoGomokuSessionsPlayAuthoritativeGameAndReleaseRoom() => UniTask.ToCoroutine(async () =>
+        {
+            GameLoginSession a = CreateSession();
+            GameLoginSession b = CreateSession();
+            Assert.AreEqual(ResultCode.Success, await a.LoginAsync(Account(), "test-password"));
+            Assert.AreEqual(ResultCode.Success, await b.LoginAsync(Account(), "test-password"));
+            var roomA = new GomokuRoomSession(a);
+            var roomB = new GomokuRoomSession(b);
+            gomokuRooms.Add(roomA);
+            gomokuRooms.Add(roomB);
+            Assert.AreEqual(GomokuResult.Ok, await roomA.CreateAsync());
+            Assert.AreEqual(GomokuResult.Ok, await roomB.JoinAsync(roomA.Snapshot.RoomCode));
+            await roomA.QueryAsync();
+            Assert.AreEqual(GomokuResult.Ok, await roomA.ReadyAsync(true));
+            await roomB.QueryAsync();
+            Assert.AreEqual(GomokuResult.Ok, await roomB.ReadyAsync(true));
+            await roomA.QueryAsync();
+            Assert.AreEqual(GomokuResult.Ok, await roomA.StartAsync());
+            for (int column = 0; column < 5; column++)
+            {
+                await roomA.QueryAsync();
+                Assert.AreEqual(GomokuResult.Ok, await roomA.MoveAsync(column, 0));
+                if (column < 4)
+                {
+                    await roomB.QueryAsync();
+                    Assert.AreEqual(GomokuResult.Ok, await roomB.MoveAsync(column, 2));
+                }
+            }
+
+            await UniTask.WaitUntil(() => roomB.Snapshot.Outcome == GomokuOutcome.BlackVictory).Timeout(TimeSpan.FromSeconds(5));
+            Assert.AreEqual(roomA.Snapshot.Version, roomB.Snapshot.Version);
+            Assert.AreEqual(9, roomA.Game.Moves.Count);
+            Assert.AreEqual(9, roomB.Game.Moves.Count);
+            Assert.AreEqual(GomokuGameState.BlackWon, roomB.Game.State);
+            Assert.AreEqual(GomokuResult.InvalidState, await roomB.MoveAsync(10, 10));
+            Assert.AreEqual(GomokuResult.Ok, await roomA.LeaveAsync());
+            Assert.IsNull(roomA.Snapshot);
+            await roomB.QueryAsync();
+            Assert.AreEqual(GomokuOutcome.BlackVictory, roomB.Snapshot.Outcome);
+            Assert.AreEqual(GomokuResult.Ok, await roomB.LeaveAsync());
+            Assert.IsNull(roomB.Snapshot);
+        });
+
+        [UnityTest]
+        public IEnumerator GomokuClosedPushCannotBeUndoneByOldRpcAndTopLoginEndsMembership() => UniTask.ToCoroutine(async () =>
+        {
+            GameLoginSession a = CreateSession();
+            string account = Account();
+            Assert.AreEqual(ResultCode.Success, await a.LoginAsync(account, "test-password"));
+            var room = new GomokuRoomSession(a);
+            gomokuRooms.Add(room);
+            Assert.AreEqual(GomokuResult.Ok, await room.CreateAsync());
+            GomokuRoomView view = room.Snapshot;
+            var baseline = new GomokuSnapshot
+            {
+                RoomId = view.RoomId, RoomCode = view.RoomCode, Version = view.Version,
+                RecipientAccountId = view.RecipientAccountId, RecipientAuthEpoch = view.RecipientAuthEpoch,
+                RecipientMemberId = view.RecipientMemberId, AdmissionCommandId = view.AdmissionCommandId
+            };
+            var close = new GomokuSnapshot
+            {
+                RoomId = baseline.RoomId, RoomCode = baseline.RoomCode, Version = baseline.Version + 1,
+                State = GomokuRoomState.Closed, RecipientAccountId = baseline.RecipientAccountId,
+                RecipientAuthEpoch = baseline.RecipientAuthEpoch, RecipientMemberId = baseline.RecipientMemberId,
+                AdmissionCommandId = baseline.AdmissionCommandId
+            };
+            MethodInfo apply = typeof(GomokuRoomSession).GetMethod("Apply", BindingFlags.Instance | BindingFlags.NonPublic);
+            apply.Invoke(room, new object[] { close, a.CurrentUser, false });
+            Assert.IsNull(room.Snapshot);
+            apply.Invoke(room, new object[] { baseline, a.CurrentUser, false });
+            Assert.IsNull(room.Snapshot, "A closed membership must not be resurrected by an older response.");
+            await room.QueryAsync();
+            Assert.IsNull(room.Snapshot, "The previous membership remains closed locally until explicit server cleanup.");
+            GameLoginSession replacement = CreateSession();
+            Assert.AreEqual(ResultCode.Success, await replacement.LoginAsync(account, "test-password"));
+            await UniTask.WaitUntil(() => !a.IsAuthenticated).Timeout(TimeSpan.FromSeconds(5));
+            Assert.IsNull(room.Snapshot);
+        });
 
         [UnityTest]
         public IEnumerator FirstLoginRetainsUserAndConnectionUntilExplicitLogout() => UniTask.ToCoroutine(async () =>

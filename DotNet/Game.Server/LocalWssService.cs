@@ -2,6 +2,7 @@ using System.Security.Cryptography.X509Certificates;
 using Game.Config.TableConfig;
 using Game.Server.Database;
 using Game.Server.Login;
+using Game.Server.Gomoku;
 using GameFrame.Server.Network;
 
 namespace Game.Server
@@ -24,10 +25,12 @@ namespace Game.Server
             await repository.ValidateAsync(CancellationToken.None);
             using var accounts = new AccountSessions(options);
             using var service = new AuthenticationService(repository, accounts, options);
-            var application = new LobbyApplication(new LoginModule(accounts, service, options));
+            await using var rooms = new GomokuRooms();
+            var application = new LobbyApplication(new LoginModule(accounts, service, options), rooms);
             await using WebApplication app = CreateHost(application.Application, networkOptions, certificate, port, tables);
             WssServer network = app.Services.GetRequiredService<WssServer>();
             ConfigurePipeline(app, network);
+            using CancellationTokenRegistration stopping = app.Lifetime.ApplicationStopping.Register(rooms.StopAdmission);
             await app.RunAsync();
         }
 

@@ -2,7 +2,7 @@
 
 服务端是 `DotNet/Game.Server`，.NET SDK 10.0.401/net10.0；业务、数据库与框架分层见 [全局开发规范](DotNetDevelopment.md)。本文从仓库根目录执行命令。客户端实际调用见 [客户端使用说明](ClientNetworkUsage.md)。
 
-当前提供两个显式 local profile：local-wss 用于 PostgreSQL 注册/登录/恢复/注销/Echo；local-kcp-dtls 只验证受控授权的 Hello/Echo。两者只监听本机。当前生产 hosting、跨进程账号会话和游戏世界业务尚未接入，不能把本地示例直接当作生产服务。
+当前提供两个显式 local profile：local-wss 用于 PostgreSQL 注册/登录/恢复/注销/Echo 和两人五子棋；local-kcp-dtls 只验证受控授权的 Hello/Echo。两者只监听本机。当前生产 hosting、跨进程账号会话和游戏世界业务尚未接入，不能把本地示例直接当作生产服务。
 
 ## 1. 准备与启动 PostgreSQL
 
@@ -178,7 +178,7 @@ Logout → 撤销会话/token → 成功响应 → Close1
 
 不同账号独立，新 Login 仅顶掉同账号旧会话，旧绑定 Close2；Resume 保留账号会话 ID/epoch/到期时间并一次性轮换 token。到期 Close4、撤销 Close7。重启保留数据库账号/哈希/epoch，内存 Resume 失效；需显式重新登录。当前没有删号、改密/找回、第三方登录或封禁业务。
 
-Echo 只在 local 注册，DelayMs=0～5000。RequestWorldGrant 当前返回 WorldUnavailable，其余世界路由显式拒绝；没有真实世界、角色或网关授权闭环。注册提交后响应丢失、RPC 超时或取消都可能结果未确认，不自动重放。
+Echo 只在 local 注册，DelayMs=0～5000。世界授权、入场、恢复、移动与 AOI 消息未使用，已从生产协议及应用占位注册中删除；未来随实际玩法定义。注册提交后响应丢失、RPC 超时或取消都可能结果未确认，不自动重放。
 
 ### 本地容量
 
@@ -213,12 +213,11 @@ application.Rpc(GameNetRoutes.Echo, async (connection, request, cancellation) =>
 ServerSession 派生类保存每连接应用状态，通过构造 ServerApplication 的 factory 创建。钩子线程、初始化阶段、权限复查、关闭重入约束见 [开发规范连接章节](DotNetDevelopment.md#3-启动连接与关闭)。context 提供 Id/Generation/GrantId/Transport/RemoteEndpoint/Cancellation/Completion，不向业务交付 native handle 或 OwnedFrame。
 
 ```csharp
-await context.PushAsync(GameNetRoutes.WorldSnapshotReliable, snapshot);
-bool admitted = context.TryPushUnreliable(GameNetRoutes.WorldSnapshot, snapshot);
+await context.PushAsync(GameNetRoutes.GomokuRoomSnapshot, snapshot);
 context.RequestClose(2);
 ```
 
-这是未来世界 Push 接口示例，当前 local 不发送世界快照；不可靠调用要求 KCP 协商支持。Push 成功只表示本地准入，后续错误通过 Completion 报告。外部 owner 可 await context.CloseAsync(reason)，handler 内部用 RequestClose/CloseAfterResponse，不能等待自身 Completion。
+这是当前五子棋可靠 Push 接口；不可靠 Push 需要业务先定义路由并由 KCP 协商支持。Push 成功只表示本地准入，后续错误通过 Completion 报告。外部 owner 可 await context.CloseAsync(reason)，handler 内部用 RequestClose/CloseAfterResponse，不能等待自身 Completion。
 
 WSS 由应用配置 HTTPS、Kestrel 连接/TLS 限额及 WebSocket 管线，将 network.HandleAsync 映射/network。WssServer 必须通过 DI 同一实例注册 HostedService 并注入 ILogger；可参考 [LocalWssService](../DotNet/Game.Server/LocalWssService.cs)，不另写停机顺序。
 
@@ -243,7 +242,7 @@ var login = new LoginModule(accounts, authentication, options);
 var application = new LobbyApplication(login).Application;
 ```
 
-`LobbyApplication` 内逐项调用 Login/Echo/World 模块的 Register。认证请求入口在 `Login/LoginHandlers.cs`，完整用例在 `Login/AuthenticationService.cs`，连接准入与身份绑定在 `Sessions/LobbySession.cs`。新增业务在自己的模块中显式注册生成路由，再加入大厅组合；不改登录处理器或框架分发，不使用反射。所有模块借用宿主持有的资源，网络停止并 join handler 后才释放认证服务、账号会话和数据库。
+`LobbyApplication` 内逐项调用 Login/Echo/Gomoku 模块的 Register。认证请求入口在 `Login/LoginHandlers.cs`，完整用例在 `Login/AuthenticationService.cs`，连接准入与身份绑定在 `Sessions/LobbySession.cs`。新增业务在自己的模块中显式注册生成路由，再加入大厅组合；不改登录处理器或框架分发，不使用反射。所有模块借用宿主持有的资源，网络停止并 join handler 后才释放认证服务、账号会话和数据库。
 
 大厅 Handler 从 `((LobbySession)context.Session).RequireIdentity()` 取得只读账号 ID、认证代次和绑定 ID。等待外部 IO 后复查绑定，业务状态提交处仍须执行所属业务的并发仲裁与权限检查；不要将身份快照当永久授权，也不要把客户端携带的账号 ID 当作当前用户。大厅 Echo 已在延迟前后执行身份检查。独立 KCP local harness 保留自己的无账号传输测试契约，不使用 LobbySession。
 
@@ -251,7 +250,7 @@ var application = new LobbyApplication(login).Application;
 
 ## 6. 协议生成与验证
 
-输入是 `Protocol/Common`、`Session`、`World`、`Diagnostics` 下的.proto；字段/路由规则见 [共享协议规范](DotNetDevelopment.md#6-共享-protomemorypack-编写规则)。修改.proto 后：
+输入是 `Protocol/Common`、`Session`、`Gomoku`、`Diagnostics` 下的.proto；字段/路由规则见 [共享协议规范](DotNetDevelopment.md#6-共享-protomemorypack-编写规则)。修改.proto 后：
 
 `DotNet/NetworkProtocol` 已加入 `DotNet.sln`，是独立的开发工具，不由 Game.Server 运行时引用。在 IDE 中将 NetworkProtocol 设为启动工程，选择 `Generate` 后点击运行即可生成消息；选择 `Check` 检查产物是否与协议源一致。两个启动项均包含 `--artifacts`。命令行也可以运行 `(cd DotNet && dotnet run --project NetworkProtocol --launch-profile Generate)` 或 `--launch-profile Check`。
 
@@ -363,3 +362,14 @@ PG 测试角色需能创建 schema，测试创建随机 schema 并只删除自�
 | 2026-10-12 实际进程 | WSS 注册→登录→Echo、重启后账号仍可登录；发布目录加载 KCP 库/监听/关闭，Ctrl+C 退出 0 | 本地实跑，非生产多实例/容量验收 |
 
 尚未执行或完成：Windows/Linux 服务端平台实跑、远端 CI、生产部署与多实例、完整元数据/诊断、容量与 24h soak。世界业务与 WebGL 按用户确认延后；其他客户端平台边界见客户端说明。后续更新本表时注明平台、版本和实际范围，不用旧数量代表新验证。
+
+
+## 五子棋联调（2026-10-14）
+
+按上述 local-wss 步骤启动同一 Game.Server，两位玩家用不同账号登录。A 创建房间并告知 B 8 位号码，B 输入号码加入；双方准备后房主开始，黑方先行，服务端裁决落子。local-kcp-dtls 不承载房间业务。
+
+GomokuOptions 定义开发限额：64 房间、128 个业务绑定、等待 10 分钟 / 对局 60 分钟 / 终局 60 秒。实际在线连接仍受 WssServerOptions 默认 32 连接、每 IP 4 连接限制。房间不持久化，服务重启失效。
+
+相关测试：`(cd Tools && dotnet test NetworkServer.Tests --filter 'GomokuRoomTests|WssServerTests|AccountLifecycleTests')`；PostgreSQL 路径需 GF_POSTGRES_TEST_CONNECTION，测试只创建 / 删除独立 schema。2026-10-14 使用独立临时 PostgreSQL 最终复验 83/83，包括双 WSS 完整对局、已提交请求取消后查询、已撤销房主绑定的加入拦截。协议测试 200/200；验证过程与平台、容量待验收项见 [五子棋](Gomoku.md#10-已实施与验证边界)。
+
+协议精简后的服务端复验：协议生成检查一致、协议工具 167/167；非 KCP 组 115 项通过（数据库环境条件跳过另行执行），临时 PostgreSQL 的数据库 / WSS 组 69/69，新增路由完整性用例后的账号生命周期组 18/18，真实原生 KCP / DTLS 回环 21/21。当前生产协议共 14 条可靠路由，世界消息未生成；双通道回环使用测试专用 catalog。Unity 使用生产 catalog 与 local-kcp-dtls 的 Hello / Echo / 释放另行实跑通过，详见 [五子棋验证](Gomoku.md#10-已实施与验证边界)。

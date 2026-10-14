@@ -32,7 +32,7 @@ SDK 由 `DotNet/global.json`、`Tools/global.json` 锁定为 10.0.401，工程�
 
 `DotNet/NetworkProtocol` 加入服务端解决方案，提供 Generate/Check IDE 启动项；Unity Editor 菜单通过外部 .NET 进程调用同一工具。生成器只依赖 Core 和生成/编译库，不引用 Game.Protocol，保持缺失既有生成文件时仍能运行。协议源、正式生成文件与共享源码引用位置保持一致，详见双方使用说明。
 
-`Game.Server/Program.cs` 验证 profile、加载游戏配置并选择启动入口；`LocalWssService`、`LocalKcpService` 持有各自配置和资源。`LobbyApplication` 只显式组合 `LoginModule`、`EchoModule`、`WorldModule`，不实现业务处理。按功能建目录：`Login/` 放认证用例、仓库、账号会话与处理器，`Sessions/` 放大厅连接会话和只读身份，`Diagnostics/` 放大厅 Echo，`World/` 显式注册当前未实现业务的返回/拒绝决定；后续背包、房间沿用此方式。通用数据库连接池在 `Game.Server/Database/`，不是网络框架能力。不为尚未实现的网关、世界、账号再创建多个可执行项目。
+`Game.Server/Program.cs` 验证 profile、加载游戏配置并选择启动入口；`LocalWssService`、`LocalKcpService` 持有各自配置和资源。`LobbyApplication` 只显式组合 `LoginModule`、`EchoModule`、可选 `GomokuModule`，不实现业务处理。按功能建目录：`Login/` 放认证用例、仓库、账号会话与处理器，`Sessions/` 放大厅连接会话和只读身份，`Diagnostics/` 放大厅 Echo，`Gomoku/` 放两人房间和权威棋局；后续背包、房间沿用此方式。通用数据库连接池在 `Game.Server/Database/`，不是网络框架能力。不为尚未实现的网关、世界、账号再创建多个可执行项目。
 
 处理器通过 `ServerApplication` 显式注册强类型 RPC/Notify 或 Reject。构造 host 前全部入站路由必须有明确处理/拒绝决定；host 校验漏注册、重复注册、目录归属后冻结应用。Push 不注册入站 handler。不用反射扫描处理器或运行时按类型名找 opcode。
 
@@ -156,7 +156,7 @@ Reject reason：1=协议不符、2=授权无效、3=人数/资源限制。Close 
 
 ServerHello 的 hash 必须完全相等；双方限额取客户端提议与服务端策略的较小值，且不得超过 V1 硬上限，可靠限额至少 2048。不可靠只允许双方都支持时启用，非 0 限额至少 256。服务端心跳间隔第一版必须为 5000ms。sessionId 是当前传输会话的诊断标识，不是账号凭据；与业务 accountSessionId 分开。
 
-Hello 前只允许所需控制包。当前 WSS 示例在 Hello 后仍未登录，只允许 Register/Login/ResumeLogin 与控制消息；local-kcp-dtls 绑定后只开放 Echo。未来世界应用须在 EnterWorld/RestoreWorld 成功后开放世界指令，不能把已生成路由当作已实现业务。重复 Hello、协商越界、绕过应用阶段均拒绝。
+Hello 前只允许所需控制包。当前 WSS 示例在 Hello 后仍未登录，只允许 Register/Login/ResumeLogin 与控制消息；local-kcp-dtls 绑定后只开放 Echo。未来世界应用须在 EnterWorld/RestoreWorld 成功后开放世界指令，该世界协议尚未生成，不能把传输可用当作已实现业务。重复 Hello、协商越界、绕过应用阶段均拒绝。
 
 客户端还须检查协商可靠上限足够容纳 catalog 中所有可靠路由声明的最大 Body+32；启用不可靠时检查其所有不可靠路由。不能接受一个无法兑现已登记路由上限的连接。WSS 允许目录包含不可靠路由，但对应能力不可用，业务不能调用这些路由。服务端按同一目录与协商限额校验输出。
 
@@ -214,7 +214,7 @@ message ExampleResponse {
 
 枚举必须先声明零值，成员名称建议直接使用 PascalCase；工具仍检查转换后的名称冲突。禁止别名、Flags、嵌套枚举、可空枚举和枚举宽度收窄。枚举定义随 manifest 纳入 hash；增加结果码也要求两端同步生成。`ResultCode.Success=0` 表示业务成功，其余值只说明业务拒绝；帧头 StatusCode 继续表示系统错误，不能混用。失败响应允许成功载荷保持默认空值，业务处理器仅在成功后使用和校验载荷。
 
-字段注释定义业务约束：成功登录的 accountSessionId/resumeToken 分别恰好 16/32 字节；恢复保留账号会话与 authEpoch 并轮换凭据。grant 成功后校验非零 ID/conv、端点、ticket、PSK 与限额，授权身份由服务端连接绑定提供。UTC 到期时间用于显示/诊断，TTL 以 RPC admission 单调时间起算，不从响应收到时重新续期。上述权限与语义校验属于实际 Hotfix/.NET 处理器，生成的结构验证器不替代它们。
+字段注释定义业务约束：成功登录的 accountSessionId/resumeToken 分别恰好 16/32 字节；恢复保留账号会话与 authEpoch 并轮换凭据。未来授权协议成功后还须校验非零 ID/conv、端点、ticket、PSK 与限额，授权身份由服务端连接绑定提供。UTC 到期时间用于显示/诊断，TTL 以 RPC admission 单调时间起算，不从响应收到时重新续期。上述权限与语义校验属于实际 Hotfix/.NET 处理器，生成的结构验证器不替代它们。
 
 ### 6.2 路由
 
@@ -234,11 +234,9 @@ route_kind 为 RPC、SERVER_PUSH 或 CLIENT_SEND。RPC 必须可靠且声明响�
 
 opcode ≥1000 且在整个目录唯一，生成路由名称也全目录唯一。RPC 响应复用请求 opcode/correlationId；系统 1～999 保留在 Runtime 中，不写进业务 Proto。路由预算必须足够容纳所有声明字段的最大值，同时不超过 V1 通道预算。
 
-世界模式显式选择路由：KCP 使用 `WorldSnapshot` / `MoveInput`（不可靠），WSS 使用 `WorldSnapshotReliable` / `MoveInputReliable`（可靠）；两组分别有独立 opcode，但共用 DTO/codec。实体进入/离开事件始终可靠，借用 WSS 大厅连接时物理连接仍只有大厅所有者负责关闭。
+当前生产协议分为 Common、Session、Gomoku、Diagnostics，共 14 条路由，全部可靠；最大可靠正文 4096 字节、不可靠正文 0。保留 Register/Login/ResumeLogin/Logout、Echo 与五子棋命令/推送；删除尚无玩法实现的世界授权、入场/恢复/退出、移动、AOI 协议及专属结果码。删除后重新生成 DTO、catalog、manifest、hash 与 golden vectors，两端必须同步更新，不保留旧指纹兼容。
 
-以下世界字段是预留业务契约，处理器尚未实现。入场/恢复响应是完整 AOI 基线，最多 64 个实体；超过返回 TooManyEntities，不截断或让 Runtime 自动分块。后续大世界分块按业务需求单独扩展。位置按毫米量化，实体以 entityId + incarnation 区分生命周期；进入/离开事件共享连续 eventVersion，缺号时停止应用并显式恢复。快照是每包最多 16 个实体的独立绝对状态批次，缺席不表示删除；服务器周期覆盖整个 AOI，未知实体/旧 incarnation 丢弃且不缓存。
-
-成功恢复保留 worldSessionId、推进 worldEpoch；输入/快照序号按新 epoch 重置，旧 epoch 消息丢弃。可靠 eventVersion 按世界会话保持连续；响应给出已包含的基线版本，之后只应用更高且连续的成员事件。每个实体分别比较 snapshotSequence，避免乱序的局部批次互相覆盖；u32 序号使用半周期内的环绕差值规则。MoveInput 使用 inputSequence/clientTick 去重和丢弃过期输入，方向轴范围为 [-32767,32767] 且归一化向量长度不超过一，不使用持久经济命令幂等表。实体控制权与移动规则由权威世界处理器校验。
+底层 KCP 双通道测试使用测试专用 catalog 与独立指纹，不为测试保留生产业务占位。实时世界的字段、AOI 与输入序号是 [总体设计](NetworkDesign.md) 中的候选契约，后续随实际玩法重新定义并验证。
 
 ### 6.3 验证器、指纹与演进
 
@@ -398,3 +396,12 @@ KcpListenerHost 通过 System.Diagnostics.Metrics 的 `GameFrame.Server.Network.
 未来世界接入必须从认证 WSS 绑定取得身份，目标网关注册确认后才返回短时单连接 PSK/ticket；串行仲裁注册/绑定/注销，迟到注册不得复活旧 epoch。账号撤销停止相关网关准入后才能确认 Logout，已提交撤销不回滚。世界/房间由自身逻辑 owner 串行 tick、指令和 AOI，数据库结果回到 owner 检查 epoch 后提交；这些是开发约束，当前没有世界处理器或多实例支持。
 
 截至 2026-10-13 已有验证证据见 [服务端使用说明](DotNetUsage.md#验证与现有证据) 和 [客户端使用说明](ClientNetworkUsage.md#验证与现有证据)。后续只更新实际执行范围，不累计历史测试数量冒充本轮全量验证。
+
+
+### 五子棋房间业务（2026-10-14）
+
+LocalWssService 创建 / 释放 GomokuRooms，ApplicationStopping 停止准入并中止未终局房间；网络 join / Closed 清理在房间 DisposeAsync 前完成。未注入业务的宿主显式拒绝 3000～3006，KCP / 实时世界占位继续保持原契约。
+
+短锁拥有集合、成员索引与结果缓存，提交时再持有 AccountSessions.Binding.CommitGate；Revoke 使用同一绑定锁。顺序为房间集合 → 绑定，房间不获取账号索引锁，不在锁内执行 IO / 编码 / continuation。LobbySession 的顶号与 Closed 交接旧 BindingId，旧解绑不能移除新成员。
+
+每绑定递增 commandId + 操作 / 内容 SHA-256 去重，最大已见 ID 活到解绑；缓存淘汰后拒绝旧 ID，Query 仍返回当前成员状态。RPC 适配位于 GomokuModule，只链接纯 GomokuGame.cs，不引用 Unity / Hotfix DLL。限额与测试见 [五子棋](Gomoku.md#联机实施计划与当前实现2026-10-14)。

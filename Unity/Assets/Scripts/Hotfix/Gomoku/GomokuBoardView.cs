@@ -22,7 +22,7 @@ namespace Game.Hotfix
         [SerializeField, Range(0.1f, 1f)] float pieceSizeRatio = 0.85f;
 
         readonly List<Image> pieces = new List<Image>();
-        GomokuGame displayedGame;
+        IGomokuGameView displayedGame;
 
         public GomokuBoardGraphic Grid => grid;
         public bool Interactable { get; set; }
@@ -66,7 +66,7 @@ namespace Game.Hotfix
         }
 
         /// <summary>从完整棋局恢复显示，也用于落子、悔棋和重开。已创建的棋子在面板内复用。</summary>
-        public void Render(GomokuGame game)
+        public void Render(IGomokuGameView game)
         {
             if (game == null)
             {

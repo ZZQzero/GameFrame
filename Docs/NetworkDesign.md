@@ -10,6 +10,8 @@
 
 > 当前实施方向（2026-10-14）：现有玩法只有五子棋，先完善通用网络底层；近期顺序与验收见[第 18.1 节](#181-当前优先路线底层框架完善)。房间联网、实时世界、AOI、预测与跨进程路由在实际多人玩法需要时再扩展。
 
+> 下一阶段候选业务已补充[五子棋 WSS 两人房间实施计划](Gomoku.md#联机实施计划与当前实现2026-10-14)，包含显式创建、按房间号加入、准备和开局。当前仍是本地对局；计划不代表已实现房间，也不启用下述实时世界路线。
+
 ## 1. 目标与范围
 
 建立可用于大厅、房间、即时战斗和大型在线游戏客户端的网络模块，交付内容包括 Unity Runtime、Hotfix 接入示例、协议工具、原生插件、.NET 联调服务和自动化验证。实现优先保证协议正确、资源可回收、失败可观察、内存有上限，再依据测量优化分配和吞吐。
@@ -122,7 +124,7 @@ DotNet/Game.Server/               唯一业务可执行入口、local 配置、�
 
 Game.Server 使用 Web SDK/net10.0，local 功能需显式 profile；PostgreSQL 注册/密码认证已接入，生产 hosting（监听/部署与跨进程会话）未配置时拒绝启动，启动不校验玩家凭据。WssServer 通过 hosted lifecycle 的 StoppingAsync 阶段在 Kestrel 等 StopAsync 前 join 网络，不能仅依赖注册先后或 RunAsync 返回后的清理。不提前增加网关/账号/世界等可执行项目；第 14 节业务契约保留供后续实现。
 
-Game.Server 内按业务功能建目录：Login/ 集中认证用例、PostgreSQL 仓库、账号会话和注册/登录/恢复/注销协议入口；Sessions/ 的 LobbySession 负责每连接准入、身份绑定和关闭，身份来源唯一为 AccountSessions.Binding。LobbyApplication 只显式组合 Login/Echo/World 模块，业务处理归所属模块；简单请求可以共用 Handler 类，复杂用例再拆分。Program 校验 profile、加载 Luban Tables 后选择 LocalWssService/LocalKcpService。启动入口负责配置校验、资源创建、运行及关闭所有权，不增加反射注册或额外生命周期管理器。配置或初始化失败停止后续步骤，已创建资源按原所有权释放。
+Game.Server 内按业务功能建目录：Login/ 集中认证用例、PostgreSQL 仓库、账号会话和注册/登录/恢复/注销协议入口；Sessions/ 的 LobbySession 负责每连接准入、身份绑定和关闭，身份来源唯一为 AccountSessions.Binding。LobbyApplication 只显式组合 Login/Echo/Gomoku 模块，业务处理归所属模块；简单请求可以共用 Handler 类，复杂用例再拆分。Program 校验 profile、加载 Luban Tables 后选择 LocalWssService/LocalKcpService。启动入口负责配置校验、资源创建、运行及关闭所有权，不增加反射注册或额外生命周期管理器。配置或初始化失败停止后续步骤，已创建资源按原所有权释放。
 
 两端从同源 Excel 分别生成配置，服务端数据随构建/发布复制；启动先加载 Tables，缺文件或反序列化失败停止后续流程。配置通过重启更新，不增加通用配置管理器或热重载；分组、版本与部署细节见服务端规范和说明。
 
@@ -313,7 +315,7 @@ Hello 完成前仅允许当前握手所需控制包。Hello 完成后，WSS 进�
 
 用户确认采用 `.proto` 作为唯一手写协议源，位于仓库根 `Protocol/`，参考 `gameprotomessage` 的 message/service 分离方式；Proto 仅用于书写，不使用 Protobuf Binary。`DotNet/NetworkProtocol` 生成纯 C# MemoryPack DTO、强类型路由与校验器到 `Game.Hotfix/Network/Generated`，不引用 Unity/Hotfix 其他业务模块。系统固定帧协议仍放在 Runtime。服务器通过 `Protocol/GameFrame.Protocol.projitems` 链接同一份生成源码，引用 NuGet MemoryPack 1.21.4；不能直接拿 Unity 编译出的 DTO DLL 当作 .NET 10 的通用协议 DLL。
 
-协议按 Common、Session、World、Diagnostics 分域并分别组织 message/service 文件，仍生成同一目录与 catalog，不因此新增程序集、部署进程或 Runtime 管理器。Common 定义唯一 ResultCode 与简单操作响应；Session 只处理账号登录/恢复、世界授权与注销，World 定义世界业务，Diagnostics 只由 local profile 注册。业务结果使用生成的 ResultCode（Success=0），帧头 StatusCode 仍用于系统错误。当前项目未部署，本轮直接更新字段和 opcode，不保留旧协议兼容入口。
+生产协议按 Common、Session、Gomoku、Diagnostics 分域并分别组织 message/service 文件，仍生成同一目录与 catalog，不因此新增程序集、部署进程或 Runtime 管理器。Common 定义唯一 ResultCode 与简单操作响应；Session 只处理账号注册、登录/恢复与注销，Gomoku 定义两人房间业务，Diagnostics 只由 local profile 注册。业务结果使用生成的 ResultCode（Success=0），帧头 StatusCode 仍用于系统错误。当前项目未部署，本轮直接更新字段和 opcode，不保留旧协议兼容入口。
 
 服务端、离线生成工具与联调测试工程统一使用 `TargetFramework=net10.0`。分别在 `DotNet/` 与 `Tools/` 下通过 `global.json` 锁定 SDK 10.0.401，构建命令从对应目录执行。ConfigGenerator 以外部进程调用 Unity/Config 中固定的 Luban 5.0.0，仍需要 .NET 8 运行时，不升级 Luban 或将 .NET 10 DLL 加载进 Unity。共享生成 DTO/约束属性源码仍限制在当前 Unity 支持的 C# 语法与 API 范围；服务端独有代码可使用 .NET 10 能力。Unity 保持 MemoryPack.Core 的 `.NET Standard 2.1` 版本，不因服务端升级而替换为 .NET 10 DLL。MemoryPack 继续固定 1.21.4，实际互通以 Unity/.NET 10 golden vectors 和 IL2CPP 测试为准。
 
@@ -674,7 +676,7 @@ TLS 信任使用平台正常证书验证与可信域名配置；不能连接任�
 
 ### 13.2 登录白名单与服务端权限
 
-登录是业务 RPC，使用 MemoryPack 和第 7 节统一帧；系统控制包仍不依赖业务 DTO。以下 opcode 在 P0 一次分配，作为 Proto service method 输入，由工具生成强类型路由，不另手写数值权限表：
+登录是业务 RPC，使用 MemoryPack 和第 7 节统一帧；系统控制包仍不依赖业务 DTO。账号路由由 Proto service method 生成；表中世界授权及 1100～1102 为未来候选，不在当前 catalog 内，不另手写数值权限表：
 
 | Opcode/路由 | 允许阶段/连接 | 主要结果与限制 |
 | --- | --- | --- |
@@ -806,7 +808,7 @@ WSS 大厅网关 → 登录/账号会话 → RequestWorldGrant → KCP/DTLS 网�
 
 客户端业务层负责插值缓冲、预测和服务端校正。插值窗口起点建议 100ms，再根据抖动测量调整；不要在网络 Runtime 内直接修改 Transform。输入/快照使用有符号环绕差值比较 u32 tick/sequence，在半周期内定义先后，并按会话 epoch 隔离重连前数据。
 
-当前 Proto 小世界示例的具体契约如下：
+以下是未来实时世界的候选契约，未保留对应 Proto、DTO 或生成路由；具体字段与限额在实际玩法接入时重新确定：
 
 - EnterWorld/RestoreWorld 的 WorldResponse 返回完整 AOI 基线（最多 64 个实体），超过返回 TooManyEntities，不静默截断；大世界分块在实际业务需要时另定义，Runtime 不自动聚合。
 - EntityState 使用 entityId + 非零 incarnation，位置为 int32 毫米（Unity 一个世界单位对应一米）。WorldEntityEntered/WorldEntityLeft 分别为可靠进入/离开事件，共用连续 eventVersion；离开明确带实体 ID 与 incarnation。
@@ -885,7 +887,7 @@ StopSessionAsync(requestLogout)
   5. 最后传播主异常
 ```
 
-上述 GameNetworkSession、世界入场/恢复/离场与快照处理是后续 Hotfix/.NET 业务接入流程。当前已生成相关路由，并实现服务端 Register/Login/ResumeLogin/Logout；WorldModule 注册 RequestWorldGrant 返回 WorldUnavailable，其余世界入站路由显式拒绝，尚无世界业务实现或完整世界会话。客户端已实现普通实例 GameLoginSession、只读 GameUser 和登录面板参数注入，当前仅 WSS 账号登录/注销，断线清空并回到登录，不自动 Resume。启动/恢复失败停止当前流程；调用者显式清理已获得的资源。KCP 世界启动失败不隐式注销账号或关闭独立大厅。
+上述 GameNetworkSession、世界入场/恢复/离场与快照处理是后续 Hotfix/.NET 业务接入流程。当前已生成账号与五子棋路由，并实现服务端 Register/Login/ResumeLogin/Logout；GomokuModule 注册两人房间业务，未使用的世界协议和 WorldModule 占位已删除，尚无实时世界或完整世界会话。客户端已实现普通实例 GameLoginSession、只读 GameUser 和登录面板参数注入，当前仅 WSS 账号登录/注销，断线清空并回到登录，不自动 Resume。启动/恢复失败停止当前流程；调用者显式清理已获得的资源。KCP 世界启动失败不隐式注销账号或关闭独立大厅。
 
 WSS 共享连接的状态流不能假装独立：EnterWorld/LeaveWorld 超时、取消或处理器失败导致世界状态不确定时，不能先注销处理器再继续使用大厅 socket；该次共享 WSS 必须停止业务并关闭，大厅可通过显式 ResumeLogin 恢复账号。业务明确拒绝入场且尚未改变状态时可保留大厅。StopSession 将关闭全部连接，不重复发 LeaveWorld；所有失败均保留原异常，不自动执行恢复或入场回滚。
 
@@ -992,7 +994,7 @@ python3 Native/Kcp/build/build.py --help
 python3 Native/Kcp/build/install.py --help
 ```
 
-本地 WSS 使用显式信任的开发证书，不修改生产证书验证；已实现 PostgreSQL Register/Login/ResumeLogin/Logout 和 Echo。RequestWorldGrant 当前返回 WorldUnavailable，其他世界入站路由显式拒绝。顺序 Push、异常/断线及撤销由框架集成测试验证，不能视为已部署世界业务。后续业务阶段再接入 WSS 大厅与 UDP listener，并从已登录 WSS 取得 ticket/PSK。当前 `local-kcp-dtls` 仅监听 loopback，用显式短时测试凭据验证 Hello/Echo，不提供取票 HTTP 接口或世界入场。生产 hosting 未配置时拒绝启动；测试账号/密钥不进入正式资源。后续仍需真实 IPv6/WAN 网络验收。
+本地 WSS 使用显式信任的开发证书，不修改生产证书验证；已实现 PostgreSQL Register/Login/ResumeLogin/Logout 和 Echo。当前生产协议只有账号、Echo 与五子棋路由，世界授权与入场路由未生成。顺序 Push、异常/断线及撤销由框架集成测试验证，不能视为已部署世界业务。后续业务阶段再接入 WSS 大厅与 UDP listener，并从已登录 WSS 取得 ticket/PSK。当前 `local-kcp-dtls` 仅监听 loopback，用显式短时测试凭据验证 Hello/Echo，不提供取票 HTTP 接口或世界入场。生产 hosting 未配置时拒绝启动；测试账号/密钥不进入正式资源。后续仍需真实 IPv6/WAN 网络验收。
 
 ## 19. 测试矩阵与商业发布门禁
 
@@ -1090,7 +1092,7 @@ ET 将网络接到 Entity/Fiber、Actor、Mailbox、Location 和 Gate/Map 业务
 
 当前通用网络模块的完整计账、诊断、平台与容量验收仍按原有路线推进，优先级不因本次参考 ET 而下降。下面的世界方案用于实际业务接入时选择实现，不自动成为新增开发范围，也不要求先建设世界或分布式系统才能完善网络框架。
 
-当前 `WorldModule` 的 RequestWorldGrant 返回 WorldUnavailable，Enter/Leave/RestoreWorld 与 MoveInput 入站显式拒绝；相关 DTO/路由已生成。`GameLoginSession` 只提供 WSS 登录/注销，断线清空认证，不提供 Resume 或双连接世界恢复。因此下面的房间、世界会话与位置路由均为待实施方案，不能仅因已有协议声明就标为完成。当前登录后进入的本地五子棋也不等于已实现服务端房间。
+当前已实现 WSS 两人五子棋房间，详见 [五子棋说明](Gomoku.md)。未使用的 WorldModule、世界授权、入场/恢复/退出、移动与 AOI Proto/生成路由已删除；当前 catalog 共 14 条可靠路由。`GameLoginSession` 提供 WSS 登录/注销，断线清空认证，不提供自动 Resume 或双连接世界恢复。下面的实时房间消费者、世界会话与位置路由继续作为候选方案，不是当前五子棋的前置依赖。
 
 | GameFrame 改进方向（ET 经验来源） | GameFrame 当前情况 | 建议与实施条件 |
 | --- | --- | --- |
@@ -1099,7 +1101,7 @@ ET 将网络接到 Entity/Fiber、Actor、Mailbox、Location 和 Gate/Map 业务
 | 连接接入与权威玩法职责清晰（Gate/Map） | 传输框架与业务程序集已分离；尚无世界处理器 | 首先在单个 Game.Server 内分清连接适配与权威玩法职责，无须先拆进程 |
 | 稳定身份与运行位置分离（Location） | 有 accountId、authEpoch 和预留 worldSessionId/epoch；无运行位置服务 | 单进程先用房间内部的成员索引；真实跨分区/进程迁移时再实现版本化位置路由 |
 | 部署变化时保持业务操作语义（本地/远程 Actor 消息） | 当前只需本进程业务调用 | 保持房间操作具有明确的命令/结果；出现远程部署时再抽取必要接口 |
-| 按玩家可见范围控制同步成本（Map/AOI） | 有快照与可靠成员事件协议；没有权威世界/AOI | 世界接入时按玩法落实可见集合、可靠成员事件与独立快照，复用第 14 节契约 |
+| 按玩家可见范围控制同步成本（Map/AOI） | 只有候选快照与可靠成员事件设计；没有生成协议或权威世界/AOI | 世界接入时按玩法落实可见集合、可靠成员事件与独立快照，复用第 14 节契约 |
 | 降低空闲连接调度成本（KCP Check/期限驱动） | 当前单调时钟、固定 10ms tick、有界 owner 轮转 | 仅在测得空闲扫描或调度成本后优化；不是当前业务接入的前置任务 |
 | 明确换网后的恢复语义（Router） | 当前 DTLS 上下文绑定网关，未提供换网迁移 | 若需要透明迁移，按加密、授权和端点所有权重新设计；现阶段采用显式新连接与恢复 |
 
@@ -1139,7 +1141,7 @@ flowchart LR
 
 | 文件/位置 | 拟承担职责 |
 | --- | --- |
-| `DotNet/Game.Server/World/WorldModule.cs`（现有） | 接收实际世界应用依赖，显式注册已有 Enter/Leave/Restore/Move 路由；KCP 授权未完成前继续返回 WorldUnavailable |
+| `DotNet/Game.Server/World/WorldModule.cs`（未来需要时新增） | 接收实际世界应用依赖，按实际玩法定义并注册 Enter/Leave/Restore/Move 路由；授权未实现时不生成占位路由 |
 | `DotNet/Game.Server/World/WorldHandlers.cs`（拟新增） | 从服务端绑定取身份、检查目标权限、复制受限命令数据、调用房间、映射 DTO；不直接修改实体 |
 | `DotNet/Game.Server/World/Room.cs`（拟新增） | 拥有成员/实体/AOI、单调 tick、命令队列、在途操作、消费者任务和 StopAsync；内部辅助类型先就近定义 |
 | `DotNet/Game.Server/World/WorldSession.cs`（拟新增） | 逻辑世界会话、worldEpoch、当前连接绑定、离线保留与显式恢复资格；按实际状态复杂度决定是否拆文件 |
@@ -1213,6 +1215,8 @@ ET Router 主要转发 KCP 包和维护路由，不终止 KCP；已阅读路径�
 
 当前执行第 18.1 节的底层完善路线。本节下表仅在以后选择多人世界业务时启用，现有五子棋不要求落实此表中的实时世界能力。
 
+首个回合制联机已采用[五子棋实施计划](Gomoku.md#联机实施计划与当前实现2026-10-14)：复用 WSS 与短锁状态提交，在 Game.Server/Gomoku 实现具体两人房间。该计划不要求先实现 EnterWorld/RestoreWorld/Move、KCP 授权或实时房间消费者；正文第 22.3～22.8 节的世界示例保持候选用途。
+
 本表是在选择实施世界业务后，对第 18 节 P5 和 P4 世界业务的细化，采用顺序由 GameFrame 的实际需求与收益决定。通用网络模块继续补齐计账、诊断和平台/容量验收；不将 Location、Router 或自动重连追加为第一版必做范围。具体业务名称和文件落点是候选方案，实施时优先选择满足需求的最简单结构。
 
 | 顺序 | 可评审交付 | 退出条件 |
@@ -1242,4 +1246,6 @@ ET 以下路径相对相邻 `ETFramework` 仓库根目录；其 DotNet 工程链
 | 迁移样例的实际边界 | `DotNet/ET.Hotfix/Map/Transfer/TransferHelper.cs` |
 | Router | `DotNet/ET.Hotfix/Router/RouterComponentSystem.cs` |
 
-GameFrame 接入点：[强类型 ServerApplication/ServerSession API](../DotNet/GameFrame.Server/ServerApplication.cs)、[现有连接派发](../DotNet/GameFrame.Server/ServerConnection.cs)、[世界路由占位](../DotNet/Game.Server/World/WorldModule.cs)、[应用组合](../DotNet/Game.Server/LobbyApplication.cs)、[大厅身份与解绑](../DotNet/Game.Server/Sessions/LobbySession.cs)、[账号会话所有权](../DotNet/Game.Server/Login/AccountSessions.cs)、[Hotfix 账号会话](../Unity/Assets/Scripts/Hotfix/Login/GameLoginSession.cs)。
+GameFrame 接入点：[强类型 ServerApplication/ServerSession API](../DotNet/GameFrame.Server/ServerApplication.cs)、[现有连接派发](../DotNet/GameFrame.Server/ServerConnection.cs)、[五子棋应用](../DotNet/Game.Server/Gomoku/GomokuModule.cs)、[应用组合](../DotNet/Game.Server/LobbyApplication.cs)、[大厅身份与解绑](../DotNet/Game.Server/Sessions/LobbySession.cs)、[账号会话所有权](../DotNet/Game.Server/Login/AccountSessions.cs)、[Hotfix 账号会话](../Unity/Assets/Scripts/Hotfix/Login/GameLoginSession.cs)。
+
+2026-10-14 五子棋房间已落地：业务位于 Game.Server/Gomoku 与 Hotfix/Gomoku，复用认证 WSS、同源纯规则与 UI 栈。同步提交采用房间集合 → Binding.CommitGate，撤销与提交互斥；有界完整快照可以合并中间版本，客户端按成员 / 版本统一应用 RPC 和 Push，取消后显式 Query。不启用实时世界路由，验证与发布平台待验收项见 [五子棋](Gomoku.md#10-已实施与验证边界)。

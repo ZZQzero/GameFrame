@@ -159,11 +159,11 @@ OperationResponse result = await client.RequestAsync(
 
 RPC 期限从本地 admission 起算，后台 deadline 不会因主线程卡帧延长；期限内保留响应后，到主线程完成前取消仍可赢。非零 StatusCode 抛 NetworkRemoteException，未知码保留；超时抛 NetworkRequestTimeoutException，本地准入或队列容量不足抛 NetworkBackpressureException；服务端过载 status1 仍抛 NetworkRemoteException。超时/取消/断线后的业务结果可能未知，不自动重发。
 
-未来世界 Push 使用示例：
+当前五子棋 Push 使用示例：
 
 ```csharp
 using IDisposable subscription = client.Subscribe(
-    GameNetRoutes.WorldSnapshotReliable,
+    GameNetRoutes.GomokuRoomSnapshot,
     snapshot =>
     {
         // 先按epoch/version更新业务模型，再通知UI。
@@ -178,9 +178,9 @@ using IDisposable faultObserver = client.ObserveMessageFault(fault =>
 });
 ```
 
-实际 local 没有世界 Push，此例用于接入自己实现的服务端。只有订阅持有期间有效；将句柄保存到会话或既有 OpenScope/LifetimeScope，异步方法返回后需继续监听时不能使用局部 using。Push 抛错 Fault 当前连接，后续业务丢弃；观察者抛错只停止该批并记录，不改网络首因。未订阅 Push 也校验正文，合法未订阅消息不创建 DTO。
+五子棋房间会话持有 GomokuRoomSnapshot / GomokuRoomClosed 两类可靠 Push 的订阅，面板借用只读模型。只有订阅持有期间有效；将句柄保存到会话或既有 OpenScope/LifetimeScope，异步方法返回后需继续监听时不能使用局部 using。Push 抛错 Fault 当前连接，后续业务丢弃；观察者抛错只停止该批并记录，不改网络首因。未订阅 Push 也校验正文，合法未订阅消息不创建 DTO。
 
-WSS 不支持不可靠 API，不能把 WorldSnapshot/MoveInput 自动改通道；未来 WSS 世界用 WorldSnapshotReliable/MoveInputReliable，KCP 用 WorldSnapshot/MoveInput，两组独立 opcode 共用 DTO。
+WSS 不支持不可靠 API。当前生产 catalog 只有可靠路由；底层 KCP 的可靠 / 不可靠能力通过独立测试路由验证，后续玩法需要时再定义输入和状态协议，不自动转换通道。
 
 <a id="原生插件安装"></a>
 
@@ -198,7 +198,7 @@ Simulator archive 独立构建并默认禁用，测试模拟器时显式选择 s
 
 ## 5. KCP/DTLS 调用
 
-从可信配置取得 UDP 端点，业务或受控测试提供票据；当前大厅 RequestWorldGrant 返回 WorldUnavailable，不能执行真实取票→世界业务流程。底层联调先启动服务端 local-kcp-dtls，按服务端说明共享短时随机凭据，在其 30 秒内完成连接：
+从可信配置取得 UDP 端点，业务或受控测试提供票据；当前没有世界授权 RPC 或世界玩法协议，不能执行真实取票→世界业务流程。底层联调先启动服务端 local-kcp-dtls，按服务端说明共享短时随机凭据，在其 30 秒内完成连接：
 
 ```csharp
 var endpoint = new Uri("udp://127.0.0.1:7450");
@@ -220,7 +220,7 @@ EchoResponse echo = await client.RequestAsync(
 
 ticket 为 1～1024 字节、conv 非零、identity16 字节、PSK32 字节，deadline 是 NetworkClock 同源单调时间。未来授权 RPC 返回 TTL 时，deadline 从 RPCadmission+TTL 算起；本地 grant 从服务端注册计时，不能在客户端收到文件时假造新的 30 秒。调用者在 Connect 结束前不修改凭据数组，使用后清零；同一 grant 不能绑定第二个连接，过期显式重新准备联调凭据。
 
-未来不可靠输入调用 `client.TrySendUnreliable(GameNetRoutes.MoveInput, input)`，返回 false 表示本地拒绝；并不保证对端收到。当前 local 未安装 MoveInput handler，这个调用只展示 API，不作为联调成功判据。
+不可靠输入能力使用 `TrySendUnreliable(NetUnreliable<T>, dto)`，返回 false 表示本地拒绝，不保证对端收到。生产协议未定义此类路由，local KCP 只开放 Echo。
 
 ## 6. 关闭与诊断
 
@@ -294,3 +294,14 @@ Unity TLS 在部分 Editor 平台不继承 `dotnet dev-certs` 的信任。登录
 | 2026-10-12 StandaloneOSX | Player 脚本编译 43 程序集通过 | 非最终 native 链接、裁剪或 Player 运行 |
 
 待验收：实际 IL2CPP 包/新热更 DTO、移动设备/模拟器、Windows/Linux 平台实跑、IPv6/代理/后台/换网/弱网、完整元数据与全部主线程/失败路径诊断、性能容量/24h soak。WebGL WSS 和世界业务延后，不以现有单元/Editor 证据声称全部完成。
+
+
+## 五子棋房间（2026-10-14）
+
+登录 → Main → 五子棋入口。创建者看到 8 位号码，另一位玩家输入号码加入；双方准备后房主开始。联网悔棋 / 重开暂不提供，本地双人保留现有操作。结果未确认时点击“查询状态”，退出成功返回入口；断线不恢复席位。
+
+相关 PlayMode 验证 29/29，使用独立临时 PostgreSQL / localhost WSS / 公开测试证书，覆盖账号、本地棋盘 / 主面板、两个客户端联机模型与 UI。Editor 编译与 Prefab 13 个准确绑定已核验。Player 脚本、正式 DLL / 资源包、实际 IL2CPP / 新 DTO 热更可达性分别验收，不以 Editor 结果代替；详见 [五子棋](Gomoku.md#10-已实施与验证边界)。
+
+StandaloneOSX Release Player 脚本和 Hotfix DLL 已编译，`Assets/Config/Code/Game.Hotfix.dll.bytes` 已更新；资源包输出 `Bundles/StandaloneOSX/DefaultPackage/gomoku-20261014-validated`，构建验证通过，尚未部署。协议相关 EditMode 162/162。
+
+协议精简后的复验：当前 14 条可靠路由；协议 EditMode 135/135，相关 PlayMode 合计 48 项通过（含真实 WSS 房间与生产协议 KCP / DTLS Echo）。StandaloneOSX Release Player 脚本与 Hotfix DLL 已重新编译；前述资源包仍是精简前产物，发布时需重新构建。具体范围与平台边界见 [五子棋验证](Gomoku.md#10-已实施与验证边界)。

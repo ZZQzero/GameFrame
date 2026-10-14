@@ -6,9 +6,20 @@ using UnityEngine;
 
 namespace Game.Hotfix
 {
-    public partial class MainPanel : UIPanel<UINone>
+    public sealed class MainPanelArgs
+    {
+        public Func<UniTask> OpenGomoku { get; }
+
+        public MainPanelArgs(Func<UniTask> openGomoku)
+        {
+            OpenGomoku = openGomoku ?? throw new ArgumentNullException(nameof(openGomoku));
+        }
+    }
+
+    public partial class MainPanel : UIPanel<MainPanelArgs>
     {
         private bool openingGame;
+        private Func<UniTask> openGomoku;
 
         protected override void OnCreate()
         {
@@ -18,8 +29,9 @@ namespace Game.Hotfix
             LifetimeScope.Register(() => woodenFishButton.onClick.RemoveListener(OpenWoodenFish));
         }
 
-        protected override void OnOpen(UINone args)
+        protected override void OnOpen(MainPanelArgs args)
         {
+            openGomoku = args.OpenGomoku;
             openingGame = false;
             statusText.text = string.Empty;
             SetInteractable(true);
@@ -27,15 +39,18 @@ namespace Game.Hotfix
 
         private void OpenGomoku()
         {
-            OpenGameAsync<GomokuMainPanel>(OpenCancellationToken).Forget();
+            OpenGameAsync(openGomoku, OpenCancellationToken).Forget();
         }
 
         private void OpenWoodenFish()
         {
-            OpenGameAsync<WoodenFishMainPanel>(OpenCancellationToken).Forget();
+            OpenGameAsync(async () =>
+            {
+                await GameUI.Push<WoodenFishMainPanel>();
+            }, OpenCancellationToken).Forget();
         }
 
-        private async UniTask OpenGameAsync<TPanel>(CancellationToken token) where TPanel : UIPanel<UINone>
+        private async UniTask OpenGameAsync(Func<UniTask> open, CancellationToken token)
         {
             if (openingGame || token.IsCancellationRequested || !gameObject.activeInHierarchy)
             {
@@ -47,7 +62,7 @@ namespace Game.Hotfix
             statusText.text = "正在打开…";
             try
             {
-                await GameUI.Push<TPanel>();
+                await open();
                 if (!token.IsCancellationRequested)
                 {
                     statusText.text = string.Empty;

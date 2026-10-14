@@ -130,7 +130,7 @@ namespace GameFrame.Tests
                 await release.Task.WaitAsync(token);
                 if (pushAfterClose)
                 {
-                    await connection.PushAsync(GameNetRoutes.WorldSnapshotReliable, new WorldSnapshot());
+                    await connection.PushAsync(GameNetRoutes.GomokuRoomSnapshot, new GomokuSnapshot());
                 }
                 else
                 {
@@ -160,7 +160,7 @@ namespace GameFrame.Tests
                 server.Context.RequestClose(2);
                 server.Context.RequestClose(7);
                 Assert.Catch<NetworkException>(server.Context.EnableFullTraffic);
-                Assert.Catch<NetworkException>(() => server.Context.PushAsync(GameNetRoutes.WorldSnapshotReliable, new WorldSnapshot()));
+                Assert.Catch<NetworkException>(() => server.Context.PushAsync(GameNetRoutes.GomokuRoomSnapshot, new GomokuSnapshot()));
                 if (pushAfterClose)
                 {
                     release.SetResult();

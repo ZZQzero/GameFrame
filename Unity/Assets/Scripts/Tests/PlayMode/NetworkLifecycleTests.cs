@@ -97,12 +97,12 @@ namespace GameFrame.Tests
         {
             await Initialize(new NetworkRuntimeOptions());
             NetworkClient client = GameRuntime.Network.CreateClient(new NetworkClientOptions(), GameNetProtocol.Catalog);
-            IDisposable first = client.Subscribe(GameNetRoutes.WorldSnapshotReliable, _ => { });
-            Assert.Throws<InvalidOperationException>(() => client.Subscribe(GameNetRoutes.WorldSnapshotReliable, _ => { }));
+            IDisposable first = client.Subscribe(GameNetRoutes.GomokuRoomSnapshot, _ => { });
+            Assert.Throws<InvalidOperationException>(() => client.Subscribe(GameNetRoutes.GomokuRoomSnapshot, _ => { }));
             first.Dispose();
-            using IDisposable second = client.Subscribe(GameNetRoutes.WorldSnapshotReliable, _ => { });
+            using IDisposable second = client.Subscribe(GameNetRoutes.GomokuRoomSnapshot, _ => { });
             first.Dispose();
-            Assert.Throws<InvalidOperationException>(() => client.Subscribe(GameNetRoutes.WorldSnapshotReliable, _ => { }));
+            Assert.Throws<InvalidOperationException>(() => client.Subscribe(GameNetRoutes.GomokuRoomSnapshot, _ => { }));
             await client.DisposeAsync();
         });
 

@@ -1,12 +1,10 @@
 using System.Net;
 using System.Runtime.ExceptionServices;
-using GameFrame.Network;
-using GameFrame.Network.Transport;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace GameFrame.Server.Network
+namespace GameFrame.Network
 {
     public sealed class WssServer : IAsyncDisposable, IHostedLifecycleService
     {

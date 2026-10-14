@@ -3,12 +3,8 @@ using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Reflection;
 using System.Threading.Channels;
-using Game.Hotfix.Network.Generated;
-using Game.Hotfix.Network.Protocol;
+using Game.Protocol;
 using GameFrame.Network;
-using GameFrame.Network.Connection;
-using GameFrame.Network.Protocol;
-using GameFrame.Network.Transport;
 using NUnit.Framework;
 
 namespace GameFrame.Tests

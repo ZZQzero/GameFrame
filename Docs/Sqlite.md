@@ -30,6 +30,8 @@ finally { await db.CloseAsync(); }
 
 业务自己定义 application_id、schema、账号归属、参数校验、索引和操作回执。参考 [游戏存档与背包示例说明](../Unity/Assets/Scripts/Runtime/Sqlite/Samples~/README.md) 和 [代码](../Unity/Assets/Scripts/Runtime/Sqlite/Samples~/GameRepositories.cs)：存档拒绝旧版或同版覆盖；购买、合成、奖励将完整资源增减与操作回执放在同一事务中，提交后才更新内存背包。UI 可直接读取内存数量。重复 OperationId 会使整个事务失败，调用方显式查询原回执核对，不会自动重放。示例 schema 为 2，旧示例库须由业务显式迁移；照片库结构和通用 SQLite API 不变。
 
+账号业务的 `Game.Hotfix/RememberedLoginStore` 使用独立的 `Game/login.sqlite`（application_id=1195789390、schema=1），按服务端记录最近账号的名称、ID 与期限。密码和恢复令牌不进入 SQLite；令牌使用系统安全存储。业务串行化同一 store 的操作，每次打开数据库并在 finally 中等待 CloseAsync，面板不持有数据库句柄，不调用 SqliteRuntime.ShutdownAsync。恢复与清除行为见 [客户端网络使用说明](ClientNetworkUsage.md#2-注册登录恢复与注销)。
+
 ## 接口与所有权
 
 | 接口 | 结果与释放 |

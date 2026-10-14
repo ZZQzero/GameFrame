@@ -1,7 +1,4 @@
-using GameFrame.Network.Protocol;
-using GameFrame.Network.Transport;
-
-namespace GameFrame.Server.Network
+namespace GameFrame.Network
 {
     public sealed class WssServerOptions
     {

@@ -8,7 +8,7 @@ GameUI.SetPackage → 下载 boot 资源 → 启动其余框架系统 →
 加载 AOT 元数据与 Hotfix DLL → 实例化 GameEntry prefab → 读取热更配置并补入翻译 → 启动热更业务。
 Launch 负责框架初始化、选择相机和准备资源。GameEntry 在 Awake 中初始化 Hotfix 配置，
 并调用 `GameUIRegistration.RegisterAll()` 统一注册业务面板，创建 Hotfix 的 `GameLoginSession` 并注入 `GameFlow`，完成后 IsReady 为 true。
-Start 调用 `GameFlow.StartAsync()` 启动业务流程；流程打开登录面板，登录成功后通过 GameScene 以 Single 模式加载并激活 Main，再显示 `MainPanel`。主界面提供五子棋和木鱼入口。
+Start 调用 `GameFlow.StartAsync()` 启动业务流程；流程打开登录面板，登录成功后通过 GameScene 以 Single 模式加载并激活 Main，再显示 `MainPanel`。主界面提供五子棋、木鱼和设置入口。
 GameEntry 只组合、调用和释放业务对象；GameFlow 决定登录与主界面的导航，GameLoginSession 持有用户信息、凭据和连接。
 Launch 启动 GameRuntime 时 EnableUI 为 false，语言服务也不重复初始化，并通过 NetworkOptions 启用网络宿主。
 任一步失败直接抛出并终止后续启动，不重试、不回退旧资源、不自动回滚。
@@ -23,7 +23,7 @@ Launch 没有单例或对外接口，也不调用 Hotfix 入口。DLL 必须在�
 业务通过 `Game.Hotfix.TableConfig.TableConfigManager.Tables` 访问配置。
 `Unity/Config/gen.sh/gen.bat` 与 Unity ExcelExporter 菜单统一通过 `DotNet/ConfigGenerator` 分别生成 client（c）和 server（s）配置；IDE 可选择 Generate Server、Generate All、Check。Unity 保持现有代码/数据输出与 YooAsset 加载链，服务端独立输出到 `DotNet/Game.Config`，见 [服务端配置接入](DotNetUsage.md)。
 语言服务在 Launch 中先用空表初始化，读取已保存的语言设置。
-GameEntry 将热更语言表转换后通过 LanguageManager.AddTable 补入，保留当前语言并刷新已注册的文本。
+GameEntry 将热更语言表和 SettingsLocalization 通过 LanguageManager.AddTable 补入，保留当前语言并刷新已注册的文本；AudioPreferences.ApplySaved 将本地音量设置应用到已初始化的音频系统。设置业务见 [Settings.md](Settings.md)。
 
 ## Hotfix 业务流程
 
@@ -45,6 +45,8 @@ GameEntry 拥有账号会话；流程和面板只借用它，不释放连接。L
 实际播放 Launch 时 GameEntry、GameFlow、登录面板和 191 条语言配置就绪，只有一个 UI 根节点和一个 UI 相机 Stack 引用，停止播放后无 Console 错误。
 首轮测试在用例开始前受 Test Runner 域重载异常中断，重新启动后整组通过；已恢复场景、EditorSettings、证书偏好、测试环境变量和字体纹理，并清理临时服务、数据库与测试场景。
 本次未执行 Player 脚本编译、正式热更 DLL/资源包构建、IL2CPP 或真机验证。
+
+2026-10-14 设置与账号记忆接入补验：实际 Launch 播放时 GameEntry.IsReady、LoginPanel 和设置翻译就绪，UI 根节点与相机 Stack 引用各一个，Console 无新增错误。相关 PlayMode 38/38、StandaloneOSX Release Player 脚本编译通过；移动端原生桥静态编译检查通过，完整 IL2CPP/真机尚未验证。测试后恢复场景、播放状态、编辑器偏好和动态字体，清理临时服务、数据库、证书及预览；账号持久化契约见客户端网络使用说明。
 
 ## 启动配置与资源服务
 
@@ -79,7 +81,7 @@ Launch 引用 `Assets/Resources/GlobalConfig.asset`，该 ScriptableObject 随�
 
 语言服务、事件派发器和 UI 在资源初始化前启动；Timer、Pool、Scene 在 boot 下载完成后由 Launch 启动。
 Input / Audio 在 Launch 的 Inspector 绑定配置后才启用。GameEntry 在 Awake 中自动初始化热更配置和业务。
-启动完成后在 Launch 场景打开 `LoginPanel`，用户输入账号和密码后才连接 WSS；不存在的账号由服务端创建并登录。
+启动完成后在 Launch 场景打开 `LoginPanel`，首次输入账号和密码后点击登录才连接 WSS；不存在的账号由服务端创建并登录。启用 Remember Login 时，再次打开会读取 SQLite 账号元数据和安全存储凭据，有效时点击确定执行 ResumeLogin，失效则要求密码；不自动连接。
 成功后通过 `GameScene.LoadAsync("Main", LoadSceneMode.Single)` 进入 `Assets/Scenes/MainScene/Main.unity`，
 重新将持久 UI 相机绑定到 Main 的主相机，打开 `MainPanel` 成功后关闭登录面板。
 主界面位于 `Assets/Prefab/HitfixPrefab/MainPanel.prefab`，通过注入的导航回调打开 `GomokuLobbyPanel` 或通过窗口栈打开 `WoodenFishMainPanel`；五子棋入口再选择本地棋盘或创建 / 加入联机房间。本地游戏“退出”关闭当前面板并恢复上一个窗口，保留缓存中的棋局和功德计数；联机退出先等待服务器确认。

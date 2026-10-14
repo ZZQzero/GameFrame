@@ -4,7 +4,7 @@ using System;
 using GameFrame.Network;
 using MemoryPack;
 
-namespace Game.Hotfix.Network.Protocol
+namespace Game.Protocol
 {
     public enum GomokuEndReason : int
     {
@@ -153,7 +153,7 @@ namespace Game.Hotfix.Network.Protocol
     public sealed partial class GomokuResponse
     {
         [MemoryPackOrder(0)]
-        public global::Game.Hotfix.Network.Protocol.GomokuResult Result { get; set; }
+        public global::Game.Protocol.GomokuResult Result { get; set; }
 
         [MemoryPackOrder(1)]
         public ulong CommandId { get; set; }
@@ -162,7 +162,7 @@ namespace Game.Hotfix.Network.Protocol
         public bool CommandKnown { get; set; }
 
         [MemoryPackOrder(3)]
-        public global::Game.Hotfix.Network.Protocol.GomokuSnapshot? Snapshot { get; set; }
+        public global::Game.Protocol.GomokuSnapshot? Snapshot { get; set; }
 
     }
 
@@ -181,21 +181,21 @@ namespace Game.Hotfix.Network.Protocol
         public ulong Version { get; set; }
 
         [MemoryPackOrder(3)]
-        public global::Game.Hotfix.Network.Protocol.GomokuRoomState State { get; set; }
+        public global::Game.Protocol.GomokuRoomState State { get; set; }
 
         [MemoryPackOrder(4)]
-        public global::Game.Hotfix.Network.Protocol.GomokuOutcome Outcome { get; set; }
+        public global::Game.Protocol.GomokuOutcome Outcome { get; set; }
 
         [MemoryPackOrder(5)]
-        public global::Game.Hotfix.Network.Protocol.GomokuEndReason EndReason { get; set; }
+        public global::Game.Protocol.GomokuEndReason EndReason { get; set; }
 
         [NetArrayLimit(2)]
         [MemoryPackOrder(6)]
-        public global::Game.Hotfix.Network.Protocol.GomokuMember[] Members { get; set; } = Array.Empty<global::Game.Hotfix.Network.Protocol.GomokuMember>();
+        public global::Game.Protocol.GomokuMember[] Members { get; set; } = Array.Empty<global::Game.Protocol.GomokuMember>();
 
         [NetArrayLimit(225)]
         [MemoryPackOrder(7)]
-        public global::Game.Hotfix.Network.Protocol.GomokuMoveData[] Moves { get; set; } = Array.Empty<global::Game.Hotfix.Network.Protocol.GomokuMoveData>();
+        public global::Game.Protocol.GomokuMoveData[] Moves { get; set; } = Array.Empty<global::Game.Protocol.GomokuMoveData>();
 
         [MemoryPackOrder(8)]
         public ulong RecipientAccountId { get; set; }
@@ -228,7 +228,7 @@ namespace Game.Hotfix.Network.Protocol
     public sealed partial class LoginResponse
     {
         [MemoryPackOrder(0)]
-        public global::Game.Hotfix.Network.Protocol.ResultCode ResultCode { get; set; }
+        public global::Game.Protocol.ResultCode ResultCode { get; set; }
 
         [MemoryPackOrder(1)]
         public ulong AccountId { get; set; }
@@ -267,7 +267,7 @@ namespace Game.Hotfix.Network.Protocol
     public sealed partial class OperationResponse
     {
         [MemoryPackOrder(0)]
-        public global::Game.Hotfix.Network.Protocol.ResultCode ResultCode { get; set; }
+        public global::Game.Protocol.ResultCode ResultCode { get; set; }
 
     }
 

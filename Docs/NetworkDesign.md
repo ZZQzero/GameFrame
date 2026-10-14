@@ -34,6 +34,8 @@
 
 ## 2. 已核对的项目现状
 
+2026-10-14 网络命名统一：客户端 Runtime、共享 Core 与服务端框架类型均使用 `GameFrame.Network`；双端生成消息、枚举、路由及 catalog 使用 `Game.Protocol`。源码目录与程序集依赖边界保持独立，业务会话继续归属 Hotfix / Game.Server。协议完整类型名参与指纹，改名后两端必须同步生成、编译和发布；本次不提供旧类型或旧指纹兼容。
+
 | 项目 | 当前事实 | 本设计的后续工作 |
 | --- | --- | --- |
 | GameFrame 网络 | `GameFrame.Network` 已实现 WSS、C KCP/DTLS 双通道、RPC、缓冲预算与主线程派发；`GameMediaNetwork` 是独立的媒体网络策略工具 | 补齐完整计账、诊断与平台/容量验收；世界业务会话与 WebGL WSS 延后 |
@@ -324,7 +326,7 @@ Hello 完成前仅允许当前握手所需控制包。Hello 完成后，WSS 进�
 ```proto
 syntax = "proto3";
 package game.protocol.world;
-option csharp_namespace = "Game.Hotfix.Network.Protocol";
+option csharp_namespace = "Game.Protocol";
 import "Common/net_options.proto";
 
 message MoveInput {
@@ -887,7 +889,7 @@ StopSessionAsync(requestLogout)
   5. 最后传播主异常
 ```
 
-上述 GameNetworkSession、世界入场/恢复/离场与快照处理是后续 Hotfix/.NET 业务接入流程。当前已生成账号与五子棋路由，并实现服务端 Register/Login/ResumeLogin/Logout；GomokuModule 注册两人房间业务，未使用的世界协议和 WorldModule 占位已删除，尚无实时世界或完整世界会话。客户端已实现普通实例 GameLoginSession、只读 GameUser 和登录面板参数注入，当前仅 WSS 账号登录/注销，断线清空并回到登录，不自动 Resume。启动/恢复失败停止当前流程；调用者显式清理已获得的资源。KCP 世界启动失败不隐式注销账号或关闭独立大厅。
+上述 GameNetworkSession、世界入场/恢复/离场与快照处理是后续 Hotfix/.NET 业务接入流程。当前已生成账号与五子棋路由，并实现服务端 Register/Login/ResumeLogin/Logout；GomokuModule 注册两人房间业务，未使用的世界协议和 WorldModule 占位已删除，尚无实时世界或完整世界会话。客户端已实现普通实例 GameLoginSession、只读 GameUser 和登录面板参数注入，当前支持 WSS 账号登录、玩家点击触发的 Resume 和注销，断线清空并回到登录，不自动 Resume。账号元数据存于 SQLite，恢复凭据存于系统安全存储，密码不保存；旧令牌在请求前消耗，恢复失败转为密码输入，见客户端使用说明。启动/恢复失败停止当前流程；调用者显式清理已获得的资源。KCP 世界启动失败不隐式注销账号或关闭独立大厅。
 
 WSS 共享连接的状态流不能假装独立：EnterWorld/LeaveWorld 超时、取消或处理器失败导致世界状态不确定时，不能先注销处理器再继续使用大厅 socket；该次共享 WSS 必须停止业务并关闭，大厅可通过显式 ResumeLogin 恢复账号。业务明确拒绝入场且尚未改变状态时可保留大厅。StopSession 将关闭全部连接，不重复发 LeaveWorld；所有失败均保留原异常，不自动执行恢复或入场回滚。
 
@@ -1092,7 +1094,7 @@ ET 将网络接到 Entity/Fiber、Actor、Mailbox、Location 和 Gate/Map 业务
 
 当前通用网络模块的完整计账、诊断、平台与容量验收仍按原有路线推进，优先级不因本次参考 ET 而下降。下面的世界方案用于实际业务接入时选择实现，不自动成为新增开发范围，也不要求先建设世界或分布式系统才能完善网络框架。
 
-当前已实现 WSS 两人五子棋房间，详见 [五子棋说明](Gomoku.md)。未使用的 WorldModule、世界授权、入场/恢复/退出、移动与 AOI Proto/生成路由已删除；当前 catalog 共 14 条可靠路由。`GameLoginSession` 提供 WSS 登录/注销，断线清空认证，不提供自动 Resume 或双连接世界恢复。下面的实时房间消费者、世界会话与位置路由继续作为候选方案，不是当前五子棋的前置依赖。
+当前已实现 WSS 两人五子棋房间，详见 [五子棋说明](Gomoku.md)。未使用的 WorldModule、世界授权、入场/恢复/退出、移动与 AOI Proto/生成路由已删除；当前 catalog 共 14 条可靠路由。`GameLoginSession` 提供 WSS 登录、显式 Resume 和注销，断线清空认证，不提供自动 Resume 或双连接世界恢复。下面的实时房间消费者、世界会话与位置路由继续作为候选方案，不是当前五子棋的前置依赖。
 
 | GameFrame 改进方向（ET 经验来源） | GameFrame 当前情况 | 建议与实施条件 |
 | --- | --- | --- |

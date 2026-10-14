@@ -5,9 +5,6 @@ using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using GameFrame.Network;
-using GameFrame.Network.Protocol;
-using GameFrame.Network.Transport;
-using GameFrame.Server.Network;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -206,7 +203,7 @@ namespace GameFrame.Tests
             Assert.That(response.Header.Opcode, Is.EqualTo(rpc.Opcode));
             Assert.That(rpc.ResponseCodec.Decode(response.Body).Value, Is.EqualTo(42));
             Assert.That(typeof(WssServer).Assembly.GetReferencedAssemblies().Any(name => name.Name!.StartsWith("Game.")), Is.False);
-            Assert.That(typeof(NetProtocolCatalog).Assembly.GetType("GameFrame.Network.Transport.Kcp.KcpWorker"), Is.Null);
+            Assert.That(typeof(NetProtocolCatalog).Assembly.GetType("GameFrame.Network.KcpWorker"), Is.Null);
         }
 
         [Test]

@@ -11,5 +11,8 @@ namespace Game.Hotfix
         [SerializeField] private TMPro.TMP_InputField passwordInput;
         [SerializeField] private UnityEngine.UI.Button confirmLoginButton;
         [SerializeField] private TMPro.TextMeshProUGUI statusText;
+        [SerializeField] private UnityEngine.UI.Button switchAccountButton;
+        [SerializeField] private TMPro.TextMeshProUGUI rememberedInfoText;
+        [SerializeField] private TMPro.TextMeshProUGUI passwordLabel;
     }
 }

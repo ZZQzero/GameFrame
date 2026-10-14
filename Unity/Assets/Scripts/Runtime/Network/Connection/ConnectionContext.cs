@@ -5,11 +5,8 @@ using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
-using GameFrame.Network.Protocol;
-using GameFrame.Network.Transport;
-using GameFrame.Network.Transport.Kcp;
 
-namespace GameFrame.Network.Connection
+namespace GameFrame.Network
 {
     internal sealed class ConnectionContext
     {

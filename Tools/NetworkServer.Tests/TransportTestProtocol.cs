@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
-using Game.Hotfix.Network.Generated;
-using Game.Hotfix.Network.Protocol;
+using Game.Protocol;
 using GameFrame.Network;
 
 namespace GameFrame.Tests

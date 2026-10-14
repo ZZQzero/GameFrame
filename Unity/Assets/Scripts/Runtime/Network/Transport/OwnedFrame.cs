@@ -2,9 +2,8 @@
 using System;
 using System.Buffers;
 using System.Threading;
-using GameFrame.Network.Protocol;
 
-namespace GameFrame.Network.Transport
+namespace GameFrame.Network
 {
     // Exact-size allocations avoid hidden pool capacity. Every lease includes in-flight bytes.
     internal sealed class FrameMemoryBudget

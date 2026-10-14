@@ -25,8 +25,10 @@ namespace Game.Hotfix
         {
             gomokuButton.onClick.AddListener(OpenGomoku);
             woodenFishButton.onClick.AddListener(OpenWoodenFish);
+            settingsButton.onClick.AddListener(OpenSettings);
             LifetimeScope.Register(() => gomokuButton.onClick.RemoveListener(OpenGomoku));
             LifetimeScope.Register(() => woodenFishButton.onClick.RemoveListener(OpenWoodenFish));
+            LifetimeScope.Register(() => settingsButton.onClick.RemoveListener(OpenSettings));
         }
 
         protected override void OnOpen(MainPanelArgs args)
@@ -47,6 +49,14 @@ namespace Game.Hotfix
             OpenGameAsync(async () =>
             {
                 await GameUI.Push<WoodenFishMainPanel>();
+            }, OpenCancellationToken).Forget();
+        }
+
+        private void OpenSettings()
+        {
+            OpenGameAsync(async () =>
+            {
+                await GameUI.Push<SettingsPanel>();
             }, OpenCancellationToken).Forget();
         }
 
@@ -94,6 +104,7 @@ namespace Game.Hotfix
         {
             gomokuButton.interactable = value;
             woodenFishButton.interactable = value;
+            settingsButton.interactable = value;
         }
     }
 }

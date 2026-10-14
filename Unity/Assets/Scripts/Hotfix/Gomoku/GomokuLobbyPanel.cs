@@ -1,7 +1,7 @@
 using System;
 using System.Threading;
 using Cysharp.Threading.Tasks;
-using Game.Hotfix.Network.Protocol;
+using Game.Protocol;
 using GameFrame.UI;
 
 namespace Game.Hotfix

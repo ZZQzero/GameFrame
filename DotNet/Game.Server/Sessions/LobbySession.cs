@@ -1,8 +1,7 @@
 using System.Net;
-using Game.Hotfix.Network.Generated;
+using Game.Protocol;
 using Game.Server.Login;
 using GameFrame.Network;
-using GameFrame.Server.Network;
 
 namespace Game.Server.Sessions
 {

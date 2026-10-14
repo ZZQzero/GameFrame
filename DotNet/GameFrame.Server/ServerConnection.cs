@@ -3,11 +3,8 @@ using System.Net.WebSockets;
 using Microsoft.Extensions.Logging;
 using System.Security.Cryptography;
 using System.Threading.Channels;
-using GameFrame.Network;
-using GameFrame.Network.Protocol;
-using GameFrame.Network.Transport;
 
-namespace GameFrame.Server.Network
+namespace GameFrame.Network
 {
 
     internal sealed class ServerConnection

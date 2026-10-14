@@ -3,7 +3,7 @@ using Game.Config.TableConfig;
 using Game.Server.Database;
 using Game.Server.Login;
 using Game.Server.Gomoku;
-using GameFrame.Server.Network;
+using GameFrame.Network;
 
 namespace Game.Server
 {

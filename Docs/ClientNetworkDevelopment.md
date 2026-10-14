@@ -16,6 +16,8 @@
 
 Runtime 不引用 Hotfix/Editor；Hotfix 通过冻结 NetProtocolCatalog 提供 codec，系统控制包固定编码不依赖业务 DTO。不要复制第二套 RPC、计时器或事件总线，不让 Runtime 修改 Transform 或维护账号、背包、房间和世界状态。
 
+客户端、共享 Core 与服务端网络框架统一使用 `GameFrame.Network`。Connection、Protocol、Transport、Kcp 等目录只用于组织源码，不再各建子命名空间；程序集及依赖边界保持独立。双端生成的 DTO、枚举、路由与 catalog 统一使用 `Game.Protocol`，客户端仍在 Game.Hotfix 程序集中编译，服务端由 Game.Protocol 工程链接同源文件。游戏会话与玩法继续使用各自的业务命名空间。
+
 GameRuntime 可选拥有 NetworkRuntime，GameEntry 只初始化热更业务；默认 NetworkOptions=null，保持离线，不自动建客户端/连服。驱动使用已有持久根，DLL 装载后由 GameEntry prefab Awake 进入业务，不加反射入口或 Launch→Hotfix 调用。遵循 [启动](Launch.md)、[作用域](Scope.md)、[错误契约](ErrorContract.md) 和 [全局规则](../AGENTS.md)。
 
 C#按 4 空格/Allman、分支与循环展开、Async 后缀及明确资源归属维护；生成/第三方不手工改格式。修改生成配置/模板后重新生成。审查必须先建清单和调用链并完整阅读指定范围的实现、调用/依赖、配置、生成工具/产物、测试/构建；不能抽样或用测试代替源码审查，持续记录未读/受阻项。
@@ -136,7 +138,7 @@ Connect 后显式 Login/Resume，独立 Register 可选；Login 自动创建不�
 
 当前 `GameLoginSession` 是 Hotfix 的普通实例，拥有一个 WSS 大厅客户端、私有认证响应、只读 GameUser、任务与生命周期 CTS。GameEntry 只创建/注入/停止它，LoginPanel 通过 LoginPanelArgs 借用；后续业务通过构造参数或面板参数接收同一个实例，不查询入口或新增静态 Current。只有校验成功结果/TTL 且连接仍有效后，才原子提交用户与凭据；密码不进入 GameUser。面板关闭只取消该次操作，成功关闭面板不注销会话。
 
-登录/注销串行准入，重复操作拒绝；失败、超时或取消等待 Close 清理后释放操作资格。DisposeAsync 先发布共享关闭任务、取消并等待在途操作，再释放观察者/客户端和清零凭据，重复释放等待同一任务。断线/顶号/注销使 CurrentUser 为 null 并通知 GameFlow 回到登录。当前不提供 Resume 或自动重连，不持久化凭据；只读用户快照不能作为权限依据，每次业务准入检查 IsAuthenticated。
+登录、恢复、读取/清除本地账号与注销串行准入，重复操作拒绝；失败、超时或取消等待 Close 清理后释放操作资格。DisposeAsync 先发布共享关闭任务、取消并等待在途操作，再释放观察者/客户端和清零凭据，重复释放等待同一任务。断线/顶号/注销使 CurrentUser 为 null 并通知 GameFlow 回到登录。当前通过 ResumeLoginAsync 提供玩家点击触发的恢复，不自动重连。RememberedLoginStore 使用 SQLite 保存账号元数据、系统安全存储保存恢复令牌，密码不持久化；只读用户快照不能作为权限依据，每次业务准入检查 IsAuthenticated。
 
 认证失效通知负责清空会话，UI 导航还需满足 GameFlow 运行、GameRuntime 运行及 GameUI 已初始化。退出时 Launch 与 GameEntry 回调顺序不固定；框架已经关闭或开始关闭时，不再执行登录/主界面导航，异步打开完成后也需复核生命周期。不能靠调整框架关闭顺序或吞掉 GameUI 未初始化异常处理退出。
 

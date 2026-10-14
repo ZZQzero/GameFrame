@@ -13,8 +13,9 @@ namespace GameFrame.ProtocolToolTests
         [Test]
         public void GenerationIsDeterministicAcrossTypeInputOrder()
         {
-            Type[] types = typeof(Game.Hotfix.Network.Protocol.LoginRequest).Assembly.GetTypes()
-                .Where(type => type.Namespace == "Game.Hotfix.Network.Protocol").ToArray();
+            Type[] types = typeof(Game.Protocol.LoginRequest).Assembly.GetTypes()
+                .Where(type => type.Namespace == "Game.Protocol" &&
+                    (type.IsEnum || Attribute.IsDefined(type, typeof(MemoryPackableAttribute)))).ToArray();
             var generator = new MemoryPackProtocolGenerator();
             var first = generator.Generate(types, Routes(), includeArtifacts: true);
             var second = generator.Generate(types.Reverse(), Routes().Reverse(), includeArtifacts: true);
@@ -58,7 +59,7 @@ namespace GameFrame.ProtocolToolTests
             return new[]
             {
                 new ProtocolRouteDefinition("Login", 1000, "Rpc", NetDelivery.Reliable,
-                    typeof(Game.Hotfix.Network.Protocol.LoginRequest), typeof(Game.Hotfix.Network.Protocol.LoginResponse), 2048, 256)
+                    typeof(Game.Protocol.LoginRequest), typeof(Game.Protocol.LoginResponse), 2048, 256)
             };
         }
 

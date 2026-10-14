@@ -10,5 +10,6 @@ namespace Game.Hotfix
         [SerializeField] private UnityEngine.UI.Button gomokuButton;
         [SerializeField] private UnityEngine.UI.Button woodenFishButton;
         [SerializeField] private TMPro.TextMeshProUGUI statusText;
+        [SerializeField] private UnityEngine.UI.Button settingsButton;
     }
 }

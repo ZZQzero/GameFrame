@@ -17,6 +17,7 @@ namespace Game.Hotfix
     {
         bool ownsTables;
         [SerializeField] string loginEndpoint = "wss://localhost:7443/network";
+        [SerializeField] bool rememberLogin = true;
         GameLoginSession loginSession;
         GameFlow flow;
         GomokuRoomSession gomoku;
@@ -61,8 +62,13 @@ namespace Game.Hotfix
             }
 
             LanguageManager.AddTable(languages);
+            LanguageManager.AddTable(SettingsLocalization.CreateTable());
+            AudioPreferences.ApplySaved();
             GameUIRegistration.RegisterAll();
-            loginSession = new GameLoginSession(GameRuntime.Network, new Uri(loginEndpoint));
+            var endpoint = new Uri(loginEndpoint);
+            var rememberedLogin = rememberLogin ? new RememberedLoginStore(System.IO.Path.Combine(
+                Application.persistentDataPath, "Game", "login.sqlite"), endpoint, new LoginCredentialVault()) : null;
+            loginSession = new GameLoginSession(GameRuntime.Network, endpoint, rememberedLogin: rememberedLogin);
             gomoku = new GomokuRoomSession(loginSession);
             flow = new GameFlow(loginSession, gomoku);
             IsReady = true;

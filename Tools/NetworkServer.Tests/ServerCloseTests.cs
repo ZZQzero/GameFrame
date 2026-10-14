@@ -1,10 +1,7 @@
 using System.Buffers;
 using System.Net;
-using Game.Hotfix.Network.Generated;
-using Game.Hotfix.Network.Protocol;
+using Game.Protocol;
 using GameFrame.Network;
-using GameFrame.Network.Protocol;
-using GameFrame.Server.Network;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 
@@ -45,7 +42,7 @@ namespace GameFrame.Tests
             var session = new InitializingSession();
             var application = Application((_, _, _) => Task.FromResult(new EchoResponse()), _ => session);
             using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            var memory = new GameFrame.Network.Transport.FrameMemoryBudget(1024 * 1024);
+            var memory = new GameFrame.Network.FrameMemoryBudget(1024 * 1024);
             using var socket = new ConnectionRaceTests.ControlledSocket(FrameDirection.ServerToClient);
             long now = 1000;
             var server = new ServerConnection(new WssServerOptions(), application, memory, () => { }, guard.Token,
@@ -140,7 +137,7 @@ namespace GameFrame.Tests
                 return new EchoResponse();
             });
             using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            var memory = new GameFrame.Network.Transport.FrameMemoryBudget(1024 * 1024);
+            var memory = new GameFrame.Network.FrameMemoryBudget(1024 * 1024);
             using var socket = new ConnectionRaceTests.ControlledSocket(FrameDirection.ServerToClient);
             var server = new ServerConnection(new WssServerOptions(), application, memory, () => { }, guard.Token,
                 NullLogger.Instance, 1, new IPEndPoint(IPAddress.Loopback, 1000));

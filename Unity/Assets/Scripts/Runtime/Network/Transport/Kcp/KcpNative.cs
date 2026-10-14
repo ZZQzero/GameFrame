@@ -2,7 +2,7 @@
 using System;
 using System.Runtime.InteropServices;
 
-namespace GameFrame.Network.Transport.Kcp
+namespace GameFrame.Network
 {
     // All calls, including destroy and listener child operations, run on the handle's creating thread.
     internal static class KcpNative

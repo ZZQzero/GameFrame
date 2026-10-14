@@ -2,8 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
-using Game.Hotfix.Network.Generated;
-using Game.Hotfix.Network.Protocol;
+using Game.Protocol;
 using GameFrame.Network;
 
 namespace Game.Hotfix
@@ -372,7 +371,7 @@ namespace Game.Hotfix
             }
 
             var game = new GomokuGame(15);
-            foreach (Network.Protocol.GomokuMoveData move in snapshot.Moves)
+            foreach (GomokuMoveData move in snapshot.Moves)
             {
                 if ((move.Stone != 1 && move.Stone != 2) ||
                     game.PlaceMove(move.Column, move.Row, (GomokuStone)move.Stone) != GomokuMoveResult.Accepted)

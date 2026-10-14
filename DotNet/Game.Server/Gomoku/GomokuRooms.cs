@@ -1,11 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
 using Game.Hotfix;
-using Game.Hotfix.Network.Protocol;
+using Game.Protocol;
 using Game.Server.Login;
 using GameFrame.Network;
-using GameFrame.Server.Network;
-using WireMove = Game.Hotfix.Network.Protocol.GomokuMoveData;
+using WireMove = Game.Protocol.GomokuMoveData;
 
 namespace Game.Server.Gomoku
 {
@@ -606,8 +605,8 @@ namespace Game.Server.Gomoku
                         try
                         {
                             await output.Connection.PushAsync(output.Snapshot.State == GomokuRoomState.Closed
-                                ? Game.Hotfix.Network.Generated.GameNetRoutes.GomokuRoomClosed
-                                : Game.Hotfix.Network.Generated.GameNetRoutes.GomokuRoomSnapshot, output.Snapshot).ConfigureAwait(false);
+                                ? Game.Protocol.GameNetRoutes.GomokuRoomClosed
+                                : Game.Protocol.GameNetRoutes.GomokuRoomSnapshot, output.Snapshot).ConfigureAwait(false);
                         }
                         catch (Exception error) when (error is NetworkException || error is OperationCanceledException)
                         {

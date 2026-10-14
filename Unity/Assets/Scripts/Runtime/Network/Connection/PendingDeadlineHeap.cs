@@ -2,7 +2,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace GameFrame.Network.Connection
+namespace GameFrame.Network
 {
     internal abstract class PendingRequest
     {
@@ -18,7 +18,7 @@ namespace GameFrame.Network.Connection
         public System.Threading.CancellationTokenRegistration Registration;
         public System.Threading.CancellationToken CancellationToken;
         public abstract int ResponseLimit { get; }
-        public abstract void Complete(Transport.OwnedFrame response);
+        public abstract void Complete(OwnedFrame response);
     }
 
     internal sealed class PendingDeadlineHeap

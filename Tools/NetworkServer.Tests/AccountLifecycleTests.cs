@@ -1,13 +1,9 @@
 using System.Net;
-using Game.Hotfix.Network.Generated;
-using Game.Hotfix.Network.Protocol;
+using Game.Protocol;
 using Game.Server;
 using Game.Server.Login;
 using Game.Server.Sessions;
 using GameFrame.Network;
-using GameFrame.Network.Protocol;
-using GameFrame.Network.Transport;
-using GameFrame.Server.Network;
 using NUnit.Framework;
 
 namespace GameFrame.Tests

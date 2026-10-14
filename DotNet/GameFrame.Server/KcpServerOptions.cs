@@ -1,4 +1,4 @@
-namespace GameFrame.Server.Network
+namespace GameFrame.Network
 {
     public sealed class KcpServerOptions
     {

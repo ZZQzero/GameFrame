@@ -3,9 +3,8 @@ using System;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
-using GameFrame.Network.Protocol;
 
-namespace GameFrame.Network.Transport
+namespace GameFrame.Network
 {
     internal sealed class WebSocketTransport : IFrameTransport
     {

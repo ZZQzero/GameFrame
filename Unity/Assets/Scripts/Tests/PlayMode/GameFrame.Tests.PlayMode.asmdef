@@ -12,7 +12,8 @@
         "UnityEditor.TestRunner",
         "GameFrame.Runtime",
         "Game.AOT",
-        "Game.Hotfix"
+        "Game.Hotfix",
+        "GameFrame.Sqlite"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

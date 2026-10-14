@@ -1,8 +1,8 @@
-using Game.Hotfix.Network.Generated;
+using Game.Protocol;
 using Game.Server.Diagnostics;
 using Game.Server.Login;
 using Game.Server.Gomoku;
-using GameFrame.Server.Network;
+using GameFrame.Network;
 
 namespace Game.Server
 {

@@ -2,9 +2,8 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using GameFrame.Network.Protocol;
 
-namespace GameFrame.Network.Transport
+namespace GameFrame.Network
 {
     internal interface IFrameTransport : IDisposable
     {

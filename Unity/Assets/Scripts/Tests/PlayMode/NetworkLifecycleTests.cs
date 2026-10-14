@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
-using Game.Hotfix.Network.Generated;
+using Game.Protocol;
 using GameFrame.Network;
 using NUnit.Framework;
 using UnityEngine;

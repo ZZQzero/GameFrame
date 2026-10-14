@@ -1,7 +1,7 @@
 using System;
 using System.Buffers.Binary;
 
-namespace GameFrame.Network.Protocol
+namespace GameFrame.Network
 {
     internal enum FrameKind : byte
     {

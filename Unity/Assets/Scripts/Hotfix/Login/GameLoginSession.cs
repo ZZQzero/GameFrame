@@ -4,8 +4,7 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
-using Game.Hotfix.Network.Generated;
-using Game.Hotfix.Network.Protocol;
+using Game.Protocol;
 using GameFrame.Network;
 using UnityEngine;
 
@@ -18,6 +17,7 @@ namespace Game.Hotfix
         private readonly NetworkConnectOptions connectOptions;
         private readonly IDisposable stateObserver;
         private readonly CancellationTokenSource lifetime = new CancellationTokenSource();
+        private readonly RememberedLoginStore rememberedLogin;
         private GameUser user;
         private LoginResponse credentials;
         private Task operation;
@@ -34,7 +34,8 @@ namespace Game.Hotfix
         public NetworkClient LobbyClient => IsAuthenticated ? client :
             throw new InvalidOperationException("当前账号尚未登录或会话已失效。");
 
-        public GameLoginSession(NetworkRuntime runtime, Uri endpoint, bool allowDevelopmentWebSocket = false)
+        public GameLoginSession(NetworkRuntime runtime, Uri endpoint, bool allowDevelopmentWebSocket = false,
+            RememberedLoginStore rememberedLogin = null)
         {
             RequireMainThread();
             if (runtime == null)
@@ -43,6 +44,7 @@ namespace Game.Hotfix
             }
 
             connectOptions = NetworkConnectOptions.WebSocket(endpoint, allowDevelopmentWebSocket);
+            this.rememberedLogin = rememberedLogin;
             client = runtime.CreateClient(new NetworkClientOptions
             {
                 TrustedWebSocketEndpoints = new[] { endpoint }
@@ -55,7 +57,44 @@ namespace Game.Hotfix
 
         public static bool IsValidPassword(string password) => password != null && password.Length >= 8 && password.Length <= 128;
 
-        public async UniTask<ResultCode> LoginAsync(string account, string password, CancellationToken cancellationToken = default)
+        public bool SupportsRememberedLogin => rememberedLogin != null;
+
+        public async UniTask<RememberedAccount> ReadRememberedAccountAsync(CancellationToken token = default)
+        {
+            RequireMainThread();
+            TaskCompletionSource<bool> completed = BeginOperation();
+            try
+            {
+                using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, token);
+                return rememberedLogin == null ? null : await rememberedLogin.ReadAsync(cancellation.Token);
+            }
+            finally
+            {
+                operation = null;
+                completed.TrySetResult(true);
+            }
+        }
+
+        public async UniTask ForgetRememberedAccountAsync(CancellationToken token = default)
+        {
+            RequireMainThread();
+            TaskCompletionSource<bool> completed = BeginOperation();
+            try
+            {
+                if (rememberedLogin != null)
+                {
+                    using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, token);
+                    await rememberedLogin.ForgetAsync(cancellation.Token);
+                }
+            }
+            finally
+            {
+                operation = null;
+                completed.TrySetResult(true);
+            }
+        }
+
+        public UniTask<ResultCode> LoginAsync(string account, string password, CancellationToken cancellationToken = default)
         {
             RequireMainThread();
             if (!IsValidAccount(account) || !IsValidPassword(password))
@@ -63,13 +102,32 @@ namespace Game.Hotfix
                 throw new ArgumentException("账号或密码不符合输入要求。");
             }
 
+            return AuthenticateAsync(account, password, false, cancellationToken);
+        }
+
+        public UniTask<ResultCode> ResumeLoginAsync(CancellationToken cancellationToken = default)
+        {
+            RequireMainThread();
+            if (rememberedLogin == null)
+            {
+                throw new InvalidOperationException("未配置账号恢复存储。");
+            }
+
+            return AuthenticateAsync(null, null, true, cancellationToken);
+        }
+
+        private async UniTask<ResultCode> AuthenticateAsync(string account, string password, bool resume,
+            CancellationToken cancellationToken)
+        {
             if (user != null)
             {
                 throw new InvalidOperationException("请先结束旧账号会话，再登录其他账号。");
             }
 
             TaskCompletionSource<bool> completed = BeginOperation();
-            var request = new LoginRequest { Account = account, Password = password };
+            LoginRequest request = null;
+            ResumeLoginRequest resumeRequest = null;
+            RememberedLoginCredential saved = null;
             LoginResponse response = null;
             Exception failure = null;
             bool committed = false;
@@ -77,10 +135,28 @@ namespace Game.Hotfix
             {
                 using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, cancellationToken);
                 cancellation.Token.ThrowIfCancellationRequested();
+                if (resume)
+                {
+                    saved = await rememberedLogin.TakeAsync(cancellation.Token);
+                    if (saved == null)
+                    {
+                        return ResultCode.InvalidCredentials;
+                    }
+
+                    account = saved.Account.AccountName;
+                    resumeRequest = new ResumeLoginRequest { AccountSessionId = saved.SessionId, ResumeToken = saved.Token };
+                }
+                else
+                {
+                    request = new LoginRequest { Account = account, Password = password };
+                }
+
                 await client.CloseAsync();
                 await client.ConnectAsync(connectOptions, cancellation.Token);
                 long admission = NetworkClock.GetMilliseconds();
-                response = await client.RequestAsync(GameNetRoutes.Login, request, TimeSpan.FromSeconds(5), cancellation.Token);
+                response = resume
+                    ? await client.RequestAsync(GameNetRoutes.ResumeLogin, resumeRequest, TimeSpan.FromSeconds(5), cancellation.Token)
+                    : await client.RequestAsync(GameNetRoutes.Login, request, TimeSpan.FromSeconds(5), cancellation.Token);
                 cancellation.Token.ThrowIfCancellationRequested();
                 if (response.ResultCode != ResultCode.Success)
                 {
@@ -88,6 +164,21 @@ namespace Game.Hotfix
                 }
 
                 ValidateLogin(response, admission);
+                if (saved != null && response.AccountId != saved.Account.AccountId)
+                {
+                    throw new NetworkProtocolException("恢复响应与保存的账号不一致。");
+                }
+
+                if (rememberedLogin != null)
+                {
+                    long remaining = checked(admission + response.ResumeRemainingTtlMs - NetworkClock.GetMilliseconds());
+                    await rememberedLogin.SaveAsync(account, response.AccountId,
+                        checked(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + remaining),
+                        response.AccountSessionId, response.ResumeToken, cancellation.Token);
+                    cancellation.Token.ThrowIfCancellationRequested();
+                    ValidateLogin(response, admission);
+                }
+
                 if (client.State != NetworkClientState.Connected)
                 {
                     throw new NetworkException("登录响应到达后连接已失效。");
@@ -107,7 +198,12 @@ namespace Game.Hotfix
             }
             finally
             {
-                request.Password = string.Empty;
+                if (request != null)
+                {
+                    request.Password = string.Empty;
+                }
+
+                saved?.Dispose();
                 password = string.Empty;
                 ClearCredentials(response);
                 try
@@ -138,6 +234,11 @@ namespace Game.Hotfix
             try
             {
                 using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, cancellationToken);
+                if (rememberedLogin != null)
+                {
+                    await rememberedLogin.ForgetAsync(cancellation.Token);
+                }
+
                 OperationResponse response = await client.RequestAsync(GameNetRoutes.Logout, new LogoutRequest(),
                     TimeSpan.FromSeconds(5), cancellation.Token);
                 return response.ResultCode;

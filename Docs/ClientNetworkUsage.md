@@ -1,6 +1,6 @@
 # 客户端网络使用说明
 
-客户端 API 在 `GameFrame.Network`，游戏使用生成的 `Game.Hotfix.Network.Generated` 路由和 `Game.Hotfix.Network.Protocol` DTO。开发/线程/错误与所有权规则见 [客户端网络开发规范](ClientNetworkDevelopment.md)；本地服务、PostgreSQL、证书与测试凭据准备见 [服务端使用说明](DotNetUsage.md)。本文示例位于已有 Hotfix 主线程异步业务方法内，变量由业务提供，不表示当前已实现 GameNetworkSession 或世界服务。
+客户端 API 在 `GameFrame.Network`，游戏消息、枚举和生成路由统一在 `Game.Protocol`。开发/线程/错误与所有权规则见 [客户端网络开发规范](ClientNetworkDevelopment.md)；本地服务、PostgreSQL、证书与测试凭据准备见 [服务端使用说明](DotNetUsage.md)。本文示例位于已有 Hotfix 主线程异步业务方法内，变量由业务提供，不表示当前已实现 GameNetworkSession 或世界服务。
 
 ## 1. 启用网络并创建客户端
 
@@ -18,8 +18,7 @@ NetworkOptions = new NetworkRuntimeOptions()
 using System;
 using GameFrame;
 using GameFrame.Network;
-using Game.Hotfix.Network.Generated;
-using Game.Hotfix.Network.Protocol;
+using Game.Protocol;
 
 var endpoint = new Uri("wss://localhost:7443/network");
 NetworkClient client = GameRuntime.Network.CreateClient(
@@ -48,7 +47,7 @@ openssl x509 -in /absolute/path/localhost.pem -outform DER -out /absolute/path/l
 
 不要将 PFX 或私钥导入 Unity；正式服务使用对应域名的可信 CA 证书，Editor 工具不进入 Player。
 
-登录按钮校验账号（1～64 个 UTF-16 字符，无首尾空白/控制字符）、密码（8～128，不裁剪），禁用控件并提交一次 Login。已有账号验密，不存在则建号并认证；错误密码显示拒绝，失败收尾清空密码并恢复输入。成功后由 Hotfix 的 GameFlow 通过 GameScene 以 Single 模式加载、激活 Main，绑定 Main 的主相机与持久 UI 相机，打开 `MainPanel` 成功后关闭登录面板。主界面提供五子棋和木鱼按钮，游戏中的“退出”返回主界面；账号连接继续存活，两个游戏仍是本地玩法，没有新增服务器对局。
+登录按钮校验账号（1～64 个 UTF-16 字符，无首尾空白/控制字符）、密码（8～128，不裁剪），禁用控件并提交一次 Login。已有账号验密，不存在则建号并认证；错误密码显示拒绝，失败收尾清空密码并恢复输入。成功后由 Hotfix 的 GameFlow 通过 GameScene 以 Single 模式加载、激活 Main，绑定 Main 的主相机与持久 UI 相机，打开 `MainPanel` 成功后关闭登录面板。主界面提供五子棋、木鱼和设置按钮；五子棋可选择本地或联机房间，木鱼使用本地玩法。退出游戏或设置后返回上一个窗口，账号连接继续存活。
 
 进入 Main 或打开主界面失败时登录面板保留，已认证会话仍有效；账号和密码输入保持禁用，玩家再次点击确定只进入主场景，不重复认证。断线后清空认证，关闭场景组的主界面、游戏及加载请求，再重新打开登录面板；Main 已加载时重新登录复用该场景。加载期间认证失效或业务停止，迟到的场景完成结果不打开主界面；GameEntry 的主动 StopAsync 先停止 GameFlow 并等待已发起的主场景导航收尾，再释放账号会话与配置。流程只借用会话；面板通过参数和成功回调接入，职责与多场景扩展见 [业务流程](Launch.md#hotfix-业务流程)。
 
@@ -65,7 +64,7 @@ ulong accountId = user.AccountId;
 // session.LobbyClient 是已认证客户端的借用引用，业务不关闭或释放它。
 ```
 
-GameUser 只包含账号 ID、输入账号名、认证 epoch 和单调到期时间；私有 sessionId/token 不暴露给 UI，不持久化密码或凭据。断线、顶号或显式注销清空认证并回到登录，无自动重连或 Resume。`await session.LogoutAsync(token)` 请求远端注销并清理本地状态；生命周期结束使用 `await session.DisposeAsync()`。运行中关闭整个应用先 `await entry.StopAsync()`，再关闭 GameUI、GameRuntime 和资源服务。
+GameUser 只包含账号 ID、输入账号名、认证 epoch 和单调到期时间；私有 sessionId/token 不暴露给 UI，密码不持久化。GameEntry 默认启用 Remember Login，SQLite 记录每个服务端最近登录的账号，系统安全存储保存恢复凭据。断线、顶号或显式注销清空内存认证并回到登录，不自动重连。`await session.LogoutAsync(token)` 请求远端注销并清理本地状态；生命周期结束使用 `await session.DisposeAsync()`。运行中关闭整个应用先 `await entry.StopAsync()`，再关闭 GameUI、GameRuntime 和资源服务。
 
 停止播放或进程退出时，Unity 不保证 Launch 和 GameEntry 的清理顺序。此时网络关闭仍清空认证；GameFlow 仅在流程运行、GameRuntime 运行且 GameUI 已初始化时执行界面切换，异步打开完成后再次检查，避免在 UI 销毁后返回登录。
 
@@ -132,7 +131,11 @@ EchoResponse echo = await client.RequestAsync(
     cancellationToken);
 ```
 
-底层 Resume RPC 已提供，当前 GameLoginSession 不暴露恢复操作。后续显式恢复时先完成旧客户端 Close，再连接 WSS，用保存的 accountSessionId/resumeToken 调用 GameNetRoutes.ResumeLogin。检查 ResultCode 及与 Login 相同的成功载荷/期限，成功原子替换 token；旧 token 只成功一次，响应丢失不自动复用或密码登录。服务器重启后 Resume 失效，玩家显式重新 Login。
+`await session.ResumeLoginAsync(token)` 使用已保存的账号恢复登录。登录面板打开时只读取本地记录；有效凭据隐藏密码输入框，玩家点击“确定登录”才连接 WSS。恢复前先消耗本地旧令牌，再关闭旧连接、连接并提交 ResumeLogin；成功保存轮换后的新令牌并校验账号 ID、载荷及剩余期限。拒绝、超时、取消或响应丢失不会重放旧令牌；保留账号名、恢复密码输入，玩家显式提交新 Login。恢复不延长服务端账号会话，默认最长 24 小时；服务器重启、顶号、注销或过期后需重新输入密码。
+
+本地数据库位于 `Application.persistentDataPath/Game/login.sqlite`，application_id=1195789390、schema=1。仅含 endpoint、account_name、account_id、expires_utc_ms；无密码、sessionId 或 token。令牌按应用、数据库绝对路径和端点隔离：macOS/iOS Keychain、Windows Credential Manager、Android Keystore AES-GCM（密文位于 noBackupFilesDir）。安全存储失败明确报错，不写明文后备。SQLite 与安全存储不跨库原子提交：写库失败删除本次安全凭据，二者不匹配时要求密码登录；既有库格式错误不覆盖重建。
+
+“切换账号”调用 ForgetRememberedAccountAsync，清除该端点的本地记录与令牌并恢复空输入框。显式 Logout 先清除保存的凭据再提交远端注销；Dispose/正常关闭仅清理内存和连接，保留下次登录所需记录。GameEntry 的 Remember Login 可关闭此能力，适用于不支持系统安全存储的平台或不需要记忆账号的业务。
 
 已登录时显式 Logout：
 
@@ -264,6 +267,8 @@ Unity 依赖固定 MemoryPack1.21.4，NuGetForUnity4.5.0 与 MemoryPack.Unity Gi
 
 ## 8. 验证与现有证据
 
+2026-10-14 命名空间统一复验（Unity 6000.3.19f1 / macOS）：Editor 编译通过；网络相关 EditMode135/135，网络生命周期 / 五子棋 / 真实 WSS 登录及对局 PlayMode45/45，现有原生 KCP / DTLS 的 Hello / Echo / 释放 PlayMode1/1，均零跳过。StandaloneOSX Release Player 脚本与 Hotfix DLL 编译通过，已更新 `Assets/Config/Code/Game.Hotfix.dll.bytes` 并保留 GUID。场景、测试设置、测试环境变量和动态字体缓存恢复，独立临时服务 / 数据库 / 证书 / grant 清理。本次未构建或部署 YooAsset 资源包，未验实际 IL2CPP、新 DTO 包后热更或真机；此前旧协议资源包发布前须重新构建。
+
 在对应 Unity 编辑器使用现有测试入口，步骤遵循 [gameframe-validate](../skills/gameframe-validate/SKILL.md)：
 
 | 变更 | 优先运行 |
@@ -305,3 +310,5 @@ Unity TLS 在部分 Editor 平台不继承 `dotnet dev-certs` 的信任。登录
 StandaloneOSX Release Player 脚本和 Hotfix DLL 已编译，`Assets/Config/Code/Game.Hotfix.dll.bytes` 已更新；资源包输出 `Bundles/StandaloneOSX/DefaultPackage/gomoku-20261014-validated`，构建验证通过，尚未部署。协议相关 EditMode 162/162。
 
 协议精简后的复验：当前 14 条可靠路由；协议 EditMode 135/135，相关 PlayMode 合计 48 项通过（含真实 WSS 房间与生产协议 KCP / DTLS Echo）。StandaloneOSX Release Player 脚本与 Hotfix DLL 已重新编译；前述资源包仍是精简前产物，发布时需重新构建。具体范围与平台边界见 [五子棋验证](Gomoku.md#10-已实施与验证边界)。
+
+2026-10-14 设置与账号记忆验证：Unity 6000.3.19f1/macOS Editor 编译通过；SettingsPanelTests、MainPanelTests、RememberedLoginStoreTests、RememberedLoginIntegrationTests、GameLoginSessionTests、ResourceLoadManagerTests 共 38/38 PlayMode 通过，零跳过。使用独立临时 WSS/PostgreSQL 与显式公开证书信任，覆盖重新创建客户端后免密登录、连续令牌轮换、恢复拒绝后手动密码登录、切换账号、注销、SQLite 元数据及 macOS Keychain 实际读写删除。最初未配置环境的联调用例跳过，以及临时服务尚未监听造成的失败，均在服务就绪后重新执行通过。StandaloneOSX Release Player 脚本编译通过（含 Game.Hotfix 与 GameFrame.Sqlite）；Android Java 桥编译、iOS Objective-C++ 桥 SDK 语法检查通过。移动端/Windows 安全存储实际运行、完整 IL2CPP 链接和真机验证尚未执行。

@@ -1,6 +1,6 @@
-using Game.Hotfix.Network.Generated;
+using Game.Protocol;
 using Game.Server.Sessions;
-using GameFrame.Server.Network;
+using GameFrame.Network;
 
 namespace Game.Server.Login
 {

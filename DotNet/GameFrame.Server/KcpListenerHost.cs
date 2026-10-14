@@ -6,12 +6,8 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Threading.Channels;
-using GameFrame.Network;
-using GameFrame.Network.Protocol;
-using GameFrame.Network.Transport;
-using GameFrame.Network.Transport.Kcp;
 
-namespace GameFrame.Server.Network
+namespace GameFrame.Network
 {
     // The listener owns the socket and every child native handle. Application handlers never call native.
     public sealed class KcpListenerHost : IAsyncDisposable

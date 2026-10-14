@@ -1,4 +1,4 @@
-using Game.Hotfix.Network.Protocol;
+using Game.Protocol;
 using Game.Server.Login;
 using Npgsql;
 using NUnit.Framework;

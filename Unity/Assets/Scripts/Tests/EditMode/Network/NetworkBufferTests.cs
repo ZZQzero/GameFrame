@@ -1,6 +1,5 @@
 using System;
 using GameFrame.Network;
-using GameFrame.Network.Transport;
 using NUnit.Framework;
 
 namespace GameFrame.Tests

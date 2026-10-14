@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace GameFrame.Network.Transport.Kcp
+namespace GameFrame.Network
 {
     internal sealed class KcpWorker
     {

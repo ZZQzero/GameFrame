@@ -1,10 +1,7 @@
 using System.Net;
 using System.Runtime.ExceptionServices;
-using GameFrame.Network;
-using GameFrame.Network.Protocol;
-using GameFrame.Network.Transport;
 
-namespace GameFrame.Server.Network
+namespace GameFrame.Network
 {
     public readonly record struct ServerMessageHeader(uint Opcode, ulong CorrelationId, int BodyLength, NetDelivery Delivery)
     {

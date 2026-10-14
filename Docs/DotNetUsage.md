@@ -197,7 +197,7 @@ WSS 的 ReceiveQueueBytes 最小为 33,824 字节：最大帧 32,768 + 初始帧
 
 ## 5. 框架接入 API
 
-业务组合使用 GameFrame.Server.Network 和生成的 Game.Hotfix.Network.Generated/Protocol 类型：
+业务组合使用 `GameFrame.Network` 框架类型和 `Game.Protocol` 生成消息、枚举及路由：
 
 ```csharp
 var application = new ServerApplication(GameNetProtocol.Catalog);
@@ -331,6 +331,8 @@ meter 为 `GameFrame.Server.Network.Kcp`，使用 MeterListener 或现有 .NET �
 <a id="验证与现有证据"></a>
 
 ## 9. 验证与现有证据
+
+2026-10-14 命名空间统一复验（macOS / .NET SDK 10.0.401）：七工程 Release 编译 0 警告 / 错误；协议 generate/check --artifacts 五文件一致；Protocol167/167、Framework13/13、Server178/178，均零跳过。服务端测试使用独立临时 PostgreSQL 与已核验 hash 的现有 macOS Release KCP 原生库，覆盖真实 WSS / 数据库 / UDP / DTLS。黄金向量只修改完整类型名称，消息字节不变；协议指纹已更新。未执行远端 CI、其他平台、IL2CPP、容量或长时运行验收。同步发布需重新构建资源包，不能复用此前旧协议资源包。
 
 ```sh
 (cd Tools && dotnet test NetworkFramework.Tests -c Release)

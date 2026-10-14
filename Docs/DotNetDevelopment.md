@@ -32,6 +32,10 @@ SDK 由 `DotNet/global.json`、`Tools/global.json` 锁定为 10.0.401，工程�
 
 `DotNet/NetworkProtocol` 加入服务端解决方案，提供 Generate/Check IDE 启动项；Unity Editor 菜单通过外部 .NET 进程调用同一工具。生成器只依赖 Core 和生成/编译库，不引用 Game.Protocol，保持缺失既有生成文件时仍能运行。协议源、正式生成文件与共享源码引用位置保持一致，详见双方使用说明。
 
+Core、客户端 Runtime 网络和 Server 网络统一使用 `GameFrame.Network`，目录分类不对应独立子命名空间。程序集名称、共享源码链接与依赖边界保持独立；同名空间不代表业务可以访问内部类型。双端生成 DTO、枚举、GameNetRoutes 和 GameNetProtocol 统一使用 `Game.Protocol`；生成器与游戏业务保留各自命名空间。协议完整类型名参与 manifest 和指纹，命名空间变更后必须重新生成并同步更新两端。
+
+诊断 meter 的 `GameFrame.Server.Network.Kcp` 是独立指标标识，不是 C# 命名空间；本次保留该标识及既有采集配置。
+
 `Game.Server/Program.cs` 验证 profile、加载游戏配置并选择启动入口；`LocalWssService`、`LocalKcpService` 持有各自配置和资源。`LobbyApplication` 只显式组合 `LoginModule`、`EchoModule`、可选 `GomokuModule`，不实现业务处理。按功能建目录：`Login/` 放认证用例、仓库、账号会话与处理器，`Sessions/` 放大厅连接会话和只读身份，`Diagnostics/` 放大厅 Echo，`Gomoku/` 放两人房间和权威棋局；后续背包、房间沿用此方式。通用数据库连接池在 `Game.Server/Database/`，不是网络框架能力。不为尚未实现的网关、世界、账号再创建多个可执行项目。
 
 处理器通过 `ServerApplication` 显式注册强类型 RPC/Notify 或 Reject。构造 host 前全部入站路由必须有明确处理/拒绝决定；host 校验漏注册、重复注册、目录归属后冻结应用。Push 不注册入站 handler。不用反射扫描处理器或运行时按类型名找 opcode。
@@ -179,7 +183,7 @@ Hello 前只允许所需控制包。当前 WSS 示例在 Hello 后仍未登录�
 ```proto
 syntax = "proto3";
 package game.protocol.example;
-option csharp_namespace = "Game.Hotfix.Network.Protocol";
+option csharp_namespace = "Game.Protocol";
 import "Common/net_options.proto";
 
 message ExampleRequest {

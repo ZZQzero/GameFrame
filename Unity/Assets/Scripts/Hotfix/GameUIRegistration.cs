@@ -9,6 +9,7 @@ namespace Game.Hotfix
         {
             GameUI.Register<LoginPanel>("LoginPanel", UIGroup.Scene, cache: true);
             GameUI.Register<MainPanel>("MainPanel", UIGroup.Scene, cache: true);
+            GameUI.Register<SettingsPanel>("SettingsPanel", UIGroup.Scene, cache: true);
             GameUI.Register<WoodenFishMainPanel>("WoodenFishMain", UIGroup.Scene, cache: true);
             GameUI.Register<GomokuLobbyPanel>("GomokuLobby", UIGroup.Scene, cache: true);
             GameUI.Register<GomokuOnlinePanel>("GomokuOnline", UIGroup.Scene, cache: true);

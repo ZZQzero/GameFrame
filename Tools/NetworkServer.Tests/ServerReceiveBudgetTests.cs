@@ -1,7 +1,4 @@
 using GameFrame.Network;
-using GameFrame.Network.Protocol;
-using GameFrame.Network.Transport;
-using GameFrame.Server.Network;
 using NUnit.Framework;
 
 namespace GameFrame.Tests

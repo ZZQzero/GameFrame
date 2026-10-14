@@ -3,7 +3,7 @@
   "endianness": "little",
   "enums": [
     {
-      "name": "Game.Hotfix.Network.Protocol.GomokuEndReason",
+      "name": "Game.Protocol.GomokuEndReason",
       "underlyingType": "System.Int32",
       "values": [
         {
@@ -37,7 +37,7 @@
       ]
     },
     {
-      "name": "Game.Hotfix.Network.Protocol.GomokuOutcome",
+      "name": "Game.Protocol.GomokuOutcome",
       "underlyingType": "System.Int32",
       "values": [
         {
@@ -63,7 +63,7 @@
       ]
     },
     {
-      "name": "Game.Hotfix.Network.Protocol.GomokuResult",
+      "name": "Game.Protocol.GomokuResult",
       "underlyingType": "System.Int32",
       "values": [
         {
@@ -121,7 +121,7 @@
       ]
     },
     {
-      "name": "Game.Hotfix.Network.Protocol.GomokuRoomState",
+      "name": "Game.Protocol.GomokuRoomState",
       "underlyingType": "System.Int32",
       "values": [
         {
@@ -143,7 +143,7 @@
       ]
     },
     {
-      "name": "Game.Hotfix.Network.Protocol.ResultCode",
+      "name": "Game.Protocol.ResultCode",
       "underlyingType": "System.Int32",
       "values": [
         {
@@ -189,9 +189,9 @@
       "opcode": 1000,
       "name": "Login",
       "responseMaxBodyBytes": 256,
-      "responseType": "Game.Hotfix.Network.Protocol.LoginResponse",
+      "responseType": "Game.Protocol.LoginResponse",
       "rootNullable": false,
-      "type": "Game.Hotfix.Network.Protocol.LoginRequest"
+      "type": "Game.Protocol.LoginRequest"
     },
     {
       "delivery": "Reliable",
@@ -200,9 +200,9 @@
       "opcode": 1001,
       "name": "ResumeLogin",
       "responseMaxBodyBytes": 256,
-      "responseType": "Game.Hotfix.Network.Protocol.LoginResponse",
+      "responseType": "Game.Protocol.LoginResponse",
       "rootNullable": false,
-      "type": "Game.Hotfix.Network.Protocol.ResumeLoginRequest"
+      "type": "Game.Protocol.ResumeLoginRequest"
     },
     {
       "delivery": "Reliable",
@@ -211,9 +211,9 @@
       "opcode": 1003,
       "name": "Logout",
       "responseMaxBodyBytes": 64,
-      "responseType": "Game.Hotfix.Network.Protocol.OperationResponse",
+      "responseType": "Game.Protocol.OperationResponse",
       "rootNullable": false,
-      "type": "Game.Hotfix.Network.Protocol.LogoutRequest"
+      "type": "Game.Protocol.LogoutRequest"
     },
     {
       "delivery": "Reliable",
@@ -222,9 +222,9 @@
       "opcode": 1004,
       "name": "Register",
       "responseMaxBodyBytes": 64,
-      "responseType": "Game.Hotfix.Network.Protocol.OperationResponse",
+      "responseType": "Game.Protocol.OperationResponse",
       "rootNullable": false,
-      "type": "Game.Hotfix.Network.Protocol.RegisterRequest"
+      "type": "Game.Protocol.RegisterRequest"
     },
     {
       "delivery": "Reliable",
@@ -233,9 +233,9 @@
       "opcode": 1900,
       "name": "Echo",
       "responseMaxBodyBytes": 1024,
-      "responseType": "Game.Hotfix.Network.Protocol.EchoResponse",
+      "responseType": "Game.Protocol.EchoResponse",
       "rootNullable": false,
-      "type": "Game.Hotfix.Network.Protocol.EchoRequest"
+      "type": "Game.Protocol.EchoRequest"
     },
     {
       "delivery": "Reliable",
@@ -244,9 +244,9 @@
       "opcode": 3000,
       "name": "CreateGomokuRoom",
       "responseMaxBodyBytes": 4096,
-      "responseType": "Game.Hotfix.Network.Protocol.GomokuResponse",
+      "responseType": "Game.Protocol.GomokuResponse",
       "rootNullable": false,
-      "type": "Game.Hotfix.Network.Protocol.GomokuCommand"
+      "type": "Game.Protocol.GomokuCommand"
     },
     {
       "delivery": "Reliable",
@@ -255,9 +255,9 @@
       "opcode": 3001,
       "name": "JoinGomokuRoom",
       "responseMaxBodyBytes": 4096,
-      "responseType": "Game.Hotfix.Network.Protocol.GomokuResponse",
+      "responseType": "Game.Protocol.GomokuResponse",
       "rootNullable": false,
-      "type": "Game.Hotfix.Network.Protocol.GomokuCommand"
+      "type": "Game.Protocol.GomokuCommand"
     },
     {
       "delivery": "Reliable",
@@ -266,9 +266,9 @@
       "opcode": 3002,
       "name": "QueryMyGomokuRoom",
       "responseMaxBodyBytes": 4096,
-      "responseType": "Game.Hotfix.Network.Protocol.GomokuResponse",
+      "responseType": "Game.Protocol.GomokuResponse",
       "rootNullable": false,
-      "type": "Game.Hotfix.Network.Protocol.GomokuQuery"
+      "type": "Game.Protocol.GomokuQuery"
     },
     {
       "delivery": "Reliable",
@@ -277,9 +277,9 @@
       "opcode": 3003,
       "name": "SetGomokuReady",
       "responseMaxBodyBytes": 4096,
-      "responseType": "Game.Hotfix.Network.Protocol.GomokuResponse",
+      "responseType": "Game.Protocol.GomokuResponse",
       "rootNullable": false,
-      "type": "Game.Hotfix.Network.Protocol.GomokuCommand"
+      "type": "Game.Protocol.GomokuCommand"
     },
     {
       "delivery": "Reliable",
@@ -288,9 +288,9 @@
       "opcode": 3004,
       "name": "StartGomokuGame",
       "responseMaxBodyBytes": 4096,
-      "responseType": "Game.Hotfix.Network.Protocol.GomokuResponse",
+      "responseType": "Game.Protocol.GomokuResponse",
       "rootNullable": false,
-      "type": "Game.Hotfix.Network.Protocol.GomokuCommand"
+      "type": "Game.Protocol.GomokuCommand"
     },
     {
       "delivery": "Reliable",
@@ -299,9 +299,9 @@
       "opcode": 3005,
       "name": "PlaceGomokuMove",
       "responseMaxBodyBytes": 4096,
-      "responseType": "Game.Hotfix.Network.Protocol.GomokuResponse",
+      "responseType": "Game.Protocol.GomokuResponse",
       "rootNullable": false,
-      "type": "Game.Hotfix.Network.Protocol.GomokuCommand"
+      "type": "Game.Protocol.GomokuCommand"
     },
     {
       "delivery": "Reliable",
@@ -310,9 +310,9 @@
       "opcode": 3006,
       "name": "LeaveGomokuRoom",
       "responseMaxBodyBytes": 4096,
-      "responseType": "Game.Hotfix.Network.Protocol.GomokuResponse",
+      "responseType": "Game.Protocol.GomokuResponse",
       "rootNullable": false,
-      "type": "Game.Hotfix.Network.Protocol.GomokuCommand"
+      "type": "Game.Protocol.GomokuCommand"
     },
     {
       "delivery": "Reliable",
@@ -321,7 +321,7 @@
       "opcode": 3010,
       "name": "GomokuRoomSnapshot",
       "rootNullable": false,
-      "type": "Game.Hotfix.Network.Protocol.GomokuSnapshot"
+      "type": "Game.Protocol.GomokuSnapshot"
     },
     {
       "delivery": "Reliable",
@@ -330,7 +330,7 @@
       "opcode": 3011,
       "name": "GomokuRoomClosed",
       "rootNullable": false,
-      "type": "Game.Hotfix.Network.Protocol.GomokuSnapshot"
+      "type": "Game.Protocol.GomokuSnapshot"
     }
   ],
   "stringEncoding": "utf8",
@@ -352,7 +352,7 @@
           "type": "System.UInt32"
         }
       ],
-      "name": "Game.Hotfix.Network.Protocol.EchoRequest"
+      "name": "Game.Protocol.EchoRequest"
     },
     {
       "fields": [
@@ -365,7 +365,7 @@
           "type": "System.String"
         }
       ],
-      "name": "Game.Hotfix.Network.Protocol.EchoResponse"
+      "name": "Game.Protocol.EchoResponse"
     },
     {
       "fields": [
@@ -416,7 +416,7 @@
           "type": "System.Int32"
         }
       ],
-      "name": "Game.Hotfix.Network.Protocol.GomokuCommand"
+      "name": "Game.Protocol.GomokuCommand"
     },
     {
       "fields": [
@@ -445,7 +445,7 @@
           "type": "System.Boolean"
         }
       ],
-      "name": "Game.Hotfix.Network.Protocol.GomokuMember"
+      "name": "Game.Protocol.GomokuMember"
     },
     {
       "fields": [
@@ -468,7 +468,7 @@
           "type": "System.Int32"
         }
       ],
-      "name": "Game.Hotfix.Network.Protocol.GomokuMoveData"
+      "name": "Game.Protocol.GomokuMoveData"
     },
     {
       "fields": [
@@ -479,7 +479,7 @@
           "type": "System.UInt64"
         }
       ],
-      "name": "Game.Hotfix.Network.Protocol.GomokuQuery"
+      "name": "Game.Protocol.GomokuQuery"
     },
     {
       "fields": [
@@ -487,7 +487,7 @@
           "name": "Result",
           "nullable": false,
           "order": 0,
-          "type": "Game.Hotfix.Network.Protocol.GomokuResult"
+          "type": "Game.Protocol.GomokuResult"
         },
         {
           "name": "CommandId",
@@ -505,10 +505,10 @@
           "name": "Snapshot",
           "nullable": true,
           "order": 3,
-          "type": "Game.Hotfix.Network.Protocol.GomokuSnapshot"
+          "type": "Game.Protocol.GomokuSnapshot"
         }
       ],
-      "name": "Game.Hotfix.Network.Protocol.GomokuResponse"
+      "name": "Game.Protocol.GomokuResponse"
     },
     {
       "fields": [
@@ -538,19 +538,19 @@
           "name": "State",
           "nullable": false,
           "order": 3,
-          "type": "Game.Hotfix.Network.Protocol.GomokuRoomState"
+          "type": "Game.Protocol.GomokuRoomState"
         },
         {
           "name": "Outcome",
           "nullable": false,
           "order": 4,
-          "type": "Game.Hotfix.Network.Protocol.GomokuOutcome"
+          "type": "Game.Protocol.GomokuOutcome"
         },
         {
           "name": "EndReason",
           "nullable": false,
           "order": 5,
-          "type": "Game.Hotfix.Network.Protocol.GomokuEndReason"
+          "type": "Game.Protocol.GomokuEndReason"
         },
         {
           "arrayLimit": 2,
@@ -558,7 +558,7 @@
           "name": "Members",
           "nullable": false,
           "order": 6,
-          "type": "Game.Hotfix.Network.Protocol.GomokuMember[]"
+          "type": "Game.Protocol.GomokuMember[]"
         },
         {
           "arrayLimit": 225,
@@ -566,7 +566,7 @@
           "name": "Moves",
           "nullable": false,
           "order": 7,
-          "type": "Game.Hotfix.Network.Protocol.GomokuMoveData[]"
+          "type": "Game.Protocol.GomokuMoveData[]"
         },
         {
           "name": "RecipientAccountId",
@@ -593,7 +593,7 @@
           "type": "System.UInt64"
         }
       ],
-      "name": "Game.Hotfix.Network.Protocol.GomokuSnapshot"
+      "name": "Game.Protocol.GomokuSnapshot"
     },
     {
       "fields": [
@@ -614,7 +614,7 @@
           "type": "System.String"
         }
       ],
-      "name": "Game.Hotfix.Network.Protocol.LoginRequest"
+      "name": "Game.Protocol.LoginRequest"
     },
     {
       "fields": [
@@ -622,7 +622,7 @@
           "name": "ResultCode",
           "nullable": false,
           "order": 0,
-          "type": "Game.Hotfix.Network.Protocol.ResultCode"
+          "type": "Game.Protocol.ResultCode"
         },
         {
           "name": "AccountId",
@@ -677,11 +677,11 @@
           "type": "System.UInt32"
         }
       ],
-      "name": "Game.Hotfix.Network.Protocol.LoginResponse"
+      "name": "Game.Protocol.LoginResponse"
     },
     {
       "fields": [],
-      "name": "Game.Hotfix.Network.Protocol.LogoutRequest"
+      "name": "Game.Protocol.LogoutRequest"
     },
     {
       "fields": [
@@ -689,10 +689,10 @@
           "name": "ResultCode",
           "nullable": false,
           "order": 0,
-          "type": "Game.Hotfix.Network.Protocol.ResultCode"
+          "type": "Game.Protocol.ResultCode"
         }
       ],
-      "name": "Game.Hotfix.Network.Protocol.OperationResponse"
+      "name": "Game.Protocol.OperationResponse"
     },
     {
       "fields": [
@@ -713,7 +713,7 @@
           "type": "System.String"
         }
       ],
-      "name": "Game.Hotfix.Network.Protocol.RegisterRequest"
+      "name": "Game.Protocol.RegisterRequest"
     },
     {
       "fields": [
@@ -734,7 +734,7 @@
           "type": "System.Byte[]"
         }
       ],
-      "name": "Game.Hotfix.Network.Protocol.ResumeLoginRequest"
+      "name": "Game.Protocol.ResumeLoginRequest"
     }
   ],
   "wireVersion": 1

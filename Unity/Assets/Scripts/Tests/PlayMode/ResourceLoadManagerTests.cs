@@ -229,6 +229,9 @@ namespace GameFrame.Tests
                 entry = instance.GetComponent<GameEntry>();
                 typeof(GameEntry).GetField("loginEndpoint", BindingFlags.Instance | BindingFlags.NonPublic)
                     .SetValue(entry, endpoint);
+                // Entry authentication tests must not replace the player's remembered account.
+                typeof(GameEntry).GetField("rememberLogin", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .SetValue(entry, false);
                 instance.transform.SetParent(null);
                 // 实际入口是持久 Launch 的子节点；测试独立实例同样需要跨 Single 切场存活。
                 UnityEngine.Object.DontDestroyOnLoad(instance);

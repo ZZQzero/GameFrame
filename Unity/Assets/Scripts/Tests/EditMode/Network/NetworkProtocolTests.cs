@@ -1,7 +1,6 @@
 using System;
 using System.Buffers.Binary;
 using GameFrame.Network;
-using GameFrame.Network.Protocol;
 using NUnit.Framework;
 
 namespace GameFrame.Tests

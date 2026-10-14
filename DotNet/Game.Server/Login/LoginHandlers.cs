@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
-using Game.Hotfix.Network.Protocol;
+using Game.Protocol;
 using Game.Server.Sessions;
-using GameFrame.Server.Network;
+using GameFrame.Network;
 
 namespace Game.Server.Login
 {

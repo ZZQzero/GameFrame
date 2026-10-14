@@ -436,13 +436,13 @@ namespace GameFrame.ProtocolTools
             foreach (string? space in schemas.Values.Select(schema => schema.Type.Namespace)
                 .Concat(enums.Values.Select(type => type.Namespace)).Distinct().OrderBy(value => value, StringComparer.Ordinal))
             {
-                if (space != null)
+                if (space != null && space != "Game.Protocol")
                 {
                     Line($"using {space};");
                 }
             }
             Line();
-            Line("namespace Game.Hotfix.Network.Generated");
+            Line("namespace Game.Protocol");
             Line("{");
             Line("    public static class GameNetRoutes");
             Line("    {");

@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using Game.Hotfix.Network.Protocol;
+using Game.Protocol;
 
 namespace Game.Hotfix
 {

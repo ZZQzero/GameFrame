@@ -1,6 +1,6 @@
 syntax = "proto3";
 package game.protocol.diagnostics;
-option csharp_namespace = "Game.Hotfix.Network.Protocol";
+option csharp_namespace = "Game.Protocol";
 import "Common/net_options.proto";
 import "Diagnostics/DiagnosticsProto.proto";
 

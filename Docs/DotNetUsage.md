@@ -153,10 +153,11 @@ DotNet/Game.Server/bin/Debug/net10.0/Game.Server --profile local-wss
 
 | 启动/连接错误 | 检查项 |
 | --- | --- |
-| Production hosting is not configured | 选择 local launch profile，或给可执行程序传--profile；当前没有生产入口 |
-| Required local configuration is missing | 在实际运行进程环境填写报错变量，只有程序参数不够 |
-| Failed to connect / Connection refused 127.0.0.1:5432 | PostgreSQL 是否运行、端口/连接地址是否正确 |
-| relation accounts does not exist / 表检查失败 | 对指定数据库显式执行初始 SQL，确认连接到了正确库和 schema |
+| Failed / Stage=profile validation | 选择 local launch profile，或给可执行程序传--profile；当前没有生产入口 |
+| Failed / Stage=configuration loading | 核对 Config/Bytes 或 GF_CONFIG_DIR，确认生成数据与服务端匹配 |
+| Failed / Stage=local-wss 或 local-kcp-dtls | 按 ErrorType/StackTrace 定位阶段，核对该 profile 所需环境变量；入口不输出原始异常 Message |
+| 数据库连接探测失败 | PostgreSQL 是否运行、端口/连接地址是否正确 |
+| 账号表检查失败 | 对指定数据库显式执行初始 SQL，确认连接到了正确库和 schema |
 | HTTPS 证书不可信或域名错误 | 客户端信任对应开发证书，连接 localhost，证书有私钥且有效；不使用忽略校验绕过 |
 | 协议 Reject/hash 不同 | 重新生成并同步客户端/服务端，检查--artifacts；不兼容混连 |
 | KCP 缺库/架构/ABI 错误 | 匹配平台库安装到实际执行目录；不能靠项目根目录中的库替代部署 |
@@ -328,6 +329,48 @@ meter 为 `GameFrame.Server.Network.Kcp`，使用 MeterListener 或现有 .NET �
 
 指标只在订阅启用时采样，按进程聚合，不含账号或连接标签。owner 工作/分配仍包含循环内 Admit/CheckDeadline 和发送排队指标回调的成本，采集器回调应保持轻量；另测进程 CPU/RSS、.NET GC/停顿与应用/数据库阶段。当前保留 10ms 轮询策略；性能调整需结合目标连接数、业务量和弱网样本，不能用单连接 loopback 数据推断生产容量。
 
+<a id="server-logging"></a>
+
+### 服务端日志（NLog）
+
+两个 local profile 已统一使用 NLog 6.2.1 / NLog.Extensions.Logging 6.2.1。单一 `GameFrame.Logging` 工程负责业务无关的选项、元数据校验、NLog Provider、布局、有界异步输出与关闭，类型统一位于 `GameFrame.Logging` 命名空间；`Game.Server/Configuration/ServerLogging.cs` 读取部署值。网络/业务继续注入标准 `ILogger`，不依赖 NLog 类型。详见 [职责边界](DotNetDevelopment.md#server-logging-architecture)及 [执行进度](DotNetDevelopment.md#server-logging-plan)。
+
+| 环境变量 | 默认值 | 行为 |
+| --- | --- | --- |
+| `GF_LOG_LEVEL` | `Information` | Trace/Debug/Information/Warning/Error/Critical/None，忽略大小写；None 禁用全部类别 |
+| `GF_LOG_FORMAT` | `Text` | Text 或 Json，忽略大小写；Json 每条事件一行 |
+| `GF_LOG_QUEUE_CAPACITY` | `4096` | 整数 1～65536；满额丢弃新事件，所有级别适用 |
+| `DOTNET_ENVIRONMENT` | `Local` | 仅作为日志 Environment 字段，不改变 local/生产准入策略 |
+
+全局和类别阈值取较严格者；应用将 Microsoft.AspNetCore/Npgsql 默认设为 Warning，其他类别沿用全局级别。级别/格式不做运行中热重载。实例 Service=Game.Server，InstanceId 为每次启动的新 GUID，Version 为程序集 informational version；元数据最多 128 字符且不含控制字符。无效配置在 profile/Tables/监听之前失败，以固定 stderr 诊断并退出 1，不切换备用输出。
+
+沿用前文证书、数据库、grant 和 native 配置后可执行：
+
+```sh
+(cd DotNet && GF_LOG_FORMAT=Json GF_LOG_LEVEL=Information dotnet run --project Game.Server --no-launch-profile -- --profile local-wss)
+(cd DotNet && GF_LOG_FORMAT=Json GF_LOG_QUEUE_CAPACITY=4096 dotnet run --project Game.Server --no-launch-profile -- --profile local-kcp-dtls)
+```
+
+JSON 外层包含 Timestamp（UTC）、Level、Category、Message、MessageTemplate、Service、Environment、InstanceId、Version 和存在时的 Exception；EventId/EventName、模板参数及 Scope 属性直接保留为结构化字段。文本包含公共实例字段、类别、渲染消息、属性/Scope JSON 与异常。日志调用必须使用固定模板和小型非敏感值，不传池化 DTO、可变数组或资源对象，不在业务锁/native owner 内等待输出或刷新。
+
+| 宿主 EventId / EventName | 级别 | 事实与字段 |
+| --- | --- | --- |
+| 2000 / Starting | Information | profile 校验后开始初始化，含 Profile；不代表监听成功 |
+| 2001 / Stopped | Information | 服务及外部资源释放后停止，含当时 DroppedCount；不代表全部输出已经刷新 |
+| 2002 / Failed | Critical | 启动/运行失败，含 Stage、ErrorType、StackTrace |
+| 2003 / KcpReady | Information | KCP/DTLS 已监听，含 Endpoint |
+| 2004 / WssReady | Information | WSS 已启动，含 Port |
+
+应用入口失败不再向进程抛出未处理异常，返回退出码 1；为避免第三方异常 Message 泄漏配置，仅记录阶段、类型与堆栈。模块内部仍按原错误契约传播异常。日志初始化失败、刷新/输出失败使用固定安全 stderr，后者也返回 1。已有网络异常输出保持原行为，完整网络/业务异常脱敏与事件统一仍是 L0/L2/L3 待办，本轮测试标记不泄漏不等同于完成全量安全审查。
+
+应用拥有独立 NLog LogFactory 和 ILoggerFactory，不使用全局 LogManager。WSS 清除默认 Provider 并注册外部 Factory 实例，宿主不释放它；KCP listener 也只借用。关闭顺序为停止准入、join 网络/业务、释放宿主与业务/数据库/证书、记录停止、刷新并释放日志。重复 `DisposeAsync` 等待同一结果。
+
+适配默认批次 200（应用取 min(容量, 200)），刷新等待 5 秒；这些参数也可在组合代码通过 `NLogOutputOptions` 显式设置。FlushTimeout 只约束刷新等待，不保证任意 Target.Dispose 的总时间。队列条数加在处理批次不等于精确内存预算，异常和字符串大小仍需限制；入队不代表写出或持久化，强杀/崩溃可能丢失日志。当前无自动文件输出、NLog.config 加载或默认指标导出器；文件 Target 可显式接入适配入口，轮转、保留与磁盘故障需另行配置验收。
+
+`NLogLogging.DroppedCount` / `OutputErrorCount` 和 meter `GameFrame.Logging.NLog` 下的 `gameframe.logging.dropped`（event）/`gameframe.logging.output.errors`（error）提供计数，部署采集端自行订阅。Meter 名称是保留的指标标识，不是独立工程或命名空间。队列满和输出故障不递归写日志；适配保留首个输出异常，刷新成功后仍会报告它。输出故障不重新执行业务，也不改变业务已提交结果。
+
+2026-10-14 本机 Release 样本：预热 1000 次后，100000 次被过滤的源生成 Debug 调用耗时 4.019ms，当前线程新增托管分配 0 字节；这是单线程调用路径样本，不能代表开启输出、异常格式化、RPC P99 或生产容量。慢 Target 测试验证队列满时生产者继续完成且丢弃计数可订阅；完整对照负载、资源峰值与性能门禁仍按 [性能要求](DotNetDevelopment.md#server-logging-performance)执行。
+
 <a id="验证与现有证据"></a>
 
 ## 9. 验证与现有证据
@@ -351,6 +394,8 @@ PG 测试角色需能创建 schema，测试创建随机 schema 并只删除自�
 
 | 日期与范围 | 证据 | 限制 |
 | --- | --- | --- |
+| 2026-10-14 日志工程合并，macOS ARM64 / SDK10.0.401 | 日志选项与 NLog 实现合并为单一 GameFrame.Logging 工程，类型统一命名空间；八工程 Release 编译 0 警告/错误，解决方案及两个相关测试工程 locked restore 通过；Logging13/13、WssLifecycle/ServerLogging6/6，均零跳过；临时 publish 仅含 GameFrame.Logging.dll，依赖清单无旧适配程序集；发布目录进程验证 JSON 启动失败、None 过滤和无效日志配置退出行为，临时产物已清理 | 本次调整工程边界与引用，沿用原输出行为和 Meter 标识；未重跑完整 Server、PG/UDP/DTLS、Unity/Player/IL2CPP、其他平台或性能容量测试 |
+| 2026-10-14 NLog 框架接入，macOS ARM64 / SDK10.0.401 | 九工程 Release 编译 0 警告/错误；解决方案及 Logging/NetworkServer.Tests locked restore 通过；Logging13/13，覆盖字段/模板/异常/UTC、并行 Scope、过滤、独立所有权、满队列、写入失败与刷新失败/超时；Server 全组 141 通过、41 跳过（共 182），新增真实 WSS host 释放后写日志用例另跑 1/1；八类早期失败进程均退出 1 且测试敏感标记未泄漏；真实 KCP 进程输出 Ready/Stopped，SIGINT 退出 0，凭据未输出 | 未配置 GF_POSTGRES_TEST_CONNECTION，PG 及依赖 PG 的 WssServerTests 跳过，不能计为数据库/完整 WSS 业务验收；KCP 使用已核验 hash 的现有 macOS native，未重构建/安装。临时 grant 和进程已清理；未执行 Unity/Player/IL2CPP、远端 CI、其他平台、全量敏感信息审查、文件部署、生产容量或 soak |
 | 2026-10-14 底层诊断与回归，macOS/.NET SDK10.0.401、PG18 | 最终 Server163/163、Framework13/13、Protocol182/182，均 0 跳过；三个测试工程 locked restore、协议 check --artifacts 五文件一致；独立临时 PG 与现有 macOS Release native 验证真实 WSS/数据库/UDP/DTLS；新增可控时钟测试覆盖分阶段耗时、同步 continuation 排除、连接汇总重置、保留响应后取消及在途额度、远端错误/期限/解码失败样本排除；KCP ACK16/16、调度4/4和分配75项（assertions/NDEBUG/ASan+UBSan）通过；五组安装产物的 binary/build ID/生产源码指纹核验通过 | 首轮新增远端错误用例错误携带正文，被现有 GFNP 规则拒绝；改为协议规定的空正文后整组复验通过。没有修改 wire/native ABI、重构建或替换插件；算法 sanitizer 不是完整 gfnet/DTLS sanitizer。临时库/进程已清理；Unity 证据见客户端表。未验其他平台实跑、远端 CI、生产容量/soak、IL2CPP/新热更 DTO |
 | 2026-10-13 大厅业务模块与认证职责整理，macOS/.NET 10.0.401 | 七工程 Release 编译 0 警告/错误；Server160/160、Framework13/13、0 跳过，使用临时独立 PostgreSQL18.6 与已核验源码/二进制 manifest 的现有 macOS Release native；新增身份与凭据清理独立、异步 Echo 期间顶号/注销拒绝、断线恢复与注销凭据撤销用例；既有真实 WSS/PG、单次 token、epoch 仲裁、过载关闭/注册重试、普通 EOF 排空及 UDP/DTLS 回归通过；协议 check --artifacts 五文件一致 | 本轮未改协议、客户端或通用框架；未运行 Unity/Player/IL2CPP、独立 Game.Server 进程联调、其他平台、远端 CI、native 重构建/sanitizer 或容量验收；临时 PG 与文件已清理 |
 | 2026-10-13 Login 自动建号与客户端接入，macOS/.NET 10.0.401 | 七工程 Release 编译 0 警告/错误；四测试工程 locked restore 通过；Server156、Framework13、Protocol182、ConfigGenerator15 共 366/366、0 跳过，使用独立 PG18.6 与现有 macOS Release native；新增真实 PG 首次建号、同名并发同/不同密码、保存密码复验与无效/取消输入测试，真实 WSS 一次 Login 后 Echo；协议 check --artifacts 通过；实际 Game.Server + Unity 登录/断线闭环通过 | 本地单实例；未验证生产部署、远端 CI、其他服务端平台、容量/soak；Unity 证据及临时开发证书信任范围见客户端说明 |

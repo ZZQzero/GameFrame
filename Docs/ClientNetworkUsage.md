@@ -54,7 +54,7 @@ openssl x509 -in /absolute/path/localhost.pem -outform DER -out /absolute/path/l
 会话是普通实例，由入口创建、注入、释放，后续业务接收同一个实例：
 
 ```csharp
-await GameUI.Push<LoginPanel, LoginPanelArgs>(new LoginPanelArgs(session, onLoggedIn));
+await GameUI.Push<LoginPanel, LoginPanelArgs>(new LoginPanelArgs(session, onLoggedIn)); // onLoggedIn: Func<string, UniTask>
 GameUser user = session.CurrentUser; // 未登录、断线或到期时为 null。
 if (user == null)
 {
@@ -119,7 +119,7 @@ if (NetworkClock.GetMilliseconds() >= resumeDeadline)
 // 此时业务才能保存账号/epoch/token/deadline并提交Authenticated。
 ```
 
-示例 timeout 为单次 RPC 上限，服务器登录硬期限不会因新 RPC 重置。GameLoginSession 先等待 Connect（上限 10 秒），随后立即提交 Login（上限 5 秒），校验成功载荷/TTL；失败、超时或取消先 await Close，不能认为服务端一定未建号或未认证，清理失败保留主因。完整世界 GameNetworkSession 仍延后。
+示例 timeout 为单次 RPC 上限，服务器登录硬期限不会因新 RPC 重置。GameLoginSession 先等待 Connect（上限 10 秒），随后提交 Login（上限 5 秒），校验成功载荷/TTL。LoginAsync / ResumeLoginAsync 返回 GameLoginResult：ResultCode 表示服务端认证结果，RememberedLoginError 单独报告账号记忆失败；认证成功但保存失败仍保留有效会话，不自动重试、不写明文后备。登录面板清空密码并直接进入 Main，在主界面状态文本提示“本次未能记住账号，下次登录需输入密码”，不增加一次确认。主动取消、认证或连接失败仍 await Close，不能认为服务端一定未建号或未认证，清理失败保留主因。响应凭据在保存尝试后清零，不随已认证会话长期保留。完整世界 GameNetworkSession 仍延后。
 
 登录后用 local Echo 确认实际往返：
 
@@ -131,11 +131,11 @@ EchoResponse echo = await client.RequestAsync(
     cancellationToken);
 ```
 
-`await session.ResumeLoginAsync(token)` 使用已保存的账号恢复登录。登录面板打开时只读取本地记录；有效凭据隐藏密码输入框，玩家点击“确定登录”才连接 WSS。恢复前先消耗本地旧令牌，再关闭旧连接、连接并提交 ResumeLogin；成功保存轮换后的新令牌并校验账号 ID、载荷及剩余期限。拒绝、超时、取消或响应丢失不会重放旧令牌；保留账号名、恢复密码输入，玩家显式提交新 Login。恢复不延长服务端账号会话，默认最长 24 小时；服务器重启、顶号、注销或过期后需重新输入密码。
+`await session.ResumeLoginAsync(token)` 使用已保存的账号恢复登录。登录面板打开时只读取本地记录；有效凭据隐藏密码输入框，玩家点击“确定登录”才连接 WSS。恢复先读取并校验本地凭据，再关闭旧连接并建连；连接成功后、提交 ResumeLogin 前，验证凭据未被替换并删除系统存储中的旧令牌。建连失败或消耗前取消保留免密资格，面板允许玩家再次点击；成功消耗后，无论请求拒绝、超时、取消或响应丢失都不复用旧令牌，保留账号名并恢复密码输入。成功响应校验账号 ID、载荷及剩余期限，尝试保存轮换后的新令牌；保存失败单独报告，不撤销已经成功的认证。登录面板继续进入 Main，由 MainPanel 的状态文本提示下次需输入密码；进入场景失败后再次点击仍携带此提示，不重复认证。恢复不延长服务端账号会话，默认最长 24 小时；服务器重启、顶号、注销或过期后需重新输入密码。
 
-本地数据库位于 `Application.persistentDataPath/Game/login.sqlite`，application_id=1195789390、schema=1。仅含 endpoint、account_name、account_id、expires_utc_ms；无密码、sessionId 或 token。令牌按应用、数据库绝对路径和端点隔离：macOS/iOS Keychain、Windows Credential Manager、Android Keystore AES-GCM（密文位于 noBackupFilesDir）。安全存储失败明确报错，不写明文后备。SQLite 与安全存储不跨库原子提交：写库失败删除本次安全凭据，二者不匹配时要求密码登录；既有库格式错误不覆盖重建。
+本地数据库位于 `Application.persistentDataPath/Game/login.sqlite`，application_id=1195789390、schema=1。仅含 endpoint、account_name、account_id、expires_utc_ms；无密码、sessionId 或 token。令牌按应用标识、端点与固定用途命名空间隔离，不依赖数据库绝对路径；测试或独立账号配置可显式传入 credentialNamespace。旧路径键不自动迁移，升级到新键后首次需输入密码。平台使用 macOS/iOS Keychain、Windows Credential Manager、Android Keystore AES-GCM（密文位于 noBackupFilesDir）。安全存储失败明确报错，不写明文后备。SQLite 与安全存储不跨库原子提交：写库失败删除本次安全凭据，二者不匹配时要求密码登录；既有库格式错误不覆盖重建。ReadCredentialAsync 只读取凭据，ConsumeAsync 在提交前消耗读到的同一凭据，替换或过期返回 false，执行错误抛出；消耗仅删除系统存储令牌，不为此重开 SQLite 修改过期字段，CanResume 同时要求元数据与系统凭据匹配。
 
-“切换账号”调用 ForgetRememberedAccountAsync，清除该端点的本地记录与令牌并恢复空输入框。显式 Logout 先清除保存的凭据再提交远端注销；Dispose/正常关闭仅清理内存和连接，保留下次登录所需记录。GameEntry 的 Remember Login 可关闭此能力，适用于不支持系统安全存储的平台或不需要记忆账号的业务。
+“切换账号”调用 ForgetRememberedAccountAsync，清除该端点的本地记录与令牌并恢复空输入框。显式 Logout 分别尝试本地清除和远端注销，本地失败不跳过远端请求，最后清空认证并关闭连接。本地清除不受调用者取消影响；远端 RPC 仍遵守调用者取消和超时。任一步执行失败均传播首个原异常，其他错误单独记录；本地失败但远端成功时明确记录“远端已注销，但本地账号清除失败”，两者失败时记录远端注销未确认。明确收到服务器 Close2（替换）、Close4（到期）或 Close7（撤销）时，立即清空认证，等待当前账号操作后删除匹配的恢复令牌，再通知返回登录；账号元数据保留。会话只保存成功持久化令牌的 SHA-256 摘要用于条件删除，迟到关闭不能删除新令牌；保存响应期间收到明确撤销也执行条件清理。普通网络断线、未知关闭原因及 Dispose/正常关闭保留下次登录所需记录。GameEntry 的 Remember Login 可关闭此能力，适用于不支持系统安全存储的平台或不需要记忆账号的业务。
 
 已登录时显式 Logout：
 
@@ -160,7 +160,7 @@ OperationResponse result = await client.RequestAsync(
 | ObserveState / ObserveMessageFault | 主线程通知，返回可释放句柄；不是自动恢复接口 |
 | CloseAsync / DisposeAsync | 前者等待释放后可重连；后者注销订阅/宿主登记且不能复用 |
 
-RPC 期限从本地 admission 起算，后台 deadline 不会因主线程卡帧延长；期限内保留响应后，到主线程完成前取消仍可赢。非零 StatusCode 抛 NetworkRemoteException，未知码保留；超时抛 NetworkRequestTimeoutException，本地准入或队列容量不足抛 NetworkBackpressureException；服务端过载 status1 仍抛 NetworkRemoteException。超时/取消/断线后的业务结果可能未知，不自动重发。
+RPC 期限从本地 admission 起算，后台 deadline 不会因主线程卡帧延长；期限内保留响应后，到主线程完成前取消仍可赢。服务器控制关闭通过 NetworkConnectionClosedException.ReasonCode 保留原始 ushort 原因（包括未知值），在状态观察者的 Error 上传递；业务自行解释。非零 StatusCode 抛 NetworkRemoteException，未知码保留；超时抛 NetworkRequestTimeoutException，本地准入或队列容量不足抛 NetworkBackpressureException；服务端过载 status1 仍抛 NetworkRemoteException。超时/取消/断线后的业务结果可能未知，不自动重发。
 
 当前五子棋 Push 使用示例：
 
@@ -312,3 +312,8 @@ StandaloneOSX Release Player 脚本和 Hotfix DLL 已编译，`Assets/Config/Cod
 协议精简后的复验：当前 14 条可靠路由；协议 EditMode 135/135，相关 PlayMode 合计 48 项通过（含真实 WSS 房间与生产协议 KCP / DTLS Echo）。StandaloneOSX Release Player 脚本与 Hotfix DLL 已重新编译；前述资源包仍是精简前产物，发布时需重新构建。具体范围与平台边界见 [五子棋验证](Gomoku.md#10-已实施与验证边界)。
 
 2026-10-14 设置与账号记忆验证：Unity 6000.3.19f1/macOS Editor 编译通过；SettingsPanelTests、MainPanelTests、RememberedLoginStoreTests、RememberedLoginIntegrationTests、GameLoginSessionTests、ResourceLoadManagerTests 共 38/38 PlayMode 通过，零跳过。使用独立临时 WSS/PostgreSQL 与显式公开证书信任，覆盖重新创建客户端后免密登录、连续令牌轮换、恢复拒绝后手动密码登录、切换账号、注销、SQLite 元数据及 macOS Keychain 实际读写删除。最初未配置环境的联调用例跳过，以及临时服务尚未监听造成的失败，均在服务就绪后重新执行通过。StandaloneOSX Release Player 脚本编译通过（含 Game.Hotfix 与 GameFrame.Sqlite）；Android Java 桥编译、iOS Objective-C++ 桥 SDK 语法检查通过。移动端/Windows 安全存储实际运行、完整 IL2CPP 链接和真机验证尚未执行。
+
+2026-10-14 登录流程优化验证：Unity 6000.3.19f1/macOS Editor 编译通过；上述六类相关 PlayMode 分批覆盖 47 个不同用例（GameLoginSession 12、MainPanel 2、SettingsPanel 1、RememberedLoginStore 7、RememberedLoginIntegration 9、ResourceLoadManager 16），最终全部通过、零跳过。新增覆盖建连失败保留免密及面板重试入口、凭据替换/取消/删除失败、密码登录及恢复登录保存失败仍保留认证、SQLite 保存失败、注销本地失败仍远端撤销、取消远端仍清理本地、双失败保留同一首因异常。使用独立临时 WSS/PostgreSQL，macOS Keychain 读写删除通过。首轮 7 个启动用例缺少临时证书信任，测试夹具补齐 GF_LOGIN_TEST_CERTIFICATE 后通过；双失败用例按 Unity 日志的内层异常格式修正预期后通过。StandaloneOSX Release Player 脚本编译通过，共 43 个程序集，包含 Game.Hotfix 与 GameFrame.Sqlite。临时服务、数据库、证书与编译产物已清理，场景、编辑器设置和测试造成的字体缓存变化已恢复；未更新正式热更 DLL/资源包，未执行完整 IL2CPP、Windows 或移动端实跑。
+
+
+2026-10-14 登录失败流程与凭据标识精简验证：Unity 6000.3.19f1/macOS Editor 编译通过；账号、记忆存储/联调、Main 与资源导航共 53 个不同 PlayMode 用例分两批通过（50+3），0 失败、0 跳过。覆盖移动数据库与显式命名空间隔离、顶号等待在途读取后条件清理、迟到关闭保护新令牌、保存响应期间被顶号、普通断线保留恢复资格、记忆失败单次点击进入并传递提示、Main 缓存重开清除旧提示，以及既有恢复/注销/切场回归。使用独立临时 PostgreSQL、真实 Game.Server/WSS 和临时公开证书信任，macOS Keychain 既有用例通过。.NET ConnectionRaceTests 30/30，包含关闭原因 2/4/7/未知值的结构化传播。StandaloneOSX Player 脚本编译 43 个程序集通过；验证结束恢复 Launch 场景、EditorSettings、测试环境变量和字体图集，并清理本次临时服务、数据库、证书和编译产物。未更新正式热更 DLL/资源包，未执行 IL2CPP 或其他平台/真机验证。

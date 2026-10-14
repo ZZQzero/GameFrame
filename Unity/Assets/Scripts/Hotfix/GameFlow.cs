@@ -59,7 +59,7 @@ namespace Game.Hotfix
             }
         }
 
-        async UniTask OpenMainAsync()
+        async UniTask OpenMainAsync(string message)
         {
             if (enteringMain != null)
             {
@@ -71,7 +71,7 @@ namespace Game.Hotfix
                 return;
             }
 
-            var pending = UniTask.Lazy(OpenMainCoreAsync);
+            var pending = UniTask.Lazy(() => OpenMainCoreAsync(message));
             enteringMain = pending;
             try
             {
@@ -86,7 +86,7 @@ namespace Game.Hotfix
             }
         }
 
-        async UniTask OpenMainCoreAsync()
+        async UniTask OpenMainCoreAsync(string message)
         {
             if (!CanNavigate)
             {
@@ -123,7 +123,7 @@ namespace Game.Hotfix
                 return;
             }
 
-            await GameUI.Push<MainPanel, MainPanelArgs>(new MainPanelArgs(OpenGomokuAsync));
+            await GameUI.Push<MainPanel, MainPanelArgs>(new MainPanelArgs(OpenGomokuAsync, message));
             if (!CanNavigate || !ReferenceEquals(loginSession.CurrentUser, user))
             {
                 if (GameUI.IsInited)

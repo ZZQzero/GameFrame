@@ -87,6 +87,20 @@ namespace GameFrame.Tests
         });
 
         [UnityTest]
+        public IEnumerator LoginNoticeIsDisplayedAndClearedOnNextOpen() => UniTask.ToCoroutine(async () =>
+        {
+            const string notice = "本次未能记住账号，下次登录需输入密码";
+            GameUI.Close<MainPanel>();
+            main = await GameUI.Push<MainPanel, MainPanelArgs>(new MainPanelArgs(() => UniTask.CompletedTask, notice));
+            var text = (TMPro.TMP_Text)typeof(MainPanel).GetField("statusText",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(main);
+            Assert.AreEqual(notice, text.text);
+            GameUI.Close<MainPanel>();
+            main = await GameUI.Push<MainPanel, MainPanelArgs>(new MainPanelArgs(() => UniTask.CompletedTask));
+            Assert.AreEqual(string.Empty, text.text);
+        });
+
+        [UnityTest]
         public IEnumerator GameButtonsAndExitReturnToMainWithCachedProgress() => UniTask.ToCoroutine(async () =>
         {
             MainButton("GomokuButton").onClick.Invoke();

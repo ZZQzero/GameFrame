@@ -27,6 +27,19 @@
         "resolved": "1.21.4",
         "contentHash": "g14EsSS85yn0lHTi0J9ivqlZMf09A2iI51fmI+0KkzIzyCbWOBWPi5mdaY7YWmXprk12aYh9u/qfWHQUYthlwg=="
       },
+      "NLog": {
+        "type": "Transitive",
+        "resolved": "6.2.1",
+        "contentHash": "fTGNuJyzkgDc1TBEGXF+FMT4b6kB7gygkSN3dLei2Ziiwx/rugXA+OyyFWZ60P1G/+SzzSKiWHlQ4OklC8AgRg=="
+      },
+      "NLog.Extensions.Logging": {
+        "type": "Transitive",
+        "resolved": "6.2.1",
+        "contentHash": "VVISyXM6nU6akAK9dzit/Yy/Q050PVpW0FZM6ceSA7oZUvMtQZlE0VlNx1VUBe3Uo540/9Ee05RiKlPvyR8dUQ==",
+        "dependencies": {
+          "NLog": "6.2.1"
+        }
+      },
       "game.config": {
         "type": "Project"
       },
@@ -35,6 +48,13 @@
         "dependencies": {
           "GameFrame.Network.Core": "[1.0.0, )",
           "MemoryPack": "[1.21.4, )"
+        }
+      },
+      "gameframe.logging": {
+        "type": "Project",
+        "dependencies": {
+          "NLog": "[6.2.1, )",
+          "NLog.Extensions.Logging": "[6.2.1, )"
         }
       },
       "gameframe.network.core": {

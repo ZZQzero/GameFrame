@@ -1,6 +1,6 @@
 namespace Game.Hotfix
 {
-    /// <summary>已登录账号的只读业务信息；认证凭据由会话内部持有。</summary>
+    /// <summary>已登录账号的只读业务信息，不持有认证凭据。</summary>
     public sealed class GameUser
     {
         public ulong AccountId { get; }

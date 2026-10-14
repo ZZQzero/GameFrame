@@ -1,7 +1,11 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
+using System.Net;
+using System.Net.Sockets;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using Game.Hotfix;
@@ -117,7 +121,7 @@ namespace GameFrame.Tests
         public IEnumerator CanceledGomokuAdmissionRequiresExplicitQueryBeforeMoreCommands() => UniTask.ToCoroutine(async () =>
         {
             GameLoginSession login = CreateSession();
-            Assert.AreEqual(ResultCode.Success, await login.LoginAsync(Account(), "test-password"));
+            Assert.AreEqual(ResultCode.Success, (await login.LoginAsync(Account(), "test-password")).ResultCode);
             var room = new GomokuRoomSession(login);
             gomokuRooms.Add(room);
             using var cancellation = new CancellationTokenSource();
@@ -150,8 +154,8 @@ namespace GameFrame.Tests
 #if UNITY_EDITOR
             GameLoginSession a = CreateSession();
             GameLoginSession b = CreateSession();
-            Assert.AreEqual(ResultCode.Success, await a.LoginAsync(Account(), "test-password"));
-            Assert.AreEqual(ResultCode.Success, await b.LoginAsync(Account(), "test-password"));
+            Assert.AreEqual(ResultCode.Success, (await a.LoginAsync(Account(), "test-password")).ResultCode);
+            Assert.AreEqual(ResultCode.Success, (await b.LoginAsync(Account(), "test-password")).ResultCode);
             var roomA = new GomokuRoomSession(a);
             var roomB = new GomokuRoomSession(b);
             gomokuRooms.Add(roomA);
@@ -252,8 +256,8 @@ namespace GameFrame.Tests
         {
             GameLoginSession a = CreateSession();
             GameLoginSession b = CreateSession();
-            Assert.AreEqual(ResultCode.Success, await a.LoginAsync(Account(), "test-password"));
-            Assert.AreEqual(ResultCode.Success, await b.LoginAsync(Account(), "test-password"));
+            Assert.AreEqual(ResultCode.Success, (await a.LoginAsync(Account(), "test-password")).ResultCode);
+            Assert.AreEqual(ResultCode.Success, (await b.LoginAsync(Account(), "test-password")).ResultCode);
             var roomA = new GomokuRoomSession(a);
             var roomB = new GomokuRoomSession(b);
             gomokuRooms.Add(roomA);
@@ -296,7 +300,7 @@ namespace GameFrame.Tests
         {
             GameLoginSession a = CreateSession();
             string account = Account();
-            Assert.AreEqual(ResultCode.Success, await a.LoginAsync(account, "test-password"));
+            Assert.AreEqual(ResultCode.Success, (await a.LoginAsync(account, "test-password")).ResultCode);
             var room = new GomokuRoomSession(a);
             gomokuRooms.Add(room);
             Assert.AreEqual(GomokuResult.Ok, await room.CreateAsync());
@@ -322,7 +326,7 @@ namespace GameFrame.Tests
             await room.QueryAsync();
             Assert.IsNull(room.Snapshot, "The previous membership remains closed locally until explicit server cleanup.");
             GameLoginSession replacement = CreateSession();
-            Assert.AreEqual(ResultCode.Success, await replacement.LoginAsync(account, "test-password"));
+            Assert.AreEqual(ResultCode.Success, (await replacement.LoginAsync(account, "test-password")).ResultCode);
             await UniTask.WaitUntil(() => !a.IsAuthenticated).Timeout(TimeSpan.FromSeconds(5));
             Assert.IsNull(room.Snapshot);
         });
@@ -332,7 +336,7 @@ namespace GameFrame.Tests
         {
             GameLoginSession session = CreateSession();
             string account = Account();
-            Assert.AreEqual(ResultCode.Success, await session.LoginAsync(account, "test-password"));
+            Assert.AreEqual(ResultCode.Success, (await session.LoginAsync(account, "test-password")).ResultCode);
             GameUser user = session.CurrentUser;
             Assert.IsNotNull(user);
             Assert.AreEqual(account, user.AccountName);
@@ -351,7 +355,7 @@ namespace GameFrame.Tests
             Assert.IsFalse(session.IsAuthenticated);
             Assert.AreEqual(NetworkClientState.Idle, client.State);
             Assert.AreEqual(0, client.GetMetrics().OwnedBytes);
-            Assert.AreEqual(ResultCode.Success, await session.LoginAsync(account, "test-password"));
+            Assert.AreEqual(ResultCode.Success, (await session.LoginAsync(account, "test-password")).ResultCode);
             Assert.AreEqual(user.AccountId, session.CurrentUser.AccountId);
             Assert.Greater(session.CurrentUser.AuthEpoch, user.AuthEpoch);
         });
@@ -362,16 +366,16 @@ namespace GameFrame.Tests
             GameLoginSession original = CreateSession();
             GameLoginSession replacement = CreateSession();
             string account = Account();
-            Assert.AreEqual(ResultCode.Success, await original.LoginAsync(account, "test-password"));
+            Assert.AreEqual(ResultCode.Success, (await original.LoginAsync(account, "test-password")).ResultCode);
             GameUser user = original.CurrentUser;
             int lost = 0;
             original.AuthenticationLost += () => lost++;
-            Assert.AreEqual(ResultCode.InvalidCredentials, await replacement.LoginAsync(account, "wrong-password"));
+            Assert.AreEqual(ResultCode.InvalidCredentials, (await replacement.LoginAsync(account, "wrong-password")).ResultCode);
             Assert.IsNull(replacement.CurrentUser);
             Assert.IsFalse(replacement.IsBusy);
             Assert.IsTrue(original.IsAuthenticated);
             Assert.AreEqual(0, lost);
-            Assert.AreEqual(ResultCode.Success, await replacement.LoginAsync(account, "test-password"));
+            Assert.AreEqual(ResultCode.Success, (await replacement.LoginAsync(account, "test-password")).ResultCode);
             await UniTask.WaitUntil(() => !original.IsAuthenticated).Timeout(TimeSpan.FromSeconds(5));
             Assert.IsNull(original.CurrentUser);
             Assert.AreEqual(1, lost);
@@ -437,6 +441,55 @@ namespace GameFrame.Tests
         });
 
 #if UNITY_EDITOR
+        [UnityTest]
+        public IEnumerator FailedConnectionKeepsRememberedLoginAndThePanelAllowsAnotherAttempt() => UniTask.ToCoroutine(async () =>
+        {
+            string directory = Path.Combine(Path.GetTempPath(), "gameframe-offline-" + Guid.NewGuid().ToString("N"));
+            var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            listener.Stop();
+            var endpoint = new Uri("wss://localhost:" + port + "/network");
+            var vault = new RememberedLoginStoreTests.MemoryVault();
+            var store = new RememberedLoginStore(Path.Combine(directory, "login.sqlite"), endpoint, vault);
+            var session = new GameLoginSession(GameRuntime.Network, endpoint, rememberedLogin: store);
+            sessions.Add(session);
+            try
+            {
+                await store.SaveAsync("offline-player", 42, DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeMilliseconds(),
+                    new byte[16], new byte[32]);
+                int entered = 0;
+                OpenPanel(session, () =>
+                {
+                    entered++;
+                    return UniTask.CompletedTask;
+                });
+                await UniTask.WaitUntil(() => Control<Button>("confirmLoginButton").interactable)
+                    .Timeout(TimeSpan.FromSeconds(5));
+                Assert.IsFalse(Control<TMP_InputField>("passwordInput").gameObject.activeSelf);
+                LogAssert.Expect(LogType.Exception, new Regex("(SocketException|WebSocketException)"));
+                Control<Button>("confirmLoginButton").onClick.Invoke();
+                await UniTask.WaitUntil(() => Control<Button>("confirmLoginButton").interactable)
+                    .Timeout(TimeSpan.FromSeconds(15));
+                Assert.AreEqual(0, entered);
+                Assert.IsFalse(session.IsAuthenticated);
+                Assert.IsFalse(session.IsBusy);
+                Assert.IsTrue((await store.ReadAsync()).CanResume);
+                Assert.IsFalse(Control<TMP_InputField>("passwordInput").gameObject.activeSelf);
+                Assert.IsFalse(Control<TMP_InputField>("accountInput").interactable);
+                StringAssert.Contains("已保留免密资格", Control<TMP_Text>("statusText").text);
+                Assert.AreEqual(0, GameRuntime.Network.Memory.OwnedBytes);
+            }
+            finally
+            {
+                await session.DisposeAsync();
+                if (Directory.Exists(directory))
+                {
+                    Directory.Delete(directory, true);
+                }
+            }
+        });
+
         private void OpenPanel(GameLoginSession session, Func<UniTask> loggedIn, string message = "")
         {
             if (panel == null)
@@ -446,7 +499,7 @@ namespace GameFrame.Tests
                 panel.DispatchCreate();
             }
 
-            panel.ApplyArgs(new LoginPanelArgs(session, loggedIn, message));
+            panel.ApplyArgs(new LoginPanelArgs(session, _ => loggedIn(), message));
             panel.DispatchOpen();
         }
 

@@ -24,6 +24,17 @@ namespace GameFrame.Network
         }
     }
 
+    public sealed class NetworkConnectionClosedException : NetworkException
+    {
+        public ushort ReasonCode { get; }
+
+        public NetworkConnectionClosedException(ushort reasonCode)
+            : base($"Server closed the connection ({reasonCode}).")
+        {
+            ReasonCode = reasonCode;
+        }
+    }
+
     public sealed class NetworkBackpressureException : NetworkException
     {
         public NetworkBackpressureException(string message) : base(message)

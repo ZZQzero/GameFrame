@@ -2,7 +2,7 @@
 
 适用于 `DotNet/` 的框架、协议、业务、数据库、启动与部署代码，以及双方共用的协议生成工具和 `Native/Kcp`。修改这些部分前阅读本文；运行与接入步骤见 [服务端使用说明](DotNetUsage.md)。Unity 侧的线程与会话规范见 [客户端网络开发规范](ClientNetworkDevelopment.md)，调用方法见 [客户端使用说明](ClientNetworkUsage.md)。所有路径相对仓库根目录。
 
-保留 [NetworkDesign](NetworkDesign.md) 作为总体设计与验收契约，另外维护上述四份开发规范和使用说明。本文集中维护 .NET 开发规则及共享 GFNP、Proto→MemoryPack、原生 ABI 的实现细节，客户端规范引用公共契约；使用说明记录操作步骤与实际验证范围。设计决定变化同步更新 NetworkDesign，接口、配置或生命周期变化更新对应规范和说明，不另增重复的实施或审查文档。历史过程由 Git 保留，当前问题和验收范围更新本文末尾。
+保留 [NetworkDesign](NetworkDesign.md) 作为总体设计与验收契约，另外维护上述四份开发规范和使用说明。本文集中维护 .NET 开发规则及共享 GFNP、Proto→MemoryPack、原生 ABI 的实现细节，客户端规范引用公共契约；使用说明记录操作步骤与实际验证范围。设计决定变化同步更新 NetworkDesign，接口、配置或生命周期变化更新对应规范和说明，不另增重复的实施或审查文档。历史过程由 Git 保留，当前问题和验收范围更新对应章节。服务端日志完善见 [执行计划](#server-logging-plan)。
 
 ## 1. 全局原则与代码要求
 
@@ -23,10 +23,11 @@ SDK 由 `DotNet/global.json`、`Tools/global.json` 锁定为 10.0.401，工程�
 | --- | --- | --- |
 | `DotNet/GameFrame.Network.Core` | 同源 GFNP/control、路由/codec、缓冲预算、时钟与 native ABI | 不引用 Unity DLL、游戏协议、客户端 worker 或账号业务 |
 | `DotNet/GameFrame.Server` | WSS/KCP host、连接与队列、强类型派发、Push、关闭 | 只引用 Core 与 ASP.NET Core，不引用 Game.Protocol/Game.Server/Npgsql |
+| `DotNet/GameFrame.Logging` | 日志选项、实例元数据、NLog Provider、布局、有界异步输出、诊断与释放 | 引用标准 Logging 与 NLog；不引用网络/协议/业务，不使用全局 LogManager |
 | `DotNet/Game.Protocol` | 编译双端同源的生成 DTO/catalog | 引用 Core、MemoryPack，导入 `Protocol/GameFrame.Protocol.projitems` |
 | `DotNet/Game.Config` | 服务端 Luban 生成表与固定版本的二进制运行库 | 不依赖 Unity、网络框架或游戏协议 |
 | `DotNet/ConfigGenerator` | Luban 离线生成与产物检查，提供 IDE 启动项 | 仅启动固定版本 Luban 进程，不引用 Game.Config 或其他运行时工程 |
-| `DotNet/Game.Server` | 单业务可执行入口、应用组合、认证、数据库、配置加载、部署 | 引用 Server、Protocol、Config；玩家与玩法规则在这里实现 |
+| `DotNet/Game.Server` | 单业务可执行入口、应用组合、认证、数据库、配置加载、部署 | 引用 Server、Protocol、Config 与日志适配；玩家与玩法规则在这里实现 |
 | `Protocol`、`DotNet/NetworkProtocol` | 唯一手写 IDL 与离线生成/检查工具 | 不新增第二套手写 DTO/opcode，不依赖已有生成产物才能生成 |
 | `Native/Kcp` | 双端唯一 C 源码、依赖锁、ABI、构建安装与回归 | C 处理字节、KCP/DTLS，不解析 MemoryPack 游戏 DTO |
 
@@ -47,10 +48,11 @@ Core、客户端 Runtime 网络和 Server 网络统一使用 `GameFrame.Network`
 ## 3. 启动、连接与关闭
 
 ```text
-配置/profile → Luban Tables 加载 → 证书检查 → 数据库 SELECT 1 → 账号表检查
+应用日志初始化 → profile 校验 → Luban Tables 加载 → 证书检查 → 数据库 SELECT 1 → 账号表检查
 → 账号服务/应用组合 → 网络与 Kestrel → 监听等待客户端
 客户端 TLS/DTLS → GFNP Hello → 应用连接初始化 → 按阶段派发业务
 停止准入 → join 网络与业务 → 停止 HTTP host → 释放账号/数据库/证书
+→ 最终停止日志 → 刷新并释放应用日志
 ```
 
 服务启动验证运行依赖，不验证玩家账号、角色或其他玩家数据。认证仅由客户端 Register/Login/ResumeLogin 触发；框架不认识账号。生产监听、容量与跨进程会话未配置时，当前入口明确拒绝生产启动。
@@ -85,7 +87,7 @@ Check 在系统临时目录生成并逐文件比较正式代码/数据，忽略 
 
 `Game.Config/Generated`、`Game.Config/Bytes` 只放生成产物；手写运行库放 `Game.Config/Luban`，来源与许可证固定在目录说明中，与当前 Unity 包相同。不得访问 Unity Library/PackageCache 构建，也不将生成器依赖带入服务端运行时。当前生成器保持 Luban 5.0.0，升级时同时验证两端代码、数据与运行库。
 
-`Game.Server/Configuration/TableConfigLoader` 用生成的 `Tables(loader)` 读取 `.bytes`，表名与引用解析由生成代码维护。两个 local profile 均在任何运行依赖与监听创建前加载；失败原样传播并终止启动。默认从 `AppContext.BaseDirectory/Config/Bytes` 读取，`GF_CONFIG_DIR` 可覆盖；相对路径也基于执行目录。WSS 宿主注册同一个 `Tables` 为 DI 单例，手动组合的业务可直接通过构造参数接收它。当前 KCP local 仅验证加载，尚无配置消费者；有真实玩法时在应用组合处传入该实例。表对象和集合按只读方式使用，不修改共享表或给每张表创建静态单例。
+`Game.Server/Configuration/TableConfigLoader` 用生成的 `Tables(loader)` 读取 `.bytes`，表名与引用解析由生成代码维护。两个 local profile 均在日志初始化后、运行依赖与监听创建前加载；加载器失败原样传播到应用入口，入口记录安全的阶段/异常类型/堆栈并退出 1，不输出可能包含配置值的异常 Message。默认从 `AppContext.BaseDirectory/Config/Bytes` 读取，`GF_CONFIG_DIR` 可覆盖；相对路径也基于执行目录。WSS 宿主注册同一个 `Tables` 为 DI 单例，手动组合的业务可直接通过构造参数接收它。当前 KCP local 仅验证加载，尚无配置消费者；有真实玩法时在应用组合处传入该实例。表对象和集合按只读方式使用，不修改共享表或给每张表创建静态单例。
 
 数据和 Luban 许可证通过 Game.Config 项目项随构建、发布复制。生成产物纳入 Git；服务器启动不运行生成器、不更新表文件、不做配置热重载。数据更新需生成并部署匹配的数据后重启，Schema 变化需同时重新生成代码和数据、编译发布。
 
@@ -409,3 +411,206 @@ LocalWssService 创建 / 释放 GomokuRooms，ApplicationStopping 停止准入�
 短锁拥有集合、成员索引与结果缓存，提交时再持有 AccountSessions.Binding.CommitGate；Revoke 使用同一绑定锁。顺序为房间集合 → 绑定，房间不获取账号索引锁，不在锁内执行 IO / 编码 / continuation。LobbySession 的顶号与 Closed 交接旧 BindingId，旧解绑不能移除新成员。
 
 每绑定递增 commandId + 操作 / 内容 SHA-256 去重，最大已见 ID 活到解绑；缓存淘汰后拒绝旧 ID，Query 仍返回当前成员状态。RPC 适配位于 GomokuModule，只链接纯 GomokuGame.cs，不引用 Unity / Hotfix DLL。限额与测试见 [五子棋](Gomoku.md#联机实施计划与当前实现2026-10-14)。
+
+<a id="server-logging-plan"></a>
+
+## 10. 服务端日志完善执行计划（2026-10-14）
+
+本节维护框架日志设计、执行步骤与实际进度。2026-10-14 已实现统一的 `GameFrame.Logging` 工程，内部直接接入 NLog，并完成两个 local profile 的应用级接入；完整网络事件治理、业务事件和生产性能验收仍待执行。日志独立于网络和游戏业务，由应用组合并管理实例生命周期。ETFramework 仅作参考，取舍以 GameFrame 的职责、生命周期和部署需求为依据；.NET/NLog 依赖不进入 Unity 共用源码。完成范围和待办见第 10.7 节，接入完成不等于全计划完成。
+
+### 10.1 当前基线与范围
+
+| 接入点 | 当前已确认情况 | 本轮工作 |
+| --- | --- | --- |
+| `Game.Server/Program.cs` | 已在 profile/Tables 前创建日志，失败记录安全诊断并返回 1，最终释放日志 | 补充各依赖故障的真实部署验证 |
+| `Game.Server/LocalWssService.cs` | 宿主借用外部 factory，移除默认输出；宿主外资源释放时日志仍存活 | 已验证真实 WSS host 释放后可写日志；真实数据库启动故障待验 |
+| `Game.Server/LocalKcpService.cs` | 借用应用 factory；凭据读取前已有日志，就绪使用源生成事件 | 已验证真实进程监听、SIGINT 停止与最终日志；生产压测待补 |
+| `GameFrame.Server/ServerConnection.cs` | 已记录 WSS 连接、handler 和部分清理故障 | 完整核对各任务和收尾路径的记录边界，补齐请求与连接字段 |
+| `GameFrame.Server/KcpListenerHost.cs` | 已注入 logger，部分事件有连接 ID/代际，具备 owner/队列 meter | 区分 child、listener、handler 和清理故障，统一关联与级别 |
+| `Game.Server/Login`、`Sessions`、`Gomoku`、`Database` | 使用显式业务组合；当前没有统一业务日志约定 | 由业务所有者记录认证、绑定和房间关键事件，仓库传播基础设施异常 |
+
+本次针对新增日志工程、应用组合与受影响测试完成源码核对，不声称已完成网络和业务日志的全量审查。继续 L0/L2/L3 前建立相关文件和调用关系清单，完整阅读实现、调用方、选项、资源所有者、测试、依赖、配置与构建入口。搜索用于定位，清单和待验证项维护在本节，不另建历史审查报告。
+
+首轮覆盖现有 local-wss/local-kcp-dtls、框架日志和现有账号/五子棋业务。生产 hosting 仍按既有约束拒绝启动；完整分布式追踪、日志检索平台、持久化审计流水和游戏行为回放不属于首轮交付。每包日志、逐落子 Information 日志和所有成功 RPC 的默认日志也不属于目标。
+
+### 10.2 已选方案与取舍
+
+- 沿用 `ILogger<T>`/`ILoggerFactory` 作为模块间日志契约。通用配置校验、实例上下文接入及初始化/释放规则属于框架日志模块；`Game.Server` 提供部署值并选择 Provider。Core 不增加日志库依赖，账号/房间字段不下沉到网络或日志框架。
+- 已采用 NLog ConsoleTarget：默认文本，可显式切换单行 JSON；两种格式使用相同事件、结构化字段和 Scope。NLog 专属配置在日志工程内，应用不同时启用内置 Console Provider。
+- 对比“分别给 WSS/KCP 补几个日志点”和“统一应用日志生命周期”，采用后者，解决早期启动与宿主外清理缺少覆盖的问题；不改变现有网络停止/join 顺序。
+- 应用拥有 `NLogLogging`，WSS DI 和手动组合的 KCP/业务借用其 Factory。外部实例注册不转移释放责任；已验证 WebApplication 释放后仍可写入。应用最后调用 `DisposeAsync`，重复调用等待同一任务。
+- 已接入 NLog 有界异步批量输出，不额外创建自研队列。文件输出保留扩展入口，当前部署只启用 Console；接入与门禁见 [性能与 NLog 接入](#server-logging-performance)。不复制 ET 的静态单例、Fiber 分文件或 All/Error 双份输出。
+- 高频日志使用固定模板与结构化参数；需要时使用 `LoggerMessage`，昂贵诊断参数先检查 `IsEnabled`。级别由启动配置决定，当前不做运行中热重载；不用 `Conditional("DEBUG")` 移除日志能力，不默认捕获调用位置或主动创建 StackTrace。
+
+<a id="server-logging-architecture"></a>
+
+#### 框架职责与依赖方向
+
+`DotNet/GameFrame.Logging` 是单一服务端日志工程，命名空间为 `GameFrame.Logging`，同时包含配置校验和 NLog 接入。当前只有一种输出实现，不再单独维护 NLog 适配程序集；职责通过标准 ILogger 接口、模块依赖和应用所有权划分。非网络服务也可以复用该工程，不预建其他 Provider 工程或自定义日志接口。
+
+| 层次 | 职责与放置位置 | 对外边界 |
+| --- | --- | --- |
+| 日志契约 | 标准 `ILogger`、`ILogger<T>`、`ILoggerFactory`、`EventId` 与 Scope | 模块依赖稳定标准接口，不重复定义 `ILog`、`ILogSink` 或逐级转发 API |
+| 日志模块 | `GameFrame.Logging`：选项校验、实例元数据、NLog Provider、布局、AsyncTargetWrapper、诊断和异步释放 | 依赖标准 Logging 与 NLog，不依赖 ASP.NET Core、网络或业务；不解析游戏环境变量，不新增第二层队列 |
+| 模块事件 | 网络事件在 `GameFrame.Server`，认证/房间事件在 `Game.Server` 各自领域 | 事件语义和字段由状态所有者定义，日志模块不引用这些类型、扫描业务事件或订阅业务事件总线 |
+| 应用组合 | `Game.Server`：读取部署配置、提供 Service/Environment/Version/InstanceId、注册选定输出并注入模块 | 应用拥有本次进程日志实例，业务只借用 logger；应用不实现通用队列、写盘或日志框架 |
+
+依赖方向为 `Game.Server → GameFrame.Logging → 标准 Logging + NLog`、`Game.Server → GameFrame.Server`。网络和业务事件使用标准 ILogger 接口，只有应用组合及日志配置使用方需要引用 `GameFrame.Logging`。日志与网络工程之间没有相互引用；共享网络 Core 保持现有无日志依赖边界。纯协议/编解码错误由拥有执行边界的调用方记录。
+
+输出格式、级别和容量是配置，连接关闭与业务失败策略仍由原模块决定。更换 Provider 只调整日志工程与应用组合，不要求修改 handler、协议 DTO、网络状态机或业务事件定义。LoggingOptions 保留元数据和级别，NLogOutputOptions 保留 NLog 输出选项；两者同属日志工程，不复制第三方完整配置模型。
+
+日志实例显式初始化、可被测试替换，所有权由应用保留；不通过全局静态 Current/ServiceLocator 查找 logger，不在取得 logger 时隐式读取配置或启动线程，不让网络模块初始化/关闭全局日志。事件测试可注入标准捕获 Provider；独立 `Tools/Logging.Tests` 验证真实 NLog 适配，无需数据库和网络监听。不新增统一 Write 转发器、自研调度器或业务感知的日志管理器。
+
+### 10.3 字段、事件与级别
+
+下表规定目标逻辑字段；当前已实现公共/实例字段与宿主事件，其余按 L2/L3 推进。文本和 JSON 的实际映射见使用说明。消息模板、EventId 和字段含义保持一致，不能把插值后的文本当作结构化参数。
+
+| 范围 | 字段 | 规则 |
+| --- | --- | --- |
+| 公共 | Timestamp、Level、Category、EventId、EventName | 时间使用带时区的 UTC；EventId/名称稳定，模板修改不复用成另一个事件 |
+| 应用 | Service、Environment、InstanceId、Version、Profile | InstanceId 区分进程启动实例，不依赖可复用的 PID；profile 校验前允许未指定 |
+| 连接 | Transport、ConnectionId、Generation | WSS/KCP 使用同一含义；握手前尚无连接标识时省略，不伪造有效 ID |
+| 请求 | Opcode、CorrelationId、BodyLength | CorrelationId 与实例、传输、连接、代际组合定位；Notify 不伪造 RPC ID |
+| 结果 | StatusCode、ResultCode、CloseReason、DurationMs、Stage | 系统码、业务码和关闭原因分开；耗时用单调时钟，Stage 说明起止边界 |
+| 业务 | AccountId、AuthEpoch、BindingId、RoomId、CommandId | 仅由对应业务提供；按需记录，不默认加入所有事件或指标标签 |
+| 故障 | ErrorType、原异常的安全诊断信息 | 保留故障定位能力；异常 Message、InnerException、Data 都不能绕过敏感信息规则 |
+
+网络事件声明在 `GameFrame.Server` 的内部诊断代码中，日志模块自身的配置/输出诊断放在 `GameFrame.Logging` 或实际适配层，业务事件在 `Game.Server` 按领域声明。通用日志模块只维护公共字段语义，不集中依赖各模块的事件类。网络事件 ID 使用 1000～1999，宿主事件 2000～2999，账号事件 3000～3999，五子棋事件 4000～4999；这些 ID 与协议 opcode、状态码无关。事件以 Category + EventId/名称识别，不要求未来所有独立模块共享一个全局整数注册表。首次实施时登记具体事件，不预先创建无调用方事件。只有语义相同、字段一致的事件才能被 WSS/KCP 共用。
+
+| 级别 | 使用范围 |
+| --- | --- |
+| Trace/Debug | 显式启用的请求完成、连接变化与详细诊断；仍禁止敏感正文 |
+| Information | 启动就绪、正常停止、成功建立/撤销账号绑定、房间创建/开始/结束等关键事件 |
+| Warning | 异常协议、超时、过载等需要关注的运行事件；高频同类事件限频汇总 |
+| Error | 未预期的 handler、外部依赖和独立清理故障 |
+| Critical | 启动失败或共享 listener/宿主故障导致服务必须终止；不把单连接错误提升为全服故障 |
+
+凭据错误、非法落子、房间已满、正常 EOF 和已请求的协作取消不写 Error 堆栈。凭据拒绝、限流和协议拒绝次数以指标聚合，必要日志只携带原因和计数；不为每个攻击来源创建无限限频状态。具体事件级别依据现有错误语义确定，不能仅按异常类型决定严重程度。
+
+### 10.4 异常记录、Scope 与所有权
+
+1. 为启动、请求、连接、listener 和最终清理分别指定记录责任方。Repository/Service 传播原异常；已经在请求边界处理并记录的主异常，连接关闭和宿主层不再打印同一堆栈。为此优先使用已有首因/终态所有权，不新增全局异常去重表。
+2. 原失败状态、Completion 和退出码独立于日志维护。写过日志不代表故障处理完成；日志丢弃也不能改写业务结果、关闭原因或异常传播。
+3. 清理产生的不同异常分别报告，带 Stage 和相同连接/实例字段。若清理是首个故障，应作为主故障记录并传播；不能只在“已有主异常”分支记录清理错误。
+4. Scope 只覆盖当前逻辑操作并及时释放；WSS 并行发送/接收/派发和 KCP owner/应用任务都要核对上下文传播。KCP owner 轮转 child 时只在当前 child 处理范围建立上下文，禁止把一个 child 的 Scope 留给后续连接。跨队列交接显式携带必要的非敏感值，不能假定 ExecutionContext 会随消息自动传播。
+5. 在日志异步入队之前固定字段快照，不传入池化 DTO、OwnedFrame、可变凭据数组或依赖已释放对象的延迟格式化回调。业务提交时在锁内取得最小事件值，在锁外写日志；不在账号/房间状态锁内调用 Provider。
+6. 密码、盐/哈希、恢复凭据及 AccountSessionId、ticket、PSK、证书密码、连接串、SQL 参数、完整消息正文不输出；默认不输出账号名和完整远端 IP。异常文本和第三方诊断一并核对。需要裁剪或脱敏时只改变日志视图，原异常及其传播保持原样，不以一层笼统文本替换业务故障。
+
+### 10.5 实施步骤与退出条件
+
+以下保留完整完善路线。本次按用户要求先交付 L1 与 NLog 输出基础，L0 全量基线及 L2/L3 尚未完成；继续治理网络/业务事件时按 L0→L2→L3 推进。每步形成可评审差异并更新进度，不能通过新增日志掩盖状态与资源问题。
+
+| 步骤 | 修改范围与具体动作 | 退出条件 |
+| --- | --- | --- |
+| L0：建立基线 | 完整阅读日志相关实现和调用方；绘制启动/关闭资源顺序及异常传播关系；登记现有事件、遗漏、重复与敏感输出；比较局部修改和生命周期调整 | 清单闭合，每条主失败与独立清理失败有记录责任方，具体事件表可用于实现与测试 |
+| L1：建立框架模块并统一接入 | 在单一 `GameFrame.Logging` 中实现选项校验与 NLog 接入，复用标准 ILogger；在 `Game.Server` 读取部署配置并选择输出；确定格式、类别过滤、实例字段和配置来源；提前创建应用拥有的 factory，两个 profile 借用 | 日志模块不依赖网络/业务，调用方不依赖 NLog API；模块可独立验证；参数、Tables、证书、数据库和 grant 读取失败均有应用日志，失败终止后续步骤并以非零状态退出 |
+| L2：统一框架事件 | 修改 `ServerConnection`、`WssServer`、`KcpListenerHost` 的现有记录点；补齐首因/清理/终态路径、连接/请求字段和操作范围；不改变帧协议与准入语义 | WSS/KCP 同类事件语义一致，主故障只记录一次，独立清理错误完整可见，并发连接字段不串线 |
+| L3：接入业务事件 | 按需将 logger 注入 `LoginModule`/`LoginHandlers`、账号会话、`LobbySession` 和 `GomokuRooms`；由状态所有者记录提交事实，处理器记录适配结果；不为日志新增业务转发层 | 登录/恢复/注销、顶号/到期/撤销、房间开始/结束可关联；正常拒绝级别正确；一次业务事实不被多层重复声明 |
+| L4：容量与输出验证 | 配置 NLog Console 的有界异步队列与满额策略，核对 Provider 真实排空/释放语义；验证文本/JSON、级别、Scope 和日志关闭顺序；补充相应行为测试 | 慢输出/洪峰下资源有界且网络 owner 不等待输出；丢弃可观察，正常关闭有排空证据，失败/超时边界如实报告 |
+| L5：回归与交付 | 运行相关测试和真实服务进程，记录日志开启前后成本及平台范围；更新实际配置、启动示例、事件字段和证据 | 首轮检查项通过；未验证平台、容量和第三方行为明确列出，使用说明与实现一致 |
+
+L1 配置沿用标准类别过滤，local 初始默认 `Information`，`Microsoft.AspNetCore`/`Npgsql` 的常规输出默认 `Warning`；业务 Debug 由配置显式启用。无效格式、级别和容量应在监听前失败。配置不能改变生产准入或启用数据库敏感日志。WSS host 不得另外注册第二套相同 Console Provider。
+
+L3 的“状态提交”与“响应送达”严格区分：登录绑定完成不代表客户端收到 token，房间命令提交不代表 Push 已送达；断线与请求取消也不证明数据库未提交。经济审计或棋谱若以后需要持久化，使用领域数据模型与事务，不能用普通异步日志代替。
+
+当前默认队列长度为 4096 条，满额丢弃新日志，不让生产者等待控制台。已验证队列满时的丢弃行为，尚非生产容量结论；Error/Critical 同样可能丢弃。丢弃由 Provider 通知计数并经 Meter 暴露，不向同一已满队列写诊断。队列另有正在处理的批次，条数上限不是精确字节上限；事件应只携带小型非敏感值，不持有正文或资源对象。完整事件/异常大小审查及资源峰值测量待 L0/L2/L3/L4 完成。不自研写盘线程或队列。
+
+正常关闭顺序为“停止准入 → 按既有契约 join 网络/handler/业务 → 释放业务、数据库、证书等资源并记录收尾 → 输出最终停止结果 → 排空并释放日志”。排空时限及未完成结果按实际 Provider 能力配置和验证；不能超时后宣称全部落盘，也不能遗弃仍拥有应用资源的任务。进程强杀、崩溃和系统关机不增加退出拦截与无限等待承诺。日志配置尚未成功时，入口用固定、无敏感信息的 stderr 启动诊断并终止；这只是早期失败出口，不切换运行模式或隐式启用备用 Provider。
+
+### 10.6 验证矩阵与执行入口
+
+优先扩展 `Tools/NetworkServer.Tests/WssLifecycleTests.cs` 的现有日志捕获方式及 `KcpLoopbackTests.cs` 的 logger 测试，验证事件、结构化状态、异常和 Scope；不只断言日志条数或自然语言文本，也不把 Provider mock 当作真实 Console/文件行为证据。
+
+| 场景 | 验收证据 |
+| --- | --- |
+| 框架边界、独立接入与 Provider 替换 | 单一日志工程不引用 Server/Core、游戏协议/业务，NLog 接入集中在日志工程；独立日志测试无需网络/数据库；注入捕获 Provider 不修改业务事件 |
+| 无效 profile/日志配置、损坏 Tables、证书与数据库初始化失败、grant 文件读取失败 | 应用事件或日志初始化前的固定 stderr 可见；不监听、不继续初始化、不泄漏敏感值；进程非零退出 |
+| WSS/KCP handler 未预期失败 | EventId、级别、Opcode/CorrelationId 和连接/代际一致；主异常堆栈只在责任边界记录一次 |
+| handler 失败同时取消回调/Closed/Dispose 失败 | 首因不被替换，独立清理事件完整，资源仍按既有契约释放 |
+| 正常 EOF、主动关闭、协作取消和预期业务拒绝 | 无误报 Error/Critical，不改变排空、回复后关闭或绑定撤销结果 |
+| 两连接并行请求、KCP owner 轮转、旧代际晚到 | 上下文不串线；相同 CorrelationId 能靠连接组合定位；Scope 在异步交接后仍正确 |
+| 登录成功/失败、Resume、顶号、到期、注销与房间提交 | 事件反映真实状态和身份代际，日志不宣称网络送达或取消回滚 |
+| 敏感测试标记进入 DTO、异常及第三方错误 | 文本、JSON、Scope、异常链与 stderr 均不出现密码/凭据/连接串等标记 |
+| 文本/JSON、类别过滤和关闭 Debug | JSON 逐行可解析，字段类型/模板正确，无重复 Provider；过滤后不计算昂贵诊断参数 |
+| 受控慢输出、队列满和持续拒绝洪峰 | 记录吞吐、RPC/owner 延迟、分配/GC、RSS、丢弃与限频情况；生产者无同步输出等待、状态数量有界 |
+| 宿主外资源收尾、正常停止与输出不可用 | 日志晚于应用依赖释放；最终事件与排空结果有证据；输出故障不伪装为服务正常停止或修改业务结果 |
+
+相关命令从仓库根目录执行，使用锁定 SDK；配置 PG/native 的步骤见 [验证与现有证据](DotNetUsage.md#验证与现有证据)：
+
+```sh
+(cd DotNet && dotnet restore DotNet.sln --locked-mode)
+(cd Tools && dotnet restore NetworkServer.Tests --locked-mode)
+(cd Tools && dotnet restore Logging.Tests --locked-mode)
+(cd DotNet && dotnet build DotNet.sln -c Release --no-restore)
+(cd Tools && dotnet test NetworkServer.Tests -c Release --no-restore)
+(cd Tools && dotnet test Logging.Tests -c Release --no-restore)
+```
+
+新增依赖时显式更新对应锁文件后再 locked restore。SDK、项目和测试实际依赖需要的其他还原按现有使用说明执行，不能通过删除锁文件避开检查。测试缺少 `GF_POSTGRES_TEST_CONNECTION` 或 `GF_KCP_NATIVE_LIBRARY` 而跳过时，分别保留数据库/UDP/DTLS 待验收项。真实进程验证覆盖两个 local profile 的启动、故障和正常停止；性能至少对比日志关闭、默认级别和受控洪峰，报告具体负载/平台/配置，不从 loopback 推断生产容量。
+
+验证只读用户现有配置，使用独立测试数据库/schema和临时路径；不输出真实密钥，不重置数据库，不替换已加载 native。临时日志和检查产物在验证结束后清理。仅服务端日志变更无需重复 Unity/Player/IL2CPP 或原生构建；若实施扩大到共享源码、协议或 ABI，再按实际影响追加对应门禁。
+
+### 10.7 可选文件输出与进度记录
+
+只有部署需要应用直接落盘时再实施文件输出：选择一个 Provider，明确日志根目录/实例隔离、按时间或大小滚动、保留期限与总容量、队列溢出/丢弃可见性，以及刷新/关闭的真实语义。验证不可写目录、运行中磁盘满、轮转/清理和进程重启，不静默退回 Console；也不因为日志写入失败自动重执行业务。部署采集器负责的行为不伪装成应用能力。不按连接/玩家创建文件，是否另存 Error 由实际查询需要决定。这是后续扩展，不阻塞首轮 Console 方案的完成。
+
+| 交付项 | 当前状态 | 完成时补充的证据 |
+| --- | --- | --- |
+| L0 完整源码/调用关系基线 | 待执行全量基线；本次只核对接入涉及的实现 | 覆盖清单、故障记录边界和具体事件表 |
+| L1 框架模块、统一配置与应用所有权 | 已合并为单一 GameFrame.Logging 工程并接入两个 profile | 独立日志测试、真实 WSS host 释放后写入、早期失败进程和 KCP 启停验证；真实 PG 启动故障尚未验 |
+| L2 框架事件与上下文 | 待实施 | WSS/KCP 故障、并发和清理行为测试 |
+| L3 业务事件 | 待实施 | 认证/撤销/房间事件及脱敏验证 |
+| L4 有界输出与排空 | 基础已实现并验证；端到端压测待执行 | 文本/JSON、过滤、并行 Scope、满队列、写入错误、刷新失败/超时；生产容量/洪峰待验 |
+| L5 首轮交付 | NLog 接入阶段已验证，不代表全路线完成 | 具体构建/测试/进程证据见使用说明；其他平台、PG 和生产压测待验 |
+| 日志性能基线与门禁 | 已验证禁用源生成调用分配与慢输出隔离；完整基线待测 | 默认输出/洪峰/慢输出的端到端吞吐、延迟、CPU/RSS 与 GC 对比 |
+| NLog Provider 接入 | 已接入 NLog/NLog.Extensions.Logging 6.2.1，更新依赖锁和 CI 入口 | 字段/过滤/所有权、输出故障与刷新验证；未声明比原 Console 更快 |
+| 应用直接落盘 | 可选，待部署需求明确 | 适配支持显式 Target；文件轮转、容量、磁盘故障尚未配置/验收 |
+
+本轮修改日志框架、适配、应用组合和相关测试，没有实施网络/业务事件的大范围改造。环境变量、事件及验证限制见 [服务端日志使用说明](DotNetUsage.md#server-logging)。
+
+<a id="server-logging-performance"></a>
+
+### 10.8 性能约束与已接入的 NLog
+
+日志性能作为 L1～L5 的实现约束与验收内容。更换 Provider 不能自动证明性能提升；异步输出主要隔离输出 IO，参数求值、结构化状态构造、Scope、异常处理、部分布局渲染与入队仍可能发生在调用线程。Console 重定向到采集器时同样可能变慢，不能将本机终端显示速度作为性能基线。
+
+调用侧执行以下约束：
+
+- 高频事件优先使用源生成 `LoggerMessage` 方法，避免反复解析模板及通用参数数组/装箱成本；低频启动和清理事件不为形式统一增加复杂封装。
+- 昂贵参数在 `IsEnabled` 之后计算；关闭 Debug 时不做插值、DTO 序列化、集合展开、字符串拼接或额外堆栈采集。源生成日志不能避免调用前的参数表达式求值。
+- Scope 只保留关联所需的少量字段，避免逐包创建字典、长生命周期保存业务对象和重复附加同一组字段。作用域传播和字段快照都计入成本，不要求形式上的“全链零 GC”。
+- 不在网络/native owner 或业务锁内执行同步输出、Flush 或队列等待，不为每条日志创建 Task/Task.Run。异步输出使用 Provider 的有界队列和批量写入，正常运行不逐条强制刷新。
+- 正常高频行为使用 Metrics；预期拒绝使用聚合或受限的汇总事件。重复故障先按主因/终态消除重复记录，再按事件语义确定限频；不能把首个故障与不同的清理故障一并隐藏。
+
+L4 测量同时覆盖调用侧与端到端行为，Release 构建、预热、固定业务负载与固定输出环境后重复采样。下表各组沿用同一事件模板和字段，分别记录配置、连接数、RPC 并发、事件速率、消息/异常大小、测试时长和输出介质；每组记录尝试/接受/丢弃/实际输出条数，队列积压单独列出，不能以大量丢弃换取更快数据。
+
+| 对照组 | 重点记录 |
+| --- | --- |
+| 日志禁用 | 业务吞吐、RPC P95/P99、owner 耗时、CPU、RSS、托管分配与 GC，作为基线 |
+| 调用保留但级别过滤 | 每次调用耗时/分配、参数计算及 Scope 成本，确认禁用路径不执行昂贵诊断 |
+| 默认文本 / JSON 输出 | 调用耗时与端到端变化、格式化/编码成本、输出吞吐和队列积压；文本/JSON 分开比较 |
+| 故障洪峰 / 慢输出 | 异常格式化、限频、队列峰值、丢弃数量、资源上界和 RPC/owner 尾延迟，确认无 IO 背压传入业务线程 |
+| 正常关闭 | 排空时间、最终输出/丢弃数量与超时结果；入队成功不当作写出或持久化成功 |
+
+测试前登记目标负载、允许的吞吐/尾延迟回归与内存预算，执行后按这些目标判定，不能仅报告“日志很快”或事后放宽标准。先定位成本来自调用侧、Scope/格式化、队列还是输出介质，再决定减少事件、调整批次/容量或更换 Provider；性能不达标时不能仅扩大队列转移内存压力。
+
+当前接入路径为：
+
+```text
+框架与业务 ILogger<T>
+        ↓
+应用拥有的 ILoggerFactory
+        ↓
+GameFrame.Logging（内部接入 NLog.Extensions.Logging 6.2.1）
+        ↓
+AsyncTargetWrapper（有界、Discard、批量）→ 输出错误观察 → ConsoleTarget
+```
+
+- `GameFrame.Logging` 引用 Microsoft.Extensions.Logging 10.0.12、NLog 和 NLog.Extensions.Logging 6.2.1，包含 LoggingOptions、NLogOutputOptions 和 NLogLogging。Core/Server 没有直接 NLog 引用，事件调用保持标准接口。
+- `NLogLogging.Create` 接收通用与输出选项，显式创建独立 LogFactory/ILoggerFactory；不用全局 LogManager，不自动读取 NLog.config 或游戏环境变量。默认 ConsoleTarget，也可由组合端提供独占 TargetWithLayout；factory 管理该 Target 的布局和释放。
+- `LoggingOptions` 包含 Service、Environment、InstanceId、Version、MinimumLevel 和 CategoryLevels；元数据为 1～128 字符且无控制字符，按字面值渲染，不解析成 layout 表达式。类别阈值取全局与类别设置中较严格者，None 禁用全部类别；过滤在标准 ILoggerFactory 层生效。
+- `NLogOutputOptions` 包含 Text/Json、QueueCapacity（默认 4096，1～65536）、BatchSize（默认 200，不超过容量）、FlushTimeout（默认 5 秒，大于 0 且不超过 30 秒）。无效选项在输出初始化前失败；Game.Server 提供部署值与默认类别策略。
+- 单层 AsyncTargetWrapper 满额丢弃新事件，生产者不等待输出；批量转发保留 Target 批量能力。队列只约束待写事件数，另有在处理批次及事件/异常大小，不能宣称精确字节上限。Error/Critical 同样可能丢弃；调用线程仍承担状态捕获与必要布局工作，不默认启用 callsite 或完整对象展开。
+- DroppedCount、OutputErrorCount 和 meter `GameFrame.Logging.NLog` 的 `gameframe.logging.dropped` / `gameframe.logging.output.errors` 提供无递归诊断。Meter 名称沿用既有指标标识，不是程序集或命名空间。输出观察包装只计数并保留首个输出错误，不重试、不新建队列；当前没有默认指标导出器，部署方需订阅。
+- `DisposeAsync` 刷新后释放 ILoggerFactory、NLog factory 和 meter，重复调用等待同一结果。刷新失败、超时或已观察到的输出错误会失败；应用用固定安全 stderr 报告并返回 1。FlushTimeout 约束刷新等待，不是任意 Target.Dispose 的总时限，不能描述成保证 5 秒内退出。Console 写出也不代表磁盘持久化。
+- 已验证模板、EventId/名称、结构化属性、并行异步 Scope、文本/JSON、过滤、字面元数据、工厂隔离、满队列、输出错误、刷新失败和超时。禁用源生成事件的本机成本样本见使用说明；完整端到端性能对照、敏感信息全量审查与文件部署故障仍按本节门禁继续执行。

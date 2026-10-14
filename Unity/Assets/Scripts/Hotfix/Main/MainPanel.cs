@@ -9,10 +9,12 @@ namespace Game.Hotfix
     public sealed class MainPanelArgs
     {
         public Func<UniTask> OpenGomoku { get; }
+        public string Message { get; }
 
-        public MainPanelArgs(Func<UniTask> openGomoku)
+        public MainPanelArgs(Func<UniTask> openGomoku, string message = "")
         {
             OpenGomoku = openGomoku ?? throw new ArgumentNullException(nameof(openGomoku));
+            Message = message;
         }
     }
 
@@ -35,7 +37,7 @@ namespace Game.Hotfix
         {
             openGomoku = args.OpenGomoku;
             openingGame = false;
-            statusText.text = string.Empty;
+            statusText.text = args.Message;
             SetInteractable(true);
         }
 

@@ -7,6 +7,7 @@
         <ProjectReference Include="../GameFrame.Server/GameFrame.Server.csproj" />
         <ProjectReference Include="../Game.Protocol/Game.Protocol.csproj" />
         <ProjectReference Include="../Game.Config/Game.Config.csproj" />
+        <ProjectReference Include="../GameFrame.Logging/GameFrame.Logging.csproj" />
     </ItemGroup>
     <ItemGroup>
         <None Update="Database/*.sql" CopyToOutputDirectory="PreserveNewest" />

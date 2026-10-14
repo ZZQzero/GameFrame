@@ -31,6 +31,12 @@ namespace GameFrame.Tests
         GameEntry entry;
         GameObject instance;
         UnityEngine.SceneManagement.Scene testScene;
+#if UNITY_EDITOR
+        object tlsSettings;
+        PropertyInfo trustAnchors;
+        object previousAnchors;
+        System.Security.Cryptography.X509Certificates.X509Certificate2 testCertificate;
+#endif
 
         [SetUp]
         public void SetUp()
@@ -38,6 +44,19 @@ namespace GameFrame.Tests
             testScene = SceneManager.GetActiveScene();
             resources = new ResourceLoadManager();
             config = ScriptableObject.CreateInstance<GlobalConfig>();
+#if UNITY_EDITOR
+            string certificatePath = Environment.GetEnvironmentVariable("GF_LOGIN_TEST_CERTIFICATE");
+            if (!string.IsNullOrEmpty(certificatePath))
+            {
+                Type settingsType = Type.GetType("Mono.Security.Interface.MonoTlsSettings, Mono.Security", true);
+                tlsSettings = settingsType.GetProperty("DefaultSettings").GetValue(null);
+                trustAnchors = settingsType.GetProperty("TrustAnchors");
+                previousAnchors = trustAnchors.GetValue(tlsSettings);
+                testCertificate = new System.Security.Cryptography.X509Certificates.X509Certificate2(certificatePath);
+                trustAnchors.SetValue(tlsSettings,
+                    new System.Security.Cryptography.X509Certificates.X509CertificateCollection { testCertificate });
+            }
+#endif
         }
 
         [UnityTearDown]
@@ -74,6 +93,14 @@ namespace GameFrame.Tests
             GameEvents.ClearAll();
             GameEvents.ShutdownDispatcher();
             await resources.ShutdownAsync();
+#if UNITY_EDITOR
+            if (tlsSettings != null)
+            {
+                trustAnchors.SetValue(tlsSettings, previousAnchors);
+                testCertificate.Dispose();
+                tlsSettings = null;
+            }
+#endif
             UnityEngine.Object.Destroy(config);
             await UniTask.NextFrame();
             Assert.IsFalse(YooAssets.IsInitialized);

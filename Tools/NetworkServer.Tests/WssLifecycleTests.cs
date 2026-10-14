@@ -49,11 +49,13 @@ namespace GameFrame.Tests
         private readonly FrameMemoryBudget memory = new(1024 * 1024);
         private CancellationTokenSource guard = null!;
         private readonly LogCapture logs = new();
+        private ILoggerFactory logging = null!;
 
         [SetUp]
         public void Prepare()
         {
             guard = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            logging = LoggerFactory.Create(builder => builder.AddProvider(logs));
             using RSA rsa = RSA.Create(2048);
             var request = new CertificateRequest("CN=localhost", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
             var san = new SubjectAlternativeNameBuilder();
@@ -69,9 +71,9 @@ namespace GameFrame.Tests
             int port = ((IPEndPoint)reserve.LocalEndpoint).Port;
             reserve.Stop();
             var tables = TableConfigLoader.Load(null);
-            app = LocalWssService.CreateHost(application, new WssServerOptions(), certificate, port, tables);
+            app = LocalWssService.CreateHost(application, new WssServerOptions(), certificate, port, tables, logging);
             Assert.That(app.Services.GetRequiredService<Game.Config.TableConfig.Tables>(), Is.SameAs(tables));
-            app.Services.GetRequiredService<ILoggerFactory>().AddProvider(logs);
+            Assert.That(app.Services.GetRequiredService<ILoggerFactory>(), Is.SameAs(logging));
             network = app.Services.GetRequiredService<WssServer>();
             LocalWssService.ConfigurePipeline(app, network);
             await app.StartAsync(guard.Token);
@@ -128,6 +130,7 @@ namespace GameFrame.Tests
             }
 
             certificate.Dispose();
+            logging.Dispose();
             guard.Dispose();
             Assert.That(memory.OwnedBytes, Is.Zero);
         }

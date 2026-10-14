@@ -17,6 +17,8 @@ namespace GameFrame.Tests
         {
             private readonly Dictionary<string, byte[]> entries = new Dictionary<string, byte[]>();
             public bool FailWrite;
+            public bool FailDelete;
+            public readonly IOException DeleteError = new IOException("test-vault-delete-failure");
 
             public byte[] Read(string key) => entries.TryGetValue(key, out var value) ? (byte[])value.Clone() : null;
 
@@ -32,6 +34,11 @@ namespace GameFrame.Tests
 
             public void Delete(string key)
             {
+                if (FailDelete)
+                {
+                    throw DeleteError;
+                }
+
                 if (entries.TryGetValue(key, out var value))
                 {
                     Array.Clear(value, 0, value.Length);
@@ -95,16 +102,90 @@ namespace GameFrame.Tests
                 await db.CloseAsync();
             }
 
-            using (var credential = await store.TakeAsync())
+            using (var credential = await store.ReadCredentialAsync())
             {
                 Assert.AreEqual(42UL, credential.Account.AccountId);
                 Assert.AreEqual(16, credential.SessionId.Length);
                 Assert.AreEqual(32, credential.Token.Length);
+                Assert.IsTrue((await store.ReadAsync()).CanResume, "Reading alone must not consume the token.");
+                Assert.IsTrue(await store.ConsumeAsync(credential));
+                Assert.IsFalse(await store.ConsumeAsync(credential));
             }
 
-            Assert.IsNull(await store.TakeAsync(), "Unknown RPC outcome must not allow reuse of a single-use token.");
+            Assert.IsNull(await store.ReadCredentialAsync(), "Unknown RPC outcome must not allow reuse of a single-use token.");
             Assert.IsFalse((await store.ReadAsync()).CanResume);
             Assert.AreEqual("saved-player", (await store.ReadAsync()).AccountName);
+        });
+
+        [UnityTest]
+        public IEnumerator MovingDatabasePreservesCredentialAndExplicitNamespaceIsIsolated() => UniTask.ToCoroutine(async () =>
+        {
+            await SaveAsync();
+            string moved = Path.Combine(directory, "moved.sqlite");
+            File.Copy(path, moved);
+            var reopened = new RememberedLoginStore(moved, Endpoint, vault);
+            Assert.IsTrue((await reopened.ReadAsync()).CanResume);
+            var isolated = new RememberedLoginStore(moved, Endpoint, vault, "separate-profile");
+            Assert.IsFalse((await isolated.ReadAsync()).CanResume);
+            await isolated.ForgetAsync();
+            Assert.IsTrue((await store.ReadAsync()).CanResume);
+        });
+
+        [UnityTest]
+        public IEnumerator InvalidationKeepsAccountAndCannotDeleteNewerToken() => UniTask.ToCoroutine(async () =>
+        {
+            await SaveAsync();
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            byte[] oldHash = sha.ComputeHash(new byte[32]);
+            var replacement = new byte[32];
+            replacement[0] = 1;
+            await store.SaveAsync("saved-player", 42, DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeMilliseconds(),
+                new byte[16], replacement);
+            await store.InvalidateCredentialAsync(oldHash);
+            Assert.IsTrue((await store.ReadAsync()).CanResume, "A late revocation must not delete a newer credential.");
+            await store.InvalidateCredentialAsync(sha.ComputeHash(replacement));
+            RememberedAccount account = await store.ReadAsync();
+            Assert.AreEqual("saved-player", account.AccountName);
+            Assert.IsFalse(account.CanResume);
+        });
+
+        [UnityTest]
+        public IEnumerator StaleOrCanceledConsumptionPreservesCurrentCredential() => UniTask.ToCoroutine(async () =>
+        {
+            await SaveAsync();
+            using var old = await store.ReadCredentialAsync();
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+            bool canceled = await store.ConsumeAsync(old, cancellation.Token).SuppressCancellationThrow()
+                .ContinueWith(result => result.IsCanceled);
+            Assert.IsTrue(canceled);
+            Assert.IsTrue((await store.ReadAsync()).CanResume);
+            await SaveAsync("replacement", 43);
+            Assert.IsFalse(await store.ConsumeAsync(old));
+            Assert.IsTrue((await store.ReadAsync()).CanResume);
+            Assert.AreEqual(43UL, (await store.ReadAsync()).AccountId);
+        });
+
+        [UnityTest]
+        public IEnumerator FailedDeletionPreservesTheUnsubmittedCredential() => UniTask.ToCoroutine(async () =>
+        {
+            await SaveAsync();
+            using var credential = await store.ReadCredentialAsync();
+            vault.FailDelete = true;
+            Exception failure = null;
+            try
+            {
+                await store.ConsumeAsync(credential);
+            }
+            catch (Exception error)
+            {
+                failure = error;
+            }
+
+            Assert.IsInstanceOf<IOException>(failure);
+            Assert.IsTrue((await store.ReadAsync()).CanResume);
+            vault.FailDelete = false;
+            Assert.IsTrue(await store.ConsumeAsync(credential));
         });
 
         [UnityTest]
@@ -139,7 +220,7 @@ namespace GameFrame.Tests
             }
 
             Assert.IsFalse((await store.ReadAsync()).CanResume);
-            Assert.IsNull(await store.TakeAsync());
+            Assert.IsNull(await store.ReadCredentialAsync());
             Assert.AreEqual("saved-player", (await store.ReadAsync()).AccountName);
         });
 
@@ -163,7 +244,7 @@ namespace GameFrame.Tests
             await SaveAsync();
             using var cancel = new CancellationTokenSource();
             cancel.Cancel();
-            bool canceled = await store.TakeAsync(cancel.Token).SuppressCancellationThrow().ContinueWith(result => result.IsCanceled);
+            bool canceled = await store.ReadCredentialAsync(cancel.Token).SuppressCancellationThrow().ContinueWith(result => result.IsCanceled);
             Assert.IsTrue(canceled);
             Assert.IsTrue((await store.ReadAsync()).CanResume);
         });

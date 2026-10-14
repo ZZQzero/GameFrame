@@ -55,7 +55,8 @@ namespace Game.Hotfix
         private readonly ILoginCredentialVault vault;
         private readonly SemaphoreSlim gate = new SemaphoreSlim(1, 1);
 
-        public RememberedLoginStore(string absolutePath, Uri loginEndpoint, ILoginCredentialVault credentialVault)
+        public RememberedLoginStore(string absolutePath, Uri loginEndpoint, ILoginCredentialVault credentialVault,
+            string credentialNamespace = "remembered-login")
         {
             if (!Path.IsPathRooted(absolutePath))
             {
@@ -63,11 +64,16 @@ namespace Game.Hotfix
             }
 
             path = absolutePath;
+            if (string.IsNullOrWhiteSpace(credentialNamespace))
+            {
+                throw new ArgumentException("凭据命名空间不能为空。", nameof(credentialNamespace));
+            }
+
             endpoint = (loginEndpoint ?? throw new ArgumentNullException(nameof(loginEndpoint))).AbsoluteUri;
             vault = credentialVault ?? throw new ArgumentNullException(nameof(credentialVault));
             using var sha = SHA256.Create();
             vaultKey = "GameFrame.Login." + BitConverter.ToString(sha.ComputeHash(
-                Encoding.UTF8.GetBytes(Application.identifier + "|" + Path.GetFullPath(path) + "|" + endpoint))).Replace("-", string.Empty);
+                Encoding.UTF8.GetBytes(Application.identifier + "|" + credentialNamespace + "|" + endpoint))).Replace("-", string.Empty);
         }
 
         public async UniTask<RememberedAccount> ReadAsync(CancellationToken token = default)
@@ -147,8 +153,8 @@ namespace Game.Hotfix
             }
         }
 
-        /// <summary>先移除持久令牌再发起恢复。超时或响应丢失后不能再次使用旧令牌。</summary>
-        public async UniTask<RememberedLoginCredential> TakeAsync(CancellationToken token = default)
+        /// <summary>读取待恢复凭据；建连失败不会消耗系统存储中的令牌。</summary>
+        public async UniTask<RememberedLoginCredential> ReadCredentialAsync(CancellationToken token = default)
         {
             await gate.WaitAsync(token);
             byte[] payload = null;
@@ -161,13 +167,69 @@ namespace Game.Hotfix
                 }
 
                 payload = vault.Read(vaultKey);
-                bool valid = Matches(account, payload);
+                token.ThrowIfCancellationRequested();
+                return Matches(account, payload) ? new RememberedLoginCredential(account, payload) : null;
+            }
+            finally
+            {
+                Clear(payload);
+                gate.Release();
+            }
+        }
+
+        /// <summary>提交 Resume 前消耗读到的同一凭据。被替换或过期时返回 false，不删除新凭据。</summary>
+        public async UniTask<bool> ConsumeAsync(RememberedLoginCredential credential, CancellationToken token = default)
+        {
+            if (credential == null)
+            {
+                throw new ArgumentNullException(nameof(credential));
+            }
+
+            await gate.WaitAsync(token);
+            byte[] payload = null;
+            try
+            {
+                payload = vault.Read(vaultKey);
+                if (!Matches(credential.Account, payload) ||
+                    !CryptographicOperations.FixedTimeEquals(credential.SessionId, payload.AsSpan(16, 16)) ||
+                    !CryptographicOperations.FixedTimeEquals(credential.Token, payload.AsSpan(32, 32)))
+                {
+                    return false;
+                }
+
                 token.ThrowIfCancellationRequested();
                 vault.Delete(vaultKey);
-                // Once consumed, complete metadata cleanup even if the panel closes.
-                await WithDatabaseAsync(async db => await db.ExecuteAsync(new SqliteCommand(
-                    "UPDATE remembered_login SET expires_utc_ms=0 WHERE endpoint=?", endpoint)));
-                return valid ? new RememberedLoginCredential(account, payload) : null;
+                return true;
+            }
+            finally
+            {
+                Clear(payload);
+                gate.Release();
+            }
+        }
+
+        /// <summary>仅删除与已失效会话匹配的令牌；迟到的关闭不删除后来保存的凭据。</summary>
+        public async UniTask InvalidateCredentialAsync(byte[] expectedTokenHash, CancellationToken token = default)
+        {
+            if (expectedTokenHash == null || expectedTokenHash.Length != 32)
+            {
+                throw new ArgumentException("恢复令牌摘要必须为 32 字节。", nameof(expectedTokenHash));
+            }
+
+            await gate.WaitAsync(token);
+            byte[] payload = null;
+            try
+            {
+                payload = vault.Read(vaultKey);
+                if (payload != null && payload.Length == 64)
+                {
+                    using var sha = SHA256.Create();
+                    byte[] currentHash = sha.ComputeHash(payload, 32, 32);
+                    if (CryptographicOperations.FixedTimeEquals(expectedTokenHash, currentHash))
+                    {
+                        vault.Delete(vaultKey);
+                    }
+                }
             }
             finally
             {

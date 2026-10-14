@@ -670,7 +670,7 @@ Login 成功响应至少包含 accountId、accountSessionId（16 字节）、aut
 
 生成器的长度选项只验证上限，不代替认证与成功载荷校验。Hotfix 必须先检查 ResultCode，再校验成功响应的非零账号/epoch、精确凭据长度、有效 TTL，之后才能提交 Authenticated；默认构造的 DTO 不能直接作为认证成功。失败响应的成功载荷保持默认空值即可。服务端身份与权限从已认证连接绑定取得；EnterWorld/RestoreWorld 请求中的 authEpoch 只是期望代际，不是权限证明。
 
-accountSession 默认最长有效期 24 小时；resumeToken 有效期不超过该会话，到期返回明确认证失败。resumeToken 是 CSPRNG 生成的不透明凭据，服务端保存摘要，客户端只保存在账号会话内存中。ResumeLogin 成功原子消费旧凭据并返回新凭据；响应丢失时不自动复用旧 token 或退回密码登录，由调用者显式重新登录。首次登录与恢复都执行服务端账号/封禁/顶号策略，不通过客户端声明恢复旧权限。
+accountSession 默认最长有效期 24 小时；resumeToken 有效期不超过该会话，到期返回明确认证失败。resumeToken 是 CSPRNG 生成的不透明凭据，服务端保存摘要，客户端将账号元数据保存在 SQLite、恢复凭据保存在系统安全存储，内存副本仅存活于认证操作期间。ResumeLogin 成功原子消费旧凭据并返回新凭据；响应丢失时不自动复用旧 token 或退回密码登录，由调用者显式重新登录。首次登录与恢复都执行服务端账号/封禁/顶号策略，不通过客户端声明恢复旧权限。
 
 ResumeLogin 只替换大厅连接绑定并轮换恢复凭据，保持仍有效的 accountSessionId/authEpoch，不撤销同一账号会话的正常 KCP 世界连接。首次 Login 创建新账号会话；本版每个账号只允许一个活跃账号会话，多个账号独立，新 Login 按顶号策略撤销旧 epoch，而不是模拟一次 ResumeLogin。密码校验后由账号会话所有者登记在途操作，再分配数据库 epoch 并提交；较新提交按 epoch 仲裁，Logout/到期撤销使撤销前已登记的在途结果失去资格。会话及操作记录有界，仅在活跃会话或在途操作需要时保留，不保存无界历史账号墓碑，也不持账号锁等待数据库或网络。
 
@@ -734,6 +734,8 @@ Logout RPC 只有在权威撤销提交、相关网关停止该 epoch 的新业�
 Unity `timeScale=0` 不影响 IO deadline；GameTimer Realtime 可用于主线程 UI 提示，但它仍依赖 Unity 帧，不能作为 KCP 工作线程的时钟。移动端进入后台时 Hotfix 使世界离开 Ready、停止游戏输入；进程被挂起期间不承诺心跳，恢复后分别检查大厅与世界状态并显式恢复。断线恢复不依赖系统持续运行后台线程。
 
 ### 13.5 分连接恢复与未知结果
+
+当前大厅账号实现保留服务器控制关闭的结构化原因。明确替换、到期或撤销时，Hotfix 条件删除该会话的恢复令牌并保留账号；普通网络断线保留恢复资格。凭据键按应用、端点与稳定用途隔离，数据库路径不参与。认证成功与记忆结果分别报告，记忆失败仍进入 Main 并显示提示。
 
 Hotfix 分别维护 `LobbyState: Disconnected → Connecting → Authenticating → Authenticated` 和 `WorldState: Disconnected → Connecting → Restoring → Ready`，登录拒绝/连接故障进入对应 Failed 状态，显式清理后回到 Disconnected。`IsWorldReady` 只表示当前世界状态已恢复，不由大厅 socket 是否存活直接推导。
 
@@ -889,7 +891,7 @@ StopSessionAsync(requestLogout)
   5. 最后传播主异常
 ```
 
-上述 GameNetworkSession、世界入场/恢复/离场与快照处理是后续 Hotfix/.NET 业务接入流程。当前已生成账号与五子棋路由，并实现服务端 Register/Login/ResumeLogin/Logout；GomokuModule 注册两人房间业务，未使用的世界协议和 WorldModule 占位已删除，尚无实时世界或完整世界会话。客户端已实现普通实例 GameLoginSession、只读 GameUser 和登录面板参数注入，当前支持 WSS 账号登录、玩家点击触发的 Resume 和注销，断线清空并回到登录，不自动 Resume。账号元数据存于 SQLite，恢复凭据存于系统安全存储，密码不保存；旧令牌在请求前消耗，恢复失败转为密码输入，见客户端使用说明。启动/恢复失败停止当前流程；调用者显式清理已获得的资源。KCP 世界启动失败不隐式注销账号或关闭独立大厅。
+上述 GameNetworkSession、世界入场/恢复/离场与快照处理是后续 Hotfix/.NET 业务接入流程。当前已生成账号与五子棋路由，并实现服务端 Register/Login/ResumeLogin/Logout；GomokuModule 注册两人房间业务，未使用的世界协议和 WorldModule 占位已删除，尚无实时世界或完整世界会话。客户端已实现普通实例 GameLoginSession、只读 GameUser 和登录面板参数注入，当前支持 WSS 账号登录、玩家点击触发的 Resume 和注销，断线清空并回到登录，不自动 Resume。账号元数据存于 SQLite，恢复凭据存于系统安全存储，密码不保存；旧令牌在建连成功后、请求前消耗；建连失败保留免密资格，已消耗后的恢复失败转为密码输入。认证与账号记忆分别报告，保存失败保留已认证会话并明确提示，见客户端使用说明。启动/恢复失败停止当前流程；调用者显式清理已获得的资源。KCP 世界启动失败不隐式注销账号或关闭独立大厅。
 
 WSS 共享连接的状态流不能假装独立：EnterWorld/LeaveWorld 超时、取消或处理器失败导致世界状态不确定时，不能先注销处理器再继续使用大厅 socket；该次共享 WSS 必须停止业务并关闭，大厅可通过显式 ResumeLogin 恢复账号。业务明确拒绝入场且尚未改变状态时可保留大厅。StopSession 将关闭全部连接，不重复发 LeaveWorld；所有失败均保留原异常，不自动执行恢复或入场回滚。
 
@@ -933,6 +935,8 @@ WebGL 条件编译隔离 native P/Invoke 与线程/socket 实现；共同的消�
 KCP MIT、MemoryPack MIT 及 mbedTLS 对应版本许可证/第三方声明随安装产物保存；NuGet 与 UPM 均固定版本。构建可重现来自锁与清单，不来自复制开发机某个已加载 DLL。
 
 ## 17. 指标与诊断
+
+服务端日志统一在单一 `GameFrame.Logging` 工程中，包含选项、实例元数据、NLog Provider、布局、有界异步输出与释放，模块间契约沿用标准 `ILogger`；网络和业务各自拥有事件定义。`Game.Server` 负责部署配置、组合与实例所有权。日志工程直接引用 NLog，不引用网络/协议/业务；Core/Server 不直接引用 NLog。当前只有一种输出实现，不为未来替换额外拆适配程序集。两个 local profile 共用应用拥有的 factory，覆盖早期启动和最终清理；NLog Console 默认文本，可切换 JSON，满队列丢弃并计数，正常退出刷新后释放。框架事件关联、业务事件、完整脱敏及生产性能仍待完善；异步输出不能证明调用侧无成本。ETFramework 仅作参考，不要求对齐其静态入口或文件组织。依赖方向见 [框架日志边界](DotNetDevelopment.md#server-logging-architecture)，当前进度见 [执行计划](DotNetDevelopment.md#server-logging-plan)，配置与证据见 [服务端日志](DotNetUsage.md#server-logging)。
 
 每连接的目标指标包括：状态/generation/sessionId、连接与 Hello 耗时、原始 UDP/WSS bytes、业务有效 bytes、RPC 端到端/到达/主线程排队耗时、Ping RTT、KCP srtt/rto/重传/waitsnd/待发与在途字节/窗口、队列条数与实际容量、native/池分配当前值与峰值、不可靠丢弃、迟到响应、协议故障与 deadline 数量。
 

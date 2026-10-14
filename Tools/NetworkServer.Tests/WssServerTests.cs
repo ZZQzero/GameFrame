@@ -749,10 +749,9 @@ namespace GameFrame.Tests
         }
 
         [Test]
-        public void ProductionWithoutAuthenticationProviderRefusesStartup()
+        public async Task ProductionWithoutAuthenticationProviderRefusesStartup()
         {
-            Assert.ThrowsAsync<InvalidOperationException>(async () =>
-                await Game.Server.Program.Main(Array.Empty<string>()));
+            Assert.That(await Game.Server.Program.Main(Array.Empty<string>()), Is.EqualTo(1));
         }
 
         [Test]

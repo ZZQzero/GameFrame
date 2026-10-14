@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Game.Protocol;
+using Game.Server.Diagnostics;
 using GameFrame.Network;
 
 namespace Game.Server
@@ -17,7 +18,7 @@ namespace Game.Server
         }
 
         // Explicit local transport harness. This does not issue world/account authorization.
-        internal static async Task RunAsync()
+        internal static async Task RunAsync(ILoggerFactory logging)
         {
             string credentialsPath = LocalEnvironment.Required("GF_LOCAL_KCP_GRANT");
             int port = LocalEnvironment.Port("GF_LOCAL_KCP_PORT", 7450);
@@ -48,12 +49,11 @@ namespace Game.Server
                 psk = Convert.FromHexString(credentials.Psk);
                 ticket = Convert.FromHexString(credentials.Ticket);
                 credentials.Identity = credentials.Psk = credentials.Ticket = string.Empty;
-                using ILoggerFactory logging = LoggerFactory.Create(builder => builder.AddSimpleConsole());
                 await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, port), CreateApplication(),
                     logger: logging.CreateLogger<KcpListenerHost>());
                 await host.RegisterGrantAsync(credentials.Conv, identity, psk, ticket);
                 CryptographicOperations.ZeroMemory(psk);
-                Console.WriteLine($"Local KCP/DTLS listening on {host.LocalEndpoint}; the explicitly configured grant expires in 30 seconds. Ctrl+C stops the listener.");
+                ServerLog.KcpReady(logging.CreateLogger(typeof(LocalKcpService).FullName!), host.LocalEndpoint!.ToString());
                 Task canceled = Task.Delay(Timeout.Infinite, stop.Token);
                 await Task.WhenAny(canceled, host.Stopped);
                 if (host.Stopped.IsCompleted)

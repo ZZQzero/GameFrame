@@ -19,9 +19,10 @@ namespace Game.Hotfix
         private readonly CancellationTokenSource lifetime = new CancellationTokenSource();
         private readonly RememberedLoginStore rememberedLogin;
         private GameUser user;
-        private LoginResponse credentials;
+        private byte[] rememberedTokenHash;
         private Task operation;
         private Task disposal;
+        private NetworkStateChange transportState;
 
         public event Action AuthenticationLost;
 
@@ -70,8 +71,7 @@ namespace Game.Hotfix
             }
             finally
             {
-                operation = null;
-                completed.TrySetResult(true);
+                CompleteOperation(completed);
             }
         }
 
@@ -89,12 +89,11 @@ namespace Game.Hotfix
             }
             finally
             {
-                operation = null;
-                completed.TrySetResult(true);
+                CompleteOperation(completed);
             }
         }
 
-        public UniTask<ResultCode> LoginAsync(string account, string password, CancellationToken cancellationToken = default)
+        public UniTask<GameLoginResult> LoginAsync(string account, string password, CancellationToken cancellationToken = default)
         {
             RequireMainThread();
             if (!IsValidAccount(account) || !IsValidPassword(password))
@@ -105,7 +104,7 @@ namespace Game.Hotfix
             return AuthenticateAsync(account, password, false, cancellationToken);
         }
 
-        public UniTask<ResultCode> ResumeLoginAsync(CancellationToken cancellationToken = default)
+        public UniTask<GameLoginResult> ResumeLoginAsync(CancellationToken cancellationToken = default)
         {
             RequireMainThread();
             if (rememberedLogin == null)
@@ -116,7 +115,7 @@ namespace Game.Hotfix
             return AuthenticateAsync(null, null, true, cancellationToken);
         }
 
-        private async UniTask<ResultCode> AuthenticateAsync(string account, string password, bool resume,
+        private async UniTask<GameLoginResult> AuthenticateAsync(string account, string password, bool resume,
             CancellationToken cancellationToken)
         {
             if (user != null)
@@ -137,10 +136,10 @@ namespace Game.Hotfix
                 cancellation.Token.ThrowIfCancellationRequested();
                 if (resume)
                 {
-                    saved = await rememberedLogin.TakeAsync(cancellation.Token);
+                    saved = await rememberedLogin.ReadCredentialAsync(cancellation.Token);
                     if (saved == null)
                     {
-                        return ResultCode.InvalidCredentials;
+                        return new GameLoginResult(ResultCode.InvalidCredentials);
                     }
 
                     account = saved.Account.AccountName;
@@ -153,6 +152,11 @@ namespace Game.Hotfix
 
                 await client.CloseAsync();
                 await client.ConnectAsync(connectOptions, cancellation.Token);
+                if (resume && !await rememberedLogin.ConsumeAsync(saved, cancellation.Token))
+                {
+                    return new GameLoginResult(ResultCode.InvalidCredentials);
+                }
+
                 long admission = NetworkClock.GetMilliseconds();
                 response = resume
                     ? await client.RequestAsync(GameNetRoutes.ResumeLogin, resumeRequest, TimeSpan.FromSeconds(5), cancellation.Token)
@@ -160,7 +164,7 @@ namespace Game.Hotfix
                 cancellation.Token.ThrowIfCancellationRequested();
                 if (response.ResultCode != ResultCode.Success)
                 {
-                    return response.ResultCode;
+                    return new GameLoginResult(response.ResultCode);
                 }
 
                 ValidateLogin(response, admission);
@@ -169,27 +173,41 @@ namespace Game.Hotfix
                     throw new NetworkProtocolException("恢复响应与保存的账号不一致。");
                 }
 
+                Exception rememberedLoginError = null;
                 if (rememberedLogin != null)
                 {
-                    long remaining = checked(admission + response.ResumeRemainingTtlMs - NetworkClock.GetMilliseconds());
-                    await rememberedLogin.SaveAsync(account, response.AccountId,
-                        checked(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + remaining),
-                        response.AccountSessionId, response.ResumeToken, cancellation.Token);
+                    try
+                    {
+                        long remaining = checked(admission + response.ResumeRemainingTtlMs - NetworkClock.GetMilliseconds());
+                        await rememberedLogin.SaveAsync(account, response.AccountId,
+                            checked(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + remaining),
+                            response.AccountSessionId, response.ResumeToken, cancellation.Token);
+                    }
+                    catch (Exception error) when (!(error is OperationCanceledException && cancellation.IsCancellationRequested))
+                    {
+                        // Remembering an account is independent of an accepted authentication.
+                        rememberedLoginError = error;
+                    }
+
                     cancellation.Token.ThrowIfCancellationRequested();
-                    ValidateLogin(response, admission);
                 }
 
-                if (client.State != NetworkClientState.Connected)
+                if (client.State != NetworkClientState.Connected ||
+                    NetworkClock.GetMilliseconds() >= checked(admission + response.AccountRemainingTtlMs))
                 {
                     throw new NetworkException("登录响应到达后连接已失效。");
                 }
 
                 user = new GameUser(response.AccountId, account, response.AuthEpoch,
                     checked(admission + response.AccountRemainingTtlMs));
-                credentials = response;
-                response = null;
+                if (rememberedLogin != null && rememberedLoginError == null)
+                {
+                    using var sha = SHA256.Create();
+                    rememberedTokenHash = sha.ComputeHash(response.ResumeToken);
+                }
+
                 committed = true;
-                return ResultCode.Success;
+                return new GameLoginResult(ResultCode.Success, rememberedLoginError);
             }
             catch (Exception error)
             {
@@ -205,18 +223,32 @@ namespace Game.Hotfix
 
                 saved?.Dispose();
                 password = string.Empty;
-                ClearCredentials(response);
                 try
                 {
                     if (!committed)
                     {
+                        try
+                        {
+                            // Revocation can arrive while a successful response is being saved.
+                            if (rememberedLogin != null && response?.ResultCode == ResultCode.Success &&
+                                transportState.Generation == client.Generation && IsCredentialRevocation(transportState.Error))
+                            {
+                                using var sha = SHA256.Create();
+                                await rememberedLogin.InvalidateCredentialAsync(sha.ComputeHash(response.ResumeToken));
+                            }
+                        }
+                        catch (Exception cleanup) when (failure != null)
+                        {
+                            Debug.LogException(cleanup);
+                        }
+
                         await CloseAfterFailureAsync(failure);
                     }
                 }
                 finally
                 {
-                    operation = null;
-                    completed.TrySetResult(true);
+                    ClearCredentials(response);
+                    CompleteOperation(completed);
                 }
             }
         }
@@ -231,22 +263,46 @@ namespace Game.Hotfix
 
             TaskCompletionSource<bool> completed = BeginOperation();
             Exception failure = null;
+            OperationResponse response = null;
             try
             {
-                using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, cancellationToken);
                 if (rememberedLogin != null)
                 {
-                    await rememberedLogin.ForgetAsync(cancellation.Token);
+                    try
+                    {
+                        // Local cleanup must not prevent revoking the server session.
+                        await rememberedLogin.ForgetAsync();
+                    }
+                    catch (Exception error)
+                    {
+                        failure = error;
+                    }
                 }
 
-                OperationResponse response = await client.RequestAsync(GameNetRoutes.Logout, new LogoutRequest(),
-                    TimeSpan.FromSeconds(5), cancellation.Token);
-                return response.ResultCode;
-            }
-            catch (Exception error)
-            {
-                failure = error;
-                throw;
+                try
+                {
+                    using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, cancellationToken);
+                    response = await client.RequestAsync(GameNetRoutes.Logout, new LogoutRequest(),
+                        TimeSpan.FromSeconds(5), cancellation.Token);
+                }
+                catch (Exception error)
+                {
+                    if (failure == null)
+                    {
+                        failure = error;
+                    }
+                    else
+                    {
+                        Debug.LogException(new InvalidOperationException("远端注销未确认，本地账号清除也失败。", error));
+                    }
+                }
+
+                if (failure != null && response != null)
+                {
+                    Debug.LogWarning(response.ResultCode == ResultCode.Success
+                        ? "远端已注销，但本地账号清除失败。"
+                        : "远端注销被拒绝，本地账号清除也失败。");
+                }
             }
             finally
             {
@@ -258,14 +314,20 @@ namespace Game.Hotfix
                 }
                 finally
                 {
-                    operation = null;
-                    completed.TrySetResult(true);
+                    CompleteOperation(completed);
                     if (notify)
                     {
                         NotifyAuthenticationLost();
                     }
                 }
             }
+
+            if (failure != null)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+            }
+
+            return response.ResultCode;
         }
 
         private TaskCompletionSource<bool> BeginOperation()
@@ -283,6 +345,17 @@ namespace Game.Hotfix
             var completed = new TaskCompletionSource<bool>();
             operation = completed.Task;
             return completed;
+        }
+
+        private void CompleteOperation(TaskCompletionSource<bool> completed)
+        {
+            // A server revocation can queue credential cleanup behind the current operation.
+            if (ReferenceEquals(operation, completed.Task))
+            {
+                operation = null;
+            }
+
+            completed.TrySetResult(true);
         }
 
         private async UniTask CloseAfterFailureAsync(Exception failure)
@@ -312,9 +385,47 @@ namespace Game.Hotfix
 
         private void OnTransportState(NetworkStateChange change)
         {
+            transportState = change;
             if (user != null && change.State != NetworkClientState.Connected)
             {
+                byte[] tokenHash = rememberedTokenHash;
                 ClearAuthentication();
+                if (tokenHash != null && IsCredentialRevocation(change.Error))
+                {
+                    Task previous = operation;
+                    var completed = new TaskCompletionSource<bool>();
+                    operation = completed.Task;
+                    _ = InvalidateCredentialAsync(tokenHash, previous, completed);
+                }
+                else
+                {
+                    NotifyAuthenticationLost();
+                }
+            }
+        }
+
+        private static bool IsCredentialRevocation(Exception error) => error is NetworkConnectionClosedException closed &&
+            (closed.ReasonCode == 2 || closed.ReasonCode == 4 || closed.ReasonCode == 7);
+
+        private async Task InvalidateCredentialAsync(byte[] tokenHash, Task previous, TaskCompletionSource<bool> completed)
+        {
+            try
+            {
+                if (previous != null)
+                {
+                    await previous;
+                }
+
+                await rememberedLogin.InvalidateCredentialAsync(tokenHash);
+            }
+            catch (Exception error)
+            {
+                // State observers have no awaiting caller. Local cleanup failure remains observable.
+                Debug.LogException(error);
+            }
+            finally
+            {
+                CompleteOperation(completed);
                 NotifyAuthenticationLost();
             }
         }
@@ -334,8 +445,7 @@ namespace Game.Hotfix
         private void ClearAuthentication()
         {
             user = null;
-            ClearCredentials(credentials);
-            credentials = null;
+            rememberedTokenHash = null;
         }
 
         private static void ClearCredentials(LoginResponse response)

@@ -310,7 +310,7 @@ namespace GameFrame.Network
             if (reply.Header.Opcode == (uint)ControlOpcode.Close)
             {
                 ushort reason = ControlCodec.ReadClose(reply.Body);
-                throw new NetworkException($"Server closed during Hello ({reason}).");
+                throw new NetworkConnectionClosedException(reason);
             }
 
             if (reply.Header.Opcode == (uint)ControlOpcode.Reject)
@@ -994,7 +994,7 @@ namespace GameFrame.Network
                 {
                     if (reason != 0)
                     {
-                        MessageFaultMarker = new NetworkException($"Server closed the connection ({reason}).");
+                        MessageFaultMarker = new NetworkConnectionClosedException(reason);
                     }
 
                     orderly = true;

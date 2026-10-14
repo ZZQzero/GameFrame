@@ -3,13 +3,14 @@ using Game.Config.TableConfig;
 using Game.Server.Database;
 using Game.Server.Login;
 using Game.Server.Gomoku;
+using Game.Server.Diagnostics;
 using GameFrame.Network;
 
 namespace Game.Server
 {
     internal static class LocalWssService
     {
-        internal static async Task RunAsync(Tables tables)
+        internal static async Task RunAsync(Tables tables, ILoggerFactory logging)
         {
             int port = LocalEnvironment.Port("GF_LOCAL_PORT", 7443);
             var options = new LoginOptions();
@@ -27,10 +28,12 @@ namespace Game.Server
             using var service = new AuthenticationService(repository, accounts, options);
             await using var rooms = new GomokuRooms();
             var application = new LobbyApplication(new LoginModule(accounts, service, options), rooms);
-            await using WebApplication app = CreateHost(application.Application, networkOptions, certificate, port, tables);
+            await using WebApplication app = CreateHost(application.Application, networkOptions, certificate, port, tables, logging);
             WssServer network = app.Services.GetRequiredService<WssServer>();
             ConfigurePipeline(app, network);
             using CancellationTokenRegistration stopping = app.Lifetime.ApplicationStopping.Register(rooms.StopAdmission);
+            using CancellationTokenRegistration started = app.Lifetime.ApplicationStarted.Register(() =>
+                ServerLog.WssReady(logging.CreateLogger(typeof(LocalWssService).FullName!), port));
             await app.RunAsync();
         }
 
@@ -49,9 +52,13 @@ namespace Game.Server
             return certificate;
         }
 
-        internal static WebApplication CreateHost(ServerApplication application, WssServerOptions networkOptions, X509Certificate2 certificate, int port, Tables tables)
+        internal static WebApplication CreateHost(ServerApplication application, WssServerOptions networkOptions, X509Certificate2 certificate,
+            int port, Tables tables, ILoggerFactory logging)
         {
             WebApplicationBuilder builder = WebApplication.CreateBuilder(Array.Empty<string>());
+            builder.Logging.ClearProviders();
+            // The application owns this external instance; disposing the host must not close it.
+            builder.Services.AddSingleton(logging);
             builder.Services.AddSingleton(tables);
             builder.WebHost.ConfigureKestrel(options =>
             {

@@ -340,11 +340,11 @@ namespace GameFrame.Tests
             Assert.That(client.State, Is.EqualTo(NetworkClientState.Connected));
         }
 
-        private void EnqueueClose()
+        private void EnqueueClose(ushort reason = 0)
         {
             byte[] frame = new byte[36];
             FrameCodec.WriteHeader(frame, new FrameHeader(FrameKind.Control, (uint)ControlOpcode.Close, 0, 4));
-            ControlCodec.WriteClose(frame.AsSpan(32), 0);
+            ControlCodec.WriteClose(frame.AsSpan(32), reason);
             socket.Enqueue(frame);
         }
 
@@ -406,6 +406,24 @@ namespace GameFrame.Tests
             client.PumpOne();
             Assert.That(client.State, Is.EqualTo(NetworkClientState.Connected));
             Assert.That(client.Metrics().ReliableReceiveCount, Is.Zero);
+        }
+
+        [TestCase((ushort)2)]
+        [TestCase((ushort)4)]
+        [TestCase((ushort)7)]
+        [TestCase((ushort)65535)]
+        public async Task ServerCloseReasonIsPreservedForStateObservers(ushort reason)
+        {
+            Exception? observed = null;
+            client.StateChanged = (_, error) => observed = error ?? observed;
+            EnqueueClose(reason);
+            await WaitFor(() => client.IoTask.IsCompleted);
+            while (client.PumpOne())
+            {
+            }
+
+            Assert.That(observed, Is.TypeOf<NetworkConnectionClosedException>());
+            Assert.That(((NetworkConnectionClosedException)observed!).ReasonCode, Is.EqualTo(reason));
         }
 
         [Test]

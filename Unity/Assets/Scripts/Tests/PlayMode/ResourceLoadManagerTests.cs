@@ -257,7 +257,7 @@ namespace GameFrame.Tests
         {
             GameLoginSession session = await CreateLoginEntryAsync();
             SubmitLogin("entry_" + Guid.NewGuid().ToString("N"));
-            await UniTask.WaitUntil(() => GameUI.IsOpen<GomokuMainPanel>()).Timeout(TimeSpan.FromSeconds(15));
+            await UniTask.WaitUntil(() => GameUI.IsOpen<MainPanel>()).Timeout(TimeSpan.FromSeconds(15));
             Assert.AreEqual("Main", SceneManager.GetActiveScene().name);
             Assert.AreEqual("Main", GameScene.ActiveId);
             Assert.IsTrue(GameScene.IsLoaded("Main"));
@@ -265,6 +265,8 @@ namespace GameFrame.Tests
             CollectionAssert.AreEqual(new[] { GameUI.UICamera }, Camera.main.GetUniversalAdditionalCameraData().cameraStack);
             Assert.IsTrue(session.IsAuthenticated);
             Assert.IsFalse(GameUI.IsOpen<LoginPanel>());
+            Assert.IsFalse(GameUI.IsOpen<GomokuMainPanel>());
+            Assert.IsFalse(GameUI.IsOpen<WoodenFishMainPanel>());
             return session;
         }
 
@@ -279,9 +281,9 @@ namespace GameFrame.Tests
             Assert.IsTrue(GameRuntime.IsInited);
             Assert.IsTrue(entry.IsReady);
             Assert.IsNull(session.CurrentUser);
-            Assert.IsFalse(GameUI.IsOpen<GomokuMainPanel>());
+            Assert.IsFalse(GameUI.IsOpen<MainPanel>());
             SubmitLogin(user.AccountName);
-            await UniTask.WaitUntil(() => GameUI.IsOpen<GomokuMainPanel>()).Timeout(TimeSpan.FromSeconds(15));
+            await UniTask.WaitUntil(() => GameUI.IsOpen<MainPanel>()).Timeout(TimeSpan.FromSeconds(15));
             Assert.AreSame(mainHandle, GameScene.Loaded["Main"], "重新登录复用 Main，不重复加载场景。");
             Assert.AreEqual(user.AccountId, session.CurrentUser.AccountId);
             Assert.Greater(session.CurrentUser.AuthEpoch, user.AuthEpoch);
@@ -327,11 +329,11 @@ namespace GameFrame.Tests
                 await GameScene.WaitForIdleAsync();
                 await UniTask.NextFrame();
                 Assert.AreEqual("Main", SceneManager.GetActiveScene().name);
-                Assert.IsFalse(GameUI.IsOpen<GomokuMainPanel>(), "迟到的切场结果不能进入已失效账号的业务。");
+                Assert.IsFalse(GameUI.IsOpen<MainPanel>(), "迟到的切场结果不能进入已失效账号的业务。");
                 Assert.IsTrue(GameUI.IsOpen<LoginPanel>());
                 CollectionAssert.AreEqual(new[] { GameUI.UICamera }, Camera.main.GetUniversalAdditionalCameraData().cameraStack);
                 SubmitLogin(account);
-                await UniTask.WaitUntil(() => GameUI.IsOpen<GomokuMainPanel>()).Timeout(TimeSpan.FromSeconds(15));
+                await UniTask.WaitUntil(() => GameUI.IsOpen<MainPanel>()).Timeout(TimeSpan.FromSeconds(15));
                 Assert.IsTrue(session.IsAuthenticated);
             }
             finally
@@ -360,7 +362,7 @@ namespace GameFrame.Tests
                 Assert.IsTrue(GameRuntime.IsInited);
                 Assert.IsNull(session.CurrentUser);
                 Assert.IsFalse(GameUI.IsOpen<LoginPanel>());
-                Assert.IsFalse(GameUI.IsOpen<GomokuMainPanel>());
+                Assert.IsFalse(GameUI.IsOpen<MainPanel>());
                 Assert.AreEqual(0, GameRuntime.Network.Memory.OwnedBytes);
             }
             finally
@@ -399,7 +401,7 @@ namespace GameFrame.Tests
             Assert.IsNull(session.CurrentUser);
             Assert.IsFalse(GameUI.IsOpen<LoginPanel>(), "框架停止后不能把断线当作新的登录导航。");
             await entry.StopAsync();
-            Assert.IsFalse(GameUI.IsOpen<GomokuMainPanel>());
+            Assert.IsFalse(GameUI.IsOpen<MainPanel>());
         });
 
         [UnityTest]

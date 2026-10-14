@@ -48,9 +48,9 @@ openssl x509 -in /absolute/path/localhost.pem -outform DER -out /absolute/path/l
 
 不要将 PFX 或私钥导入 Unity；正式服务使用对应域名的可信 CA 证书，Editor 工具不进入 Player。
 
-登录按钮校验账号（1～64 个 UTF-16 字符，无首尾空白/控制字符）、密码（8～128，不裁剪），禁用控件并提交一次 Login。已有账号验密，不存在则建号并认证；错误密码显示拒绝，失败收尾清空密码并恢复输入。成功后通过 GameScene 以 Single 模式加载、激活 Main，绑定 Main 的主相机与持久 UI 相机，再关闭登录面板并打开现有五子棋主界面，账号连接继续存活；五子棋仍是本地玩法，没有新增服务器对局。
+登录按钮校验账号（1～64 个 UTF-16 字符，无首尾空白/控制字符）、密码（8～128，不裁剪），禁用控件并提交一次 Login。已有账号验密，不存在则建号并认证；错误密码显示拒绝，失败收尾清空密码并恢复输入。成功后通过 GameScene 以 Single 模式加载、激活 Main，绑定 Main 的主相机与持久 UI 相机，打开 `MainPanel` 成功后关闭登录面板。主界面提供五子棋和木鱼按钮，游戏中的“退出”返回主界面；账号连接继续存活，两个游戏仍是本地玩法，没有新增服务器对局。
 
-进入 Main 失败时登录面板保留，已认证会话仍有效；账号和密码输入保持禁用，玩家再次点击确定只进入主场景，不重复认证。断线后清空认证并重新打开登录面板；Main 已加载时重新登录复用该场景。加载期间认证失效或业务停止，迟到的场景完成结果不打开五子棋；主动 StopAsync 等待已发起的主场景导航收尾。
+进入 Main 或打开主界面失败时登录面板保留，已认证会话仍有效；账号和密码输入保持禁用，玩家再次点击确定只进入主场景，不重复认证。断线后清空认证，关闭场景组的主界面、游戏及加载请求，再重新打开登录面板；Main 已加载时重新登录复用该场景。加载期间认证失效或业务停止，迟到的场景完成结果不打开主界面；主动 StopAsync 等待已发起的主场景导航收尾。
 
 会话是普通实例，由入口创建、注入、释放，后续业务接收同一个实例：
 
@@ -234,6 +234,20 @@ await client.DisposeAsync();
 
 主线程调用 GetMetrics，关注 State/Generation、OwnedBytes/PeakReservedBytes、pending/堆/队列条数、timeout/cancel/late、不可靠丢弃、发送队龄告警、应用帧/正文 bytes 与 PingRoundTripMilliseconds。Kcp 快照区分 native 预留与实际/峰值、waitsnd/srtt/rto/窗口、明文/密文队列、实际 socket 字节。TimeoutRetransmits 只含超时重传，不含 fast retransmit；DtlsDiscardDetailsAvailable=false 表示细分坏记录不可用。
 
+`GetMetrics().Rpc` 按当前连接汇总成功解码的 RPC。每个阶段提供 Count、LastMilliseconds、TotalMilliseconds、MaximumMilliseconds、AverageMilliseconds，单位为毫秒，使用 Stopwatch 高精度单调时间；没有样本时 Count=0。阶段定义如下：
+
+| 字段 | 测量范围 |
+| --- | --- |
+| Encoding | 请求帧分配、出站对象校验与编码；只随成功响应计入汇总 |
+| ResponseWait | admission 到 IO 保留完整响应，包含本地发送排队、传输和服务端处理 |
+| MainThreadWait | IO 保留响应到主线程开始解码，包含派发等待和取消注册注销 |
+| Decoding | 响应正文校验和 DTO 解码 |
+| Completion | admission 到解码完成，等于 ResponseWait + MainThreadWait + Decoding；不含 Encoding |
+
+这些值不是纯网络 RTT。统计在任务完成前提交，不包含业务 continuation 和帧清零；整个 Pump 的成本仍包含这些工作。非零传输 StatusCode、取消、超时、连接失败、迟到响应与解码失败不进入成功样本；DTO 内的业务结果码不由 Runtime 判定。汇总为固定空间，不保存历史或提供 P95/P99；采样成本也计入实际框架开销。Close 后保留最后一代快照，下次 Connect 使用全新汇总。
+
+`GetMetrics().Memory` 展示 ReliableSendReservedBytes、ReliableReceiveReservedBytes、ControlReservedBytes、UnreliableSendReservedBytes、UnreliableReceiveReservedBytes、PendingReservedBytes。帧额度包含数组容量与每帧 512 字节预约，Pending 包含已经终态但尚未交付的请求。发送在途、接收正在组帧也占额度：WSS 空闲连接会保留接收固定头的 32+512 字节，不是泄漏。握手临时帧和 KCP native allowance 还占连接总额，后者见 Kcp.NativeReservedBytes；子预算由不同 IO 工作推进，读取不是所有子项的原子加总。真正释放完成后的可控额度才归零。
+
 OwnedBytes 不是 RSS、所有 CLR 对象或 TLS/内核内存；每帧/每 pending512 字节是保守 reservation。当前无空闲缓冲池，MaxIdlePoolBytes 实际 0，仍有逐包分配。KCP 请求 socket 收/发各 256KiB 并报告系统实际值，ClientWebSocket 不开放底层 buffer 设置，不能声称其设置成功。
 
 ## 7. 协议与依赖维护
@@ -269,6 +283,7 @@ Unity TLS 在部分 Editor 平台不继承 `dotnet dev-certs` 的信任。登录
 
 | 日期/实际范围 | 结果 | 不证明的部分 |
 | --- | --- | --- |
+| 2026-10-14 RPC/子预算诊断，Unity6000.3.19f1/macOS | Editor 编译无 Console 错误；网络 Buffer/Protocol/MemoryPack EditMode147/147，生命周期 PlayMode11/11；独立本地 KCP 服务下真实 UDP/DTLS PlayMode1/1，覆盖 Hello/Echo、公开 RPC 汇总、Close 后保留统计及帧/native 预约归零；StandaloneOSX Player 脚本43程序集通过 | 首次组合 PlayMode 出现 TearDown 空引用，域重载后生命周期复验通过；KCP 首轮无凭据，最终使用临时随机 grant 实跑通过。环境变量、Launch 场景与记录的 EditorSettings 恢复，临时进程/凭据/Player 输出清理；未重建插件、打 IL2CPP 包或验新热更 DTO/其他平台/设备/弱网/容量/soak。RPC 汇总只涵盖成功解码样本，不是全部发送、Push 或每帧成本 |
 | 2026-10-13 登录成功切 Main，Unity6000.3.19f1/macOS | Editor 编译通过；账号、资源、场景操作、GameRuntime、网络生命周期及根节点 PlayMode 73/73，零跳过；覆盖 Main 激活/相机 Stack、断线后复用 Main、加载中认证失效、主动 Stop 等待加载、进入失败后显式再次进入且不重复 Login；实际 Launch 按钮登录后仅 Main 场景加载，GameEntry/会话/UI 根保留，Stack 恰好一个 UI 相机；保持登录停止播放无新增 Console 错误；最终 StandaloneOSX Player 脚本 43 程序集通过 | 首轮停止用例发现导航任务登记晚于加载开始回调，改为使用 AsyncLazy 先登记再执行后整组通过；独立临时 WSS/PostgreSQL 联调，恢复测试端点、场景、EditorSettings、环境和字体变化并清理临时服务。未构建正式资源包、IL2CPP 或验证真机/其他平台 |
 | 2026-10-13 登录后退出顺序修复，Unity6000.3.19f1/macOS | Editor 编译通过；账号、资源、GameRuntime、网络生命周期与根节点 PlayMode 55/55，零跳过；新增真实登录用例覆盖正常断线回登录、UI 先关闭及框架先关闭且 UI 尚存两种顺序；实际 Launch 从按钮登录进入五子棋后停止播放，Console 无新增错误；StandaloneOSX Player 脚本 43 程序集通过 | 使用独立临时 WSS/PostgreSQL，不修改玩家数据库；验证后恢复端点、场景、EditorSettings、环境变量及字体变化并清理临时服务。首轮两个新用例误把普通初始化日志作为未预期日志，修正测试日志检查后整组通过。未构建 IL2CPP 或验证真机/其他平台 |
 | 2026-10-13 Editor 开发证书配置，Unity6000.3.19f1/macOS | Editor 编译及实际菜单对应配置成功；播放初始化自动追加已核验 localhost 公开证书，实际 WSS TLS/Hello 成功，关闭后 ownedBytes=0；默认验证回调未变，错误 TLS 目标仍被拒绝；正常 Domain Reload 与关闭 Domain Reload 均检查自动应用/停止恢复；无效路径和指纹更换拒绝且保留原配置；StandaloneOSX Player 脚本 43 程序集通过，GameFrame.Editor 排除 | 只验证本机 Mono TLS，不是其他 Editor 平台、IL2CPP 或真机验收；握手验证未提交玩家账号，不修改现有服务器/数据库；本机证书配置按用户要求保留 |
@@ -278,4 +293,4 @@ Unity TLS 在部分 Editor 平台不继承 `dotnet dev-certs` 的信任。登录
 | 2026-10-12 重启后 Unity Mono | 新 mbedTLS4.2/ABI2 实际 UDP Hello/Echo/关闭通过，自有缓冲与 native 预留归零 | 非 IL2CPP、移动真机或 Windows 执行 |
 | 2026-10-12 StandaloneOSX | Player 脚本编译 43 程序集通过 | 非最终 native 链接、裁剪或 Player 运行 |
 
-待验收：实际 IL2CPP 包/新热更 DTO、移动设备/模拟器、Windows/Linux 平台实跑、IPv6/代理/后台/换网/弱网、完整元数据与分阶段诊断、性能容量/24h soak。WebGL WSS 和世界业务延后，不以现有单元/Editor 证据声称全部完成。
+待验收：实际 IL2CPP 包/新热更 DTO、移动设备/模拟器、Windows/Linux 平台实跑、IPv6/代理/后台/换网/弱网、完整元数据与全部主线程/失败路径诊断、性能容量/24h soak。WebGL WSS 和世界业务延后，不以现有单元/Editor 证据声称全部完成。

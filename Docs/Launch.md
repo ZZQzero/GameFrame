@@ -8,7 +8,7 @@ GameUI.SetPackage → 下载 boot 资源 → 启动其余框架系统 →
 加载 AOT 元数据与 Hotfix DLL → 实例化 GameEntry prefab → 读取热更配置并补入翻译 → 启动热更业务。
 Launch 负责框架初始化、选择相机和准备资源。GameEntry 在 Awake 中初始化 Hotfix 配置，
 并调用 `GameUIRegistration.RegisterAll()` 统一注册业务面板、创建并注入 Hotfix 的 `GameLoginSession`，完成后 IsReady 为 true。
-Start 中打开登录面板，登录成功后通过 GameScene 以 Single 模式加载并激活 Main，再进入五子棋主面板。
+Start 中打开登录面板，登录成功后通过 GameScene 以 Single 模式加载并激活 Main，再显示 `MainPanel`。主界面提供五子棋和木鱼入口。
 GameEntry 只组合、调用和释放业务对象，不保存账号字段或实现认证；会话实例持有用户信息、凭据和连接。
 Launch 启动 GameRuntime 时 EnableUI 为 false，语言服务也不重复初始化，并通过 NetworkOptions 启用网络宿主。
 任一步失败直接抛出并终止后续启动，不重试、不回退旧资源、不自动回滚。
@@ -60,7 +60,8 @@ Launch 引用 `Assets/Resources/GlobalConfig.asset`，该 ScriptableObject 随�
 Input / Audio 在 Launch 的 Inspector 绑定配置后才启用。GameEntry 在 Awake 中自动初始化热更配置和业务。
 启动完成后在 Launch 场景打开 `LoginPanel`，用户输入账号和密码后才连接 WSS；不存在的账号由服务端创建并登录。
 成功后通过 `GameScene.LoadAsync("Main", LoadSceneMode.Single)` 进入 `Assets/Scenes/MainScene/Main.unity`，
-重新将持久 UI 相机绑定到 Main 的主相机，再关闭登录面板并打开 `GomokuMainPanel`。
+重新将持久 UI 相机绑定到 Main 的主相机，打开 `MainPanel` 成功后关闭登录面板。
+主界面位于 `Assets/Prefab/HitfixPrefab/MainPanel.prefab`，通过窗口栈打开 `GomokuMainPanel` 或 `WoodenFishMainPanel`；两个游戏的“退出”关闭当前面板并恢复主界面，保留缓存中的棋局和功德计数。
 Launch 和其子节点 GameEntry 跨切场保留，账号会话与框架不重新初始化；内置 Launch 场景由 Single 加载卸载。
 连接失效后在当前 Main 场景打开登录面板，重新登录复用已加载的 Main，不重新加载 Launch。
 场景加载失败保留已认证会话与登录面板，玩家再次点击确定只重新执行进入主场景，不重复登录或自动重试。
@@ -69,7 +70,8 @@ GameEntry prefab 的 `Login Endpoint` 是可信环境端点，当前开发值为
 本地开发证书可在 `Tools/GameFrame/Network/Set Local Development Certificate` 配置；Editor 在 BeforeSceneLoad 读取本机配置并启用信任，先于 Launch/GameEntry 初始化，停止播放后恢复。工具不进入 Player，也不为入口增加 Editor 依赖，详见 [客户端网络使用说明](ClientNetworkUsage.md)。
 `DefaultPackage` 的 `Gomoku` 组采集 `Assets/Prefab/Gomoku`、`Assets/ArtRes/Gomoku/Image` 和 `Assets/ArtRes/Gomoku/Audio`，
 标签为 `gomoku;boot`。字体通过 prefab 依赖采集，本地对局和配置见 [Gomoku.md](Gomoku.md)。
-木鱼面板仍保留注册，`WoodenFish` 组采集 prefab 与 Audio 目录，标签为 `fish`。
+断线或主动停止业务时关闭 `UIGroup.Scene`，包括主界面、游戏、登录以及正在加载的面板；断线随后重新打开登录面板。
+`WoodenFish` 组采集 prefab 与 Audio 目录，标签为 `fish;boot`，登录后可以直接从主界面打开。
 Launch 绑定 `Assets/Config/Audio/GameAudioConfig.asset`，棋子落盘声和木鱼音效在框架初始化时常驻预加载。
 玩法与可调参数见 [WoodenFish.md](WoodenFish.md)。
 

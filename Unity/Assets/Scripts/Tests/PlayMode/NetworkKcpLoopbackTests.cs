@@ -68,9 +68,15 @@ namespace GameFrame.Tests
                 Assert.IsTrue(client.GetMetrics().Kcp.Available);
                 EchoResponse echo = await client.RequestAsync(GameNetRoutes.Echo, new EchoRequest { Text = "Unity native UDP" }, TimeSpan.FromSeconds(2));
                 Assert.AreEqual("Unity native UDP", echo.Text);
+                RpcMetricsSnapshot rpc = client.GetMetrics().Rpc;
+                Assert.AreEqual(1, rpc.SuccessfulResponses);
+                Assert.GreaterOrEqual(rpc.Completion.LastMilliseconds, rpc.ResponseWait.LastMilliseconds);
+                Assert.AreEqual(0, client.GetMetrics().Memory.PendingReservedBytes);
                 await client.CloseAsync();
                 Assert.AreEqual(0, client.GetMetrics().OwnedBytes);
                 Assert.AreEqual(0, client.GetMetrics().Kcp.NativeReservedBytes);
+                Assert.AreEqual(1, client.GetMetrics().Rpc.SuccessfulResponses);
+                Assert.AreEqual(0, client.GetMetrics().Memory.ReliableReceiveReservedBytes);
                 await client.DisposeAsync();
             }
             finally

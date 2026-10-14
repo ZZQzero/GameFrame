@@ -346,8 +346,11 @@ PG 测试角色需能创建 schema，测试创建随机 schema 并只删除自�
 
 以下按实际执行范围记录，各次验证独立，不用旧数量代表新验证：
 
+2026-10-14 底层核对覆盖 Runtime 网络与 Core/Server、GameRuntime/Launch/GameEntry 和登录接入、协议定义/生成工具/正式生成代码、Editor 网络工具、关联 .NET/Unity 测试、KCP 桥接与仓库内第三方 KCP 源码、构建安装脚本，以及依赖锁/程序集/原生 importer/五组安装清单和网络 CI 配置。主要实施缺口是客户端 RPC 阶段及子预算可见性，已直接补入既有快照；保留当前状态仲裁和关闭所有权，暂不调整传输参数、池化或调度模型。完整 CLR 元数据成本和发布平台门禁仍未完成。外部 mbedTLS/PSA、MemoryPack、平台 TLS/SDK 的实现内部未逐文件审计，只核对版本、接入配置、边界与运行证据，不将本轮核对称为所有第三方实现的完整安全审计。
+
 | 日期与范围 | 证据 | 限制 |
 | --- | --- | --- |
+| 2026-10-14 底层诊断与回归，macOS/.NET SDK10.0.401、PG18 | 最终 Server163/163、Framework13/13、Protocol182/182，均 0 跳过；三个测试工程 locked restore、协议 check --artifacts 五文件一致；独立临时 PG 与现有 macOS Release native 验证真实 WSS/数据库/UDP/DTLS；新增可控时钟测试覆盖分阶段耗时、同步 continuation 排除、连接汇总重置、保留响应后取消及在途额度、远端错误/期限/解码失败样本排除；KCP ACK16/16、调度4/4和分配75项（assertions/NDEBUG/ASan+UBSan）通过；五组安装产物的 binary/build ID/生产源码指纹核验通过 | 首轮新增远端错误用例错误携带正文，被现有 GFNP 规则拒绝；改为协议规定的空正文后整组复验通过。没有修改 wire/native ABI、重构建或替换插件；算法 sanitizer 不是完整 gfnet/DTLS sanitizer。临时库/进程已清理；Unity 证据见客户端表。未验其他平台实跑、远端 CI、生产容量/soak、IL2CPP/新热更 DTO |
 | 2026-10-13 大厅业务模块与认证职责整理，macOS/.NET 10.0.401 | 七工程 Release 编译 0 警告/错误；Server160/160、Framework13/13、0 跳过，使用临时独立 PostgreSQL18.6 与已核验源码/二进制 manifest 的现有 macOS Release native；新增身份与凭据清理独立、异步 Echo 期间顶号/注销拒绝、断线恢复与注销凭据撤销用例；既有真实 WSS/PG、单次 token、epoch 仲裁、过载关闭/注册重试、普通 EOF 排空及 UDP/DTLS 回归通过；协议 check --artifacts 五文件一致 | 本轮未改协议、客户端或通用框架；未运行 Unity/Player/IL2CPP、独立 Game.Server 进程联调、其他平台、远端 CI、native 重构建/sanitizer 或容量验收；临时 PG 与文件已清理 |
 | 2026-10-13 Login 自动建号与客户端接入，macOS/.NET 10.0.401 | 七工程 Release 编译 0 警告/错误；四测试工程 locked restore 通过；Server156、Framework13、Protocol182、ConfigGenerator15 共 366/366、0 跳过，使用独立 PG18.6 与现有 macOS Release native；新增真实 PG 首次建号、同名并发同/不同密码、保存密码复验与无效/取消输入测试，真实 WSS 一次 Login 后 Echo；协议 check --artifacts 通过；实际 Game.Server + Unity 登录/断线闭环通过 | 本地单实例；未验证生产部署、远端 CI、其他服务端平台、容量/soak；Unity 证据及临时开发证书信任范围见客户端说明 |
 | 2026-10-13 服务端传输修正与测量，macOS/.NET 10.0.401 | 七工程 Release 编译 0 警告/错误，解决方案与四测试工程 locked restore 通过；Server150、Framework13、Protocol182、ConfigGenerator15 共 360/360、0 跳过，使用独立 PG18 与本机 Release native；真实 UDP/DTLS 验证 21.5 秒初始化期间心跳/准入、业务 FIFO、factory 发布、失败/主动关闭取消与正常关闭排空，完成后 owned 归零；WSS33,824 最小额度接收最大帧及双 lease 清理通过；协议 check --artifacts 与 Luban check --target all 通过；CI YAML 解析、路径/检查入口与 setup-dotnet 双版本安装语义核对通过 | 未执行远端 CI、Unity/Player/IL2CPP/真机、Windows/Linux 服务端实跑、新 native 构建/sanitizer、容量或 soak；新增指标不是完整服务端诊断 |

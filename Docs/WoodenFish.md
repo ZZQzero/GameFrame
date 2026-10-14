@@ -1,7 +1,7 @@
 # 木鱼小游戏
 
-播放 `Unity/Assets/Scenes/Launch.unity`。GameEntry 初始化成功后自动打开
-`Assets/Prefab/WoodenFish/WoodenFishMain.prefab`。编辑器可使用 GlobalConfig 的
+播放 `Unity/Assets/Scenes/Launch.unity`，登录成功进入 Main 场景后显示主界面。
+点击“木鱼”打开 `Assets/Prefab/WoodenFish/WoodenFishMain.prefab`，右上角“退出”关闭面板并返回主界面，缓存保留功德计数。编辑器可使用 GlobalConfig 的
 EditorSimulateMode；OfflinePlayMode 需要先构建含新增资源的内置资源包。
 
 业务面板注册集中在 `Assets/Scripts/Hotfix/GameUIRegistration.cs`。
@@ -53,7 +53,7 @@ GameEntry 初始化时统一调用；打开面板的时机由各业务流程决�
 当前 WAV 是合成的短木质敲击音，可替换同路径资源并保留 `.meta`。
 
 YooAsset `DefaultPackage/WoodenFish` 采集 prefab 目录和音效，AddressByFileName、
-PackSeparately、CollectAll、boot 标签。图片与字体作为 prefab 依赖，无需额外配置地址。
+PackSeparately、CollectAll、`fish;boot` 标签。图片与字体作为 prefab 依赖，无需额外配置地址。
 AudioRuntimeConfig 和 AudioMixer 由 Launch 场景引用，随场景进入安装包。
 
 PrimeTween skill 从 unitygame 迁入 `skills/unity-primetween`，版本和路径已适配本项目。

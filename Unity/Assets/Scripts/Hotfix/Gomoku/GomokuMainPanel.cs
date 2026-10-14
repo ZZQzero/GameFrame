@@ -22,9 +22,11 @@ namespace Game.Hotfix
             boardView.IntersectionClicked += OnIntersectionClicked;
             restartButton.onClick.AddListener(RestartGame);
             undoButton.onClick.AddListener(UndoMove);
+            exitButton.onClick.AddListener(ExitGame);
             LifetimeScope.Register(() => boardView.IntersectionClicked -= OnIntersectionClicked);
             LifetimeScope.Register(() => restartButton.onClick.RemoveListener(RestartGame));
             LifetimeScope.Register(() => undoButton.onClick.RemoveListener(UndoMove));
+            LifetimeScope.Register(() => exitButton.onClick.RemoveListener(ExitGame));
         }
 
         protected override void OnOpen(UINone args)
@@ -81,6 +83,11 @@ namespace Game.Hotfix
         void OnIntersectionClicked(int column, int row)
         {
             ApplyMove(column, row, Game.CurrentTurn);
+        }
+
+        void ExitGame()
+        {
+            CloseSelf();
         }
 
         void RestartGame()

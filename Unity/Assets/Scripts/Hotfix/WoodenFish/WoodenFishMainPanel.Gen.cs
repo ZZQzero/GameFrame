@@ -11,5 +11,6 @@ namespace Game.Hotfix
         [SerializeField] private UnityEngine.UI.Image crabstick;
         [SerializeField] private TMPro.TextMeshProUGUI num;
         [SerializeField] private TMPro.TextMeshProUGUI clickNum;
+        [SerializeField] private UnityEngine.UI.Button exitButton;
     }
 }

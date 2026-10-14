@@ -109,9 +109,76 @@ namespace GameFrame.Network
         }
     }
 
+    /// <summary>当前连接的耗时汇总；不保留逐请求记录，也不推算分位数。</summary>
+    public readonly struct NetworkDurationSnapshot
+    {
+        public long Count { get; }
+        public double LastMilliseconds { get; }
+        public double TotalMilliseconds { get; }
+        public double MaximumMilliseconds { get; }
+        public double AverageMilliseconds => Count == 0 ? 0 : TotalMilliseconds / Count;
+
+        private NetworkDurationSnapshot(long count, double last, double total, double maximum)
+        {
+            Count = count;
+            LastMilliseconds = last;
+            TotalMilliseconds = total;
+            MaximumMilliseconds = maximum;
+        }
+
+        internal NetworkDurationSnapshot Add(double milliseconds) =>
+            new NetworkDurationSnapshot(Count + 1, milliseconds, TotalMilliseconds + milliseconds,
+                Math.Max(MaximumMilliseconds, milliseconds));
+    }
+
+    /// <summary>仅统计成功解码的 RPC；任务 continuation 的执行成本不计入。</summary>
+    public readonly struct RpcMetricsSnapshot
+    {
+        public long SuccessfulResponses => ResponseWait.Count;
+        public NetworkDurationSnapshot Encoding { get; }
+        public NetworkDurationSnapshot ResponseWait { get; }
+        public NetworkDurationSnapshot MainThreadWait { get; }
+        public NetworkDurationSnapshot Decoding { get; }
+        public NetworkDurationSnapshot Completion { get; }
+
+        internal RpcMetricsSnapshot(NetworkDurationSnapshot encoding, NetworkDurationSnapshot responseWait,
+            NetworkDurationSnapshot mainThreadWait, NetworkDurationSnapshot decoding, NetworkDurationSnapshot completion)
+        {
+            Encoding = encoding;
+            ResponseWait = responseWait;
+            MainThreadWait = mainThreadWait;
+            Decoding = decoding;
+            Completion = completion;
+        }
+    }
+
+    /// <summary>各子预算当前预约值，含在途帧及保守元数据额度；不是实际进程内存。</summary>
+    public readonly struct NetworkMemorySnapshot
+    {
+        public long ReliableSendReservedBytes { get; }
+        public long ReliableReceiveReservedBytes { get; }
+        public long ControlReservedBytes { get; }
+        public long UnreliableSendReservedBytes { get; }
+        public long UnreliableReceiveReservedBytes { get; }
+        public long PendingReservedBytes { get; }
+
+        internal NetworkMemorySnapshot(long reliableSend, long reliableReceive, long control,
+            long unreliableSend, long unreliableReceive, long pending)
+        {
+            ReliableSendReservedBytes = reliableSend;
+            ReliableReceiveReservedBytes = reliableReceive;
+            ControlReservedBytes = control;
+            UnreliableSendReservedBytes = unreliableSend;
+            UnreliableReceiveReservedBytes = unreliableReceive;
+            PendingReservedBytes = pending;
+        }
+    }
+
     public readonly struct NetworkMetricsSnapshot
     {
         public KcpMetricsSnapshot Kcp { get; }
+        public RpcMetricsSnapshot Rpc { get; }
+        public NetworkMemorySnapshot Memory { get; }
         public long UnreliableDropped { get; }
         public long Generation { get; }
         public long OwnedBytes { get; }
@@ -136,8 +203,11 @@ namespace GameFrame.Network
             int pendingCount, int deadlineCount, long sentFrames, long receivedFrames, long lateResponses,
             long timeouts, long cancellations, long queueAgeWarnings, KcpMetricsSnapshot kcp = default, long unreliableDropped = 0,
             long peakReservedBytes = 0, long sentApplicationBytes = 0, long receivedApplicationBytes = 0,
-            long sentBusinessBodyBytes = 0, long receivedBusinessBodyBytes = 0, long pingRoundTripMilliseconds = 0)
+            long sentBusinessBodyBytes = 0, long receivedBusinessBodyBytes = 0, long pingRoundTripMilliseconds = 0,
+            RpcMetricsSnapshot rpc = default, NetworkMemorySnapshot memory = default)
         {
+            Rpc = rpc;
+            Memory = memory;
             Generation = generation;
             OwnedBytes = ownedBytes;
             PeakReservedBytes = peakReservedBytes;

@@ -165,15 +165,18 @@ namespace Game.Hotfix
                 return;
             }
 
-            GameUI.Close<LoginPanel>();
-            await GameUI.Push<GomokuMainPanel>();
+            await GameUI.Push<MainPanel>();
             if (!CanNavigate || !ReferenceEquals(loginSession.CurrentUser, user))
             {
                 if (GameUI.IsInited)
                 {
-                    GameUI.Close<GomokuMainPanel>();
+                    GameUI.Close<MainPanel>();
                 }
+
+                return;
             }
+
+            GameUI.Close<LoginPanel>();
         }
 
         void OnAuthenticationLost()
@@ -183,8 +186,7 @@ namespace Game.Hotfix
                 return;
             }
 
-            GameUI.Close<GomokuMainPanel>();
-            GameUI.Close<LoginPanel>();
+            GameUI.CloseGroup(UIGroup.Scene);
             OpenLoginAsync("会话已结束，请重新登录").Forget();
         }
 
@@ -214,8 +216,7 @@ namespace Game.Hotfix
 
                 if (GameUI.IsInited)
                 {
-                    GameUI.Close<LoginPanel>();
-                    GameUI.Close<GomokuMainPanel>();
+                    GameUI.CloseGroup(UIGroup.Scene);
                 }
             }
             catch (Exception error)

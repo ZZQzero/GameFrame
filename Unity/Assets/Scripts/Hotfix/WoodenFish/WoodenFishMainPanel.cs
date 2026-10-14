@@ -37,6 +37,8 @@ namespace Game.Hotfix
 
         protected override void OnCreate()
         {
+            exitButton.onClick.AddListener(ExitGame);
+            LifetimeScope.Register(() => exitButton.onClick.RemoveListener(ExitGame));
             restRotation = stickPivot.localRotation;
             restScale = fishImg.rectTransform.localScale;
             num.gameObject.SetActive(false);
@@ -83,6 +85,11 @@ namespace Game.Hotfix
             StopPresentation();
             textPool?.Dispose();
             textPool = null;
+        }
+
+        private void ExitGame()
+        {
+            CloseSelf();
         }
 
         private void Hit()

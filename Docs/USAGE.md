@@ -436,6 +436,8 @@ public sealed class RankPanel : UILoopScrollBase<RankArgs>
 
 ## 10. 编辑器代码生成 / 绑定
 
+本项目主界面为 `Assets/Prefab/HitfixPrefab/MainPanel.prefab`，登录并进入 Main 后由 GameEntry 打开。五子棋、木鱼按钮使用 `GameUI.Push` 暂停主界面，游戏“退出”使用 `CloseSelf` 恢复它；主界面和新增退出按钮的字段由 UIFrame 生成并回填。两种游戏保持现有缓存行为，退出不切换场景或注销账号。
+
 ### 用法
 
 1. 选中 UI Prefab 根 → Inspector「生成脚本」。

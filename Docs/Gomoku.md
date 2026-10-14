@@ -1,7 +1,8 @@
 # 五子棋本地对局
 
 从 `Unity/Assets/Scenes/Launch.unity` 启动并登录成功后，GameEntry 通过 GameScene 切换到
-`Unity/Assets/Scenes/MainScene/Main.unity`，再打开 `GomokuMainPanel`。
+`Unity/Assets/Scenes/MainScene/Main.unity`，显示 `MainPanel`；点击“五子棋”打开 `GomokuMainPanel`。
+右上角“退出”通过 `CloseSelf()` 返回主界面，不重新加载场景，缓存保留棋局。
 当前为同机双人：黑方先行，双方交替落子，横、竖、两种斜线连续五子及以上获胜，
 没有三三、四四和长连禁手。棋盘填满且没有获胜方时和棋。
 点击已占用位置或终局后继续点击不会改变棋局；“悔一步”撤销最近一手，“重新开始”清空棋局。
@@ -63,7 +64,8 @@ GomokuMain
         │           ├── Piece …         运行时按需创建
         │           └── LastMoveMarker
         ├── UndoButton
-        └── RestartButton
+        ├── RestartButton
+        └── ExitButton
 ```
 
 Checkerboard 的 Image 提供底色，Grid 和 Pieces 均铺满 Checkerboard，棋子与标记关闭 Raycast Target。
@@ -114,7 +116,7 @@ Sfx 总线、Resident 启动预加载、音量 0.7、无冷却、最多 4 声并
 面板传递 OpenCancellationToken，关闭时取消尚未完成的播放请求，已经开播的短音效自然结束。
 需要更换音色时替换同路径 WAV 并保留 `.meta`；音量在共用配置的落子条目中调整。
 GameUIRegistration 注册 GomokuMain，DefaultPackage 的 Gomoku 组保持 `gomoku` 标签并增加 `boot`，
-采集 Image、Audio 和 prefab；字体通过 prefab 依赖采集。GameEntry 在框架和配置就绪后打开此面板。
+采集 Image、Audio 和 prefab；字体通过 prefab 依赖采集。主界面的五子棋按钮通过窗口栈打开此面板。
 正式包仍需重新编译 Hotfix DLL 并构建 YooAsset 资源包，不能仅更新 Editor 源码。
 
 PlayMode 测试 GomokuGameTests 覆盖回合、非法落子、四方向胜负、白方胜利、长连、和棋、悔棋和历史重放；

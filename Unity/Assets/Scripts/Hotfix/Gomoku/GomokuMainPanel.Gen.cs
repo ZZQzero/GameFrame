@@ -9,5 +9,6 @@ namespace Game.Hotfix
     {
         [SerializeField] private UnityEngine.UI.Image gomokuBg;
         [SerializeField] private UnityEngine.UI.Image checkerboard;
+        [SerializeField] private UnityEngine.UI.Button exitButton;
     }
 }

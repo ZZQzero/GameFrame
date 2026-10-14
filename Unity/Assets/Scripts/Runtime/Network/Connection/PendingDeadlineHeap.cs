@@ -9,6 +9,9 @@ namespace GameFrame.Network.Connection
         public ulong Id;
         public uint Opcode;
         public long Deadline;
+        public long EncodingTicks;
+        public long AdmittedTimestamp;
+        public long ResponseTimestamp;
         public int HeapIndex = -1;
         public int State; // 0 waiting, 1 response reserved, 2 terminal, 3 completed
         public Exception Error;

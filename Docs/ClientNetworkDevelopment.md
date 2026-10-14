@@ -172,4 +172,8 @@ Unity MemoryPack 固定 1.21.4、Core 为.NET Standard2.1，Generator 保留 Ros
 
 性能在最低目标设备测完整每帧网络成本 P95≤2ms，另报 P99/峰值、分配、GC、清零、最长 handler 和 worker 轮转。当前 2ms 只是 Pump 调度预算；帧/控制预热后无逐包分配是待达到目标，DTO/字符串/数组仍独立统计。先测最大容量发送、统计采样与锁成本再决定优化，不提前换 ArrayPool.Shared、批量 ABI 或零复制。
 
-当前剩余工作：完整托管元数据预约、RPC 到达/主线程等待与编码耗时、统一诊断、池化/性能测量、精细期限调度和全部平台/容量验收。World/GameNetworkSession 与 WebGL WSS 继续延后。既有平台证据见 [客户端使用说明](ClientNetworkUsage.md#验证与现有证据)，以日期/版本/实际执行范围为准。
+2026-10-14 已补充当前连接的成功 RPC 编码、完整响应等待、主线程等待、解码与 admission 到解码完成汇总，并公开各子预算当前预约值。复用既有 pending/响应保留/Pump/预算所有权，统计在同步 continuation 前完成；不增加逐请求历史、指标管理器或业务状态。采样定义与失败排除范围见 [关闭与诊断](ClientNetworkUsage.md#6-关闭与诊断)。
+
+当前剩余工作：完整托管元数据预约、全部发送/Push/Pump 与失败路径耗时、分位采样与统一诊断、池化/性能测量、精细期限调度和全部平台/容量验收。World/GameNetworkSession 与 WebGL WSS 继续延后。既有平台证据见 [客户端使用说明](ClientNetworkUsage.md#验证与现有证据)，以日期/版本/实际执行范围为准。
+
+2026-10-14 实施优先级：按 [NetworkDesign 第 18.1 节](NetworkDesign.md#181-当前优先路线底层框架完善)先完善现有网络底层、诊断和验证。当前五子棋保持既有业务接入，双连接世界会话、世界恢复、移动同步、插值/预测与 AOI 在实际多人玩法需要时扩展；不为将来玩法预先增加 Runtime 业务状态、通用调度器或管理层。

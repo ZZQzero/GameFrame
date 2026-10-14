@@ -1,6 +1,7 @@
 #nullable disable
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,13 +17,15 @@ namespace GameFrame.Network.Connection
         {
             private readonly NetMessageCodec<T> codec;
             private readonly int responseLimit;
+            private readonly ConnectionContext owner;
             public readonly TaskCompletionSource<T> Source = new TaskCompletionSource<T>();
             public override int ResponseLimit => responseLimit;
 
-            public Pending(NetMessageCodec<T> codec, int responseLimit)
+            public Pending(NetMessageCodec<T> codec, int responseLimit, ConnectionContext owner)
             {
                 this.codec = codec;
                 this.responseLimit = responseLimit;
+                this.owner = owner;
             }
 
             public override void Complete(OwnedFrame response)
@@ -43,7 +46,12 @@ namespace GameFrame.Network.Connection
                 {
                     try
                     {
-                        Source.TrySetResult(codec.Decode(response.Body));
+                        long decodingStarted = owner.getTimestamp();
+                        T result = codec.Decode(response.Body);
+                        long decodingFinished = owner.getTimestamp();
+                        // Publish before synchronous continuations can inspect metrics or close this generation.
+                        owner.RecordRpcSuccess(this, decodingStarted, decodingFinished);
+                        Source.TrySetResult(result);
                     }
                     catch (Exception error)
                     {
@@ -77,6 +85,7 @@ namespace GameFrame.Network.Connection
         private readonly NetworkConnectOptions connect;
         private readonly IFrameTransport transport;
         private readonly Func<long> getMilliseconds;
+        private readonly Func<long> getTimestamp;
         private readonly Func<int, CancellationToken, Task> delay;
         private readonly CancellationTokenSource lifetime = new CancellationTokenSource();
         private readonly FrameMemoryBudget memory;
@@ -137,6 +146,7 @@ namespace GameFrame.Network.Connection
         private long timeouts;
         private long cancellations;
         private long queueAgeWarnings;
+        private RpcMetricsSnapshot rpcMetrics;
         private bool disposed;
         private bool hostFailed;
         public readonly long Generation;
@@ -161,13 +171,15 @@ namespace GameFrame.Network.Connection
         public ConnectionContext(long generation, NetworkClientOptions options, NetProtocolCatalog catalog,
             NetworkConnectOptions connect, FrameMemoryBudget parent, CancellationToken cancellationToken,
             WebSocket testSocket = null, Func<long> testClock = null,
-            Func<int, CancellationToken, Task> testDelay = null, Func<Uri, CancellationToken, Task> testConnect = null, KcpWorker kcpWorker = null)
+            Func<int, CancellationToken, Task> testDelay = null, Func<Uri, CancellationToken, Task> testConnect = null,
+            KcpWorker kcpWorker = null, Func<long> testTimestamp = null)
         {
             Generation = generation;
             this.options = options;
             this.catalog = catalog;
             this.connect = connect;
             getMilliseconds = testClock ?? NetworkClock.GetMilliseconds;
+            getTimestamp = testTimestamp ?? Stopwatch.GetTimestamp;
             delay = testDelay ?? Task.Delay;
             memory = new FrameMemoryBudget(options.MaxOwnedBytes, parent);
             sendMemory = new FrameMemoryBudget(options.ReliableSendBytes, memory);
@@ -333,11 +345,14 @@ namespace GameFrame.Network.Connection
             }
 
             cancellationToken.ThrowIfCancellationRequested();
+            long encodingStarted = getTimestamp();
             OwnedFrame frame = Encode(route.RequestCodec, route.MaxBodyBytes, request);
-            var item = new Pending<TResponse>(route.ResponseCodec, route.ResponseMaxBodyBytes)
+            long encodingTicks = getTimestamp() - encodingStarted;
+            var item = new Pending<TResponse>(route.ResponseCodec, route.ResponseMaxBodyBytes, this)
             {
                 Opcode = route.Opcode,
-                CancellationToken = cancellationToken
+                CancellationToken = cancellationToken,
+                EncodingTicks = encodingTicks
             };
             try
             {
@@ -361,6 +376,7 @@ namespace GameFrame.Network.Connection
                     metadataBytes += PendingReservation;
                     item.Id = ++nextId;
                     item.Deadline = checked(getMilliseconds() + (long)Math.Ceiling(timeout.TotalMilliseconds));
+                    item.AdmittedTimestamp = getTimestamp();
                     frame.Header = new FrameHeader(FrameKind.Request, route.Opcode, item.Id, frame.Length - 32);
                     FrameCodec.WriteHeader(frame.Bytes, frame.Header);
                     pending.Add(item.Id, item);
@@ -855,6 +871,7 @@ namespace GameFrame.Network.Connection
                             }
 
                             request.State = 1;
+                            request.ResponseTimestamp = getTimestamp();
                             deadlines.Remove(request);
                         }
 
@@ -1663,6 +1680,20 @@ namespace GameFrame.Network.Connection
             }
         }
 
+        private void RecordRpcSuccess(PendingRequest request, long decodingStarted, long decodingFinished)
+        {
+            double tickMilliseconds = 1000.0 / Stopwatch.Frequency;
+            lock (gate)
+            {
+                rpcMetrics = new RpcMetricsSnapshot(
+                    rpcMetrics.Encoding.Add(request.EncodingTicks * tickMilliseconds),
+                    rpcMetrics.ResponseWait.Add((request.ResponseTimestamp - request.AdmittedTimestamp) * tickMilliseconds),
+                    rpcMetrics.MainThreadWait.Add((decodingStarted - request.ResponseTimestamp) * tickMilliseconds),
+                    rpcMetrics.Decoding.Add((decodingFinished - decodingStarted) * tickMilliseconds),
+                    rpcMetrics.Completion.Add((decodingFinished - request.AdmittedTimestamp) * tickMilliseconds));
+            }
+        }
+
         public NetworkMetricsSnapshot Metrics()
         {
             lock (gate)
@@ -1671,7 +1702,9 @@ namespace GameFrame.Network.Connection
                     deadlines.Count, sentFrames, receivedFrames, lateResponses, timeouts, cancellations, queueAgeWarnings,
                     transport is KcpTransport kcp ? kcp.GetMetrics() : default, unreliableDropped,
                     memory.PeakReservedBytes, sentApplicationBytes, receivedApplicationBytes,
-                    sentBusinessBodyBytes, receivedBusinessBodyBytes, pingRoundTripMilliseconds);
+                    sentBusinessBodyBytes, receivedBusinessBodyBytes, pingRoundTripMilliseconds, rpcMetrics,
+                    new NetworkMemorySnapshot(sendMemory.OwnedBytes, receiveMemory.OwnedBytes, controlMemory.OwnedBytes,
+                        unreliableMemory.OwnedBytes, unreliableReceiveMemory.OwnedBytes, metadataBytes));
             }
         }
     }

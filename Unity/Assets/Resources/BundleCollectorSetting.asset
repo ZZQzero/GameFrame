@@ -74,7 +74,7 @@ MonoBehaviour:
         UserData: 
     - GroupName: WoodenFish
       GroupDesc: "\u6728\u9C7C\u9762\u677F\u4E0E\u6572\u51FB\u97F3"
-      AssetTags: fish
+      AssetTags: fish;boot
       ActiveRuleName: EnableGroup
       Collectors:
       - CollectPath: Assets/Prefab/WoodenFish

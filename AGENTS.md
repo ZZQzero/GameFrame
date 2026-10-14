@@ -141,6 +141,7 @@ if (config.Enabled) { Initialize(config); }
 
 | 任务 | Skill |
 | --- | --- |
+| 开发或扩展业务功能、按需求选择与组合 Runtime 系统 | [gameframe-feature-development](skills/gameframe-feature-development/SKILL.md) |
 | 修改后检查、Unity 回归测试、启动验证 | [gameframe-validate](skills/gameframe-validate/SKILL.md) |
 | UIFrame 生成 Panel/Item 脚本、维护控件绑定与编译后回填 | [gameframe-ui-codegen](skills/gameframe-ui-codegen/SKILL.md) |
 | PrimeTween 动画、UI 缩放旋转与飘字 | [unity-primetween](skills/unity-primetween/SKILL.md) |

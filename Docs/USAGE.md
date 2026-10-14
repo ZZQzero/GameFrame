@@ -220,7 +220,7 @@ protected override void OnOpen(ItemArgs args)
 - 必须 `GameUI.Register`。未注册、空 Location、重复且不一致的注册都会抛。
 - 本项目的业务注册集中在 Hotfix 的 `GameUIRegistration.RegisterAll()`，由 GameEntry 初始化时调用。
   新面板的类型、地址、UIGroup 和缓存选项在该脚本维护；注册不加载 prefab，打开时仍调用 `Push` / `Popup` 等接口。
-- 登录界面为 `Assets/Prefab/HitfixPrefab/LoginPanel.prefab`，注册地址是 `LoginPanel`，通过 `await GameUI.Push<LoginPanel, LoginPanelArgs>(new LoginPanelArgs(session, onLoggedIn))` 注入会话与成功回调。控件绑定由 UIFrame 生成到 `Assets/Scripts/Hotfix/Login/LoginPanel.Gen.cs`。确认按钮校验账号、密码并提交一次 Login；服务端不存在账号时创建并登录，成功后由入口切换主界面。提交期间禁用控件，关闭取消本次请求；关闭、失败收尾或重新打开清空密码，保留账号。面板只借用会话，见 [客户端网络使用说明](ClientNetworkUsage.md)。
+- 登录界面为 `Assets/Prefab/HitfixPrefab/LoginPanel.prefab`，注册地址是 `LoginPanel`，通过 `await GameUI.Push<LoginPanel, LoginPanelArgs>(new LoginPanelArgs(session, onLoggedIn))` 注入会话与成功回调。控件绑定由 UIFrame 生成到 `Assets/Scripts/Hotfix/Login/LoginPanel.Gen.cs`。确认按钮校验账号、密码并提交一次 Login；服务端不存在账号时创建并登录，成功后由 Hotfix 的 GameFlow 切换主界面。提交期间禁用控件，关闭取消本次请求；关闭、失败收尾或重新打开清空密码，保留账号。面板只借用会话，见 [客户端网络使用说明](ClientNetworkUsage.md)。
 - 资源地址原样传递，不自动去除首尾空格。无参打开重载使用 `UINone.Value`；显式传入 `null` 不会自动补成无参对象。
 - 默认 `cache: true`：Close 只隐藏，不释放内存；要释放用 `destroy: true` 或 `ClearCache()`。
 
@@ -436,7 +436,7 @@ public sealed class RankPanel : UILoopScrollBase<RankArgs>
 
 ## 10. 编辑器代码生成 / 绑定
 
-本项目主界面为 `Assets/Prefab/HitfixPrefab/MainPanel.prefab`，登录并进入 Main 后由 GameEntry 打开。五子棋、木鱼按钮使用 `GameUI.Push` 暂停主界面，游戏“退出”使用 `CloseSelf` 恢复它；主界面和新增退出按钮的字段由 UIFrame 生成并回填。两种游戏保持现有缓存行为，退出不切换场景或注销账号。
+本项目主界面为 `Assets/Prefab/HitfixPrefab/MainPanel.prefab`，登录并进入 Main 后由 GameFlow 打开。五子棋、木鱼按钮使用 `GameUI.Push` 暂停主界面，游戏“退出”使用 `CloseSelf` 恢复它；主界面和新增退出按钮的字段由 UIFrame 生成并回填。两种游戏保持现有缓存行为，退出不切换场景或注销账号。
 
 ### 用法
 

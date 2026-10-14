@@ -1,0 +1,4 @@
+interface:
+  display_name: "GameFrame 功能模块开发"
+  short_description: "按功能需求选择并组合 Runtime 系统，完成生命周期接入与验证"
+  default_prompt: "使用 $gameframe-feature-development 开发这个功能，优先复用项目现有系统，并处理资源归属和生命周期。"

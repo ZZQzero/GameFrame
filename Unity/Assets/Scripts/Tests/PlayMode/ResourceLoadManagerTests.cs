@@ -311,6 +311,65 @@ namespace GameFrame.Tests
         }
 
         [UnityTest]
+        public IEnumerator FlowStopClosesUIButLeavesBorrowedAccountSessionAlive() => UniTask.ToCoroutine(async () =>
+        {
+            GameLoginSession session = await LoginToMainAsync();
+            GameUser user = session.CurrentUser;
+            var flow = (GameFlow)typeof(GameEntry).GetField("flow", BindingFlags.Instance | BindingFlags.NonPublic)
+                .GetValue(entry);
+            await flow.StopAsync();
+            await flow.StopAsync();
+            Assert.IsTrue(entry.IsReady, "流程停止不负责停止组合入口或配置。");
+            Assert.AreSame(user, session.CurrentUser, "流程只借用会话，不注销或释放账号连接。");
+            Assert.IsTrue(GameRuntime.IsInited);
+            Assert.IsFalse(GameUI.IsOpen<MainPanel>());
+            Assert.IsFalse(GameUI.IsOpen<LoginPanel>());
+            Assert.Throws<ObjectDisposedException>(() => flow.StartAsync());
+
+            await session.LogoutAsync();
+            await UniTask.NextFrame();
+            Assert.IsFalse(GameUI.IsOpen<LoginPanel>(), "停止后认证失效不能再次启动导航。");
+            await entry.StopAsync();
+            await entry.StopAsync();
+            Assert.IsFalse(entry.IsReady);
+            Assert.IsNull(TableConfigManager.Tables);
+            Assert.AreEqual(0, GameRuntime.Network.Memory.OwnedBytes);
+        });
+
+        [UnityTest]
+        public IEnumerator ReloginDuringPreviousMainLoadEntersWithNewAccountSession() => UniTask.ToCoroutine(async () =>
+        {
+            GameLoginSession session = await CreateLoginEntryAsync();
+            await GameScene.ShutdownAsync();
+            var loader = new GatedSceneLoader(resources.Package);
+            GameScene.InitLoader(loader);
+            try
+            {
+                SubmitLogin("entry_" + Guid.NewGuid().ToString("N"));
+                await loader.Started.Task.Timeout(TimeSpan.FromSeconds(15));
+                GameUser previousUser = session.CurrentUser;
+                await session.LobbyClient.CloseAsync();
+                await UniTask.WaitUntil(() => GameUI.IsOpen<LoginPanel>()).Timeout(TimeSpan.FromSeconds(5));
+                SubmitLogin("entry_" + Guid.NewGuid().ToString("N"));
+                await UniTask.WaitUntil(() => session.IsAuthenticated).Timeout(TimeSpan.FromSeconds(15));
+                GameUser currentUser = session.CurrentUser;
+                Assert.AreNotEqual(previousUser.AccountId, currentUser.AccountId);
+                Assert.IsFalse(GameUI.IsOpen<MainPanel>());
+
+                loader.Continue.TrySetResult();
+                await UniTask.WaitUntil(() => GameUI.IsOpen<MainPanel>()).Timeout(TimeSpan.FromSeconds(15));
+                Assert.AreSame(currentUser, session.CurrentUser);
+                Assert.AreEqual("Main", GameScene.ActiveId);
+                Assert.IsFalse(GameUI.IsOpen<LoginPanel>());
+                CollectionAssert.AreEqual(new[] { GameUI.UICamera }, Camera.main.GetUniversalAdditionalCameraData().cameraStack);
+            }
+            finally
+            {
+                loader.Continue.TrySetResult();
+            }
+        });
+
+        [UnityTest]
         public IEnumerator AuthenticationLossDuringMainLoadDoesNotOpenMain() => UniTask.ToCoroutine(async () =>
         {
             GameLoginSession session = await CreateLoginEntryAsync();

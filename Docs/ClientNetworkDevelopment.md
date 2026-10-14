@@ -136,11 +136,11 @@ Connect 后显式 Login/Resume，独立 Register 可选；Login 自动创建不�
 
 当前 `GameLoginSession` 是 Hotfix 的普通实例，拥有一个 WSS 大厅客户端、私有认证响应、只读 GameUser、任务与生命周期 CTS。GameEntry 只创建/注入/停止它，LoginPanel 通过 LoginPanelArgs 借用；后续业务通过构造参数或面板参数接收同一个实例，不查询入口或新增静态 Current。只有校验成功结果/TTL 且连接仍有效后，才原子提交用户与凭据；密码不进入 GameUser。面板关闭只取消该次操作，成功关闭面板不注销会话。
 
-登录/注销串行准入，重复操作拒绝；失败、超时或取消等待 Close 清理后释放操作资格。DisposeAsync 先发布共享关闭任务、取消并等待在途操作，再释放观察者/客户端和清零凭据，重复释放等待同一任务。断线/顶号/注销使 CurrentUser 为 null 并通知入口回到登录。当前不提供 Resume 或自动重连，不持久化凭据；只读用户快照不能作为权限依据，每次业务准入检查 IsAuthenticated。
+登录/注销串行准入，重复操作拒绝；失败、超时或取消等待 Close 清理后释放操作资格。DisposeAsync 先发布共享关闭任务、取消并等待在途操作，再释放观察者/客户端和清零凭据，重复释放等待同一任务。断线/顶号/注销使 CurrentUser 为 null 并通知 GameFlow 回到登录。当前不提供 Resume 或自动重连，不持久化凭据；只读用户快照不能作为权限依据，每次业务准入检查 IsAuthenticated。
 
-认证失效通知负责清空会话，UI 导航还需满足业务入口就绪、GameRuntime 运行及 GameUI 已初始化。退出时 Launch 与 GameEntry 回调顺序不固定；框架已经关闭或开始关闭时，不再执行登录/主界面导航，异步打开完成后也需复核生命周期。不能靠调整框架关闭顺序或吞掉 GameUI 未初始化异常处理退出。
+认证失效通知负责清空会话，UI 导航还需满足 GameFlow 运行、GameRuntime 运行及 GameUI 已初始化。退出时 Launch 与 GameEntry 回调顺序不固定；框架已经关闭或开始关闭时，不再执行登录/主界面导航，异步打开完成后也需复核生命周期。不能靠调整框架关闭顺序或吞掉 GameUI 未初始化异常处理退出。
 
-账号认证成功后由入口通过 GameScene 加载 Main，完成相机 Stack 配置后才关闭登录面板并打开业务 UI。入口跟踪主场景导航任务，主动停止时等待它收尾；场景加载不能取消，完成后核对同一 GameUser 实例与生命周期，旧账号结果不能进入新账号业务。场景失败由面板报告，保留认证供玩家显式再次进入，不自动重试或重复 Login；Main 已加载时复用，断线后在当前场景显示登录。
+账号认证成功后由 Hotfix 的 GameFlow 通过 GameScene 加载 Main，配置相机 Stack 并成功打开主面板后才关闭登录面板。GameEntry 创建流程并注入借用的 GameLoginSession，不持有导航规则；流程跟踪主场景导航任务，主动停止时等待它收尾，再由 GameEntry 释放账号会话与配置，具体职责见 [启动与业务流程](Launch.md#hotfix-业务流程)；场景加载不能取消，完成后核对同一 GameUser 实例与生命周期，旧账号结果不能进入新账号业务。场景失败由面板报告，保留认证供玩家显式再次进入，不自动重试或重复 Login；Main 已加载时复用，断线后在当前场景显示登录。
 
 后续 GameNetworkSession 放 Hotfix，拥有大厅、独占 KCP 世界客户端、账号/世界 epoch、凭据、CTS 与分别的状态机；不由临时 UI 面板创建销毁。一个 opcode 一个权威订阅，先更新业务模型再经已有 EventSystem 通知 UI。OpenScope/LifetimeScope 可拥有订阅和请求取消，但同步 Dispose 不能 await 连接关闭。
 

@@ -7,9 +7,9 @@
 GameUI.SetPackage → 下载 boot 资源 → 启动其余框架系统 →
 加载 AOT 元数据与 Hotfix DLL → 实例化 GameEntry prefab → 读取热更配置并补入翻译 → 启动热更业务。
 Launch 负责框架初始化、选择相机和准备资源。GameEntry 在 Awake 中初始化 Hotfix 配置，
-并调用 `GameUIRegistration.RegisterAll()` 统一注册业务面板、创建并注入 Hotfix 的 `GameLoginSession`，完成后 IsReady 为 true。
-Start 中打开登录面板，登录成功后通过 GameScene 以 Single 模式加载并激活 Main，再显示 `MainPanel`。主界面提供五子棋和木鱼入口。
-GameEntry 只组合、调用和释放业务对象，不保存账号字段或实现认证；会话实例持有用户信息、凭据和连接。
+并调用 `GameUIRegistration.RegisterAll()` 统一注册业务面板，创建 Hotfix 的 `GameLoginSession` 并注入 `GameFlow`，完成后 IsReady 为 true。
+Start 调用 `GameFlow.StartAsync()` 启动业务流程；流程打开登录面板，登录成功后通过 GameScene 以 Single 模式加载并激活 Main，再显示 `MainPanel`。主界面提供五子棋和木鱼入口。
+GameEntry 只组合、调用和释放业务对象；GameFlow 决定登录与主界面的导航，GameLoginSession 持有用户信息、凭据和连接。
 Launch 启动 GameRuntime 时 EnableUI 为 false，语言服务也不重复初始化，并通过 NetworkOptions 启用网络宿主。
 任一步失败直接抛出并终止后续启动，不重试、不回退旧资源、不自动回滚。
 
@@ -24,6 +24,27 @@ Launch 没有单例或对外接口，也不调用 Hotfix 入口。DLL 必须在�
 `Unity/Config/gen.sh/gen.bat` 与 Unity ExcelExporter 菜单统一通过 `DotNet/ConfigGenerator` 分别生成 client（c）和 server（s）配置；IDE 可选择 Generate Server、Generate All、Check。Unity 保持现有代码/数据输出与 YooAsset 加载链，服务端独立输出到 `DotNet/Game.Config`，见 [服务端配置接入](DotNetUsage.md)。
 语言服务在 Launch 中先用空表初始化，读取已保存的语言设置。
 GameEntry 将热更语言表转换后通过 LanguageManager.AddTable 补入，保留当前语言并刷新已注册的文本。
+
+## Hotfix 业务流程
+
+`GameFlow` 是 `Game.Hotfix` 的普通实例，由 GameEntry 创建、启动和停止，不是静态入口或 MonoBehaviour。
+GameEntry 拥有账号会话；流程和面板只借用它，不释放连接。LoginPanel 继续通过 `LoginPanelArgs.LoggedIn` 回调请求进入主界面，不查询 GameEntry。
+
+- `StartAsync()` 订阅认证失效并打开登录面板；同一实例只能启动一次，停止后不能重启。
+- 流程协调 Main 加载、相机 Stack 和面板打开；完成后仍核对当前 GameUser 与运行状态，旧账号或已停止流程不能继续导航。
+- `StopAsync()` 先禁用导航、解绑认证事件并关闭场景组 UI，再等待正在执行的主场景导航；重复停止等待同一任务，不释放借用的会话。
+- GameEntry 的 `StopAsync()` 先等待流程停止，即使流程清理失败也继续释放会话与配置，最后传播首个错误。
+- 场景加载仍由 GameScene 执行，面板仍由 GameUI 管理；流程不另建场景加载器、UI 注册表或自动重试队列。
+
+后续进入房间或独立战斗场景时，在 Hotfix 增加明确的业务进入/离开流程，统一处理切换准入、业务资源清理、场景加载和进入后的初始化。
+流程复杂后再按房间、对局拆分；不要求一个业务阶段对应一个 Unity 场景。当前五子棋和木鱼仍只通过 UI 栈打开、退出。
+未来复用已加载的多场景时必须区分已加载与当前活动场景，显式选择激活或加载，不能仅沿用当前 Main 的 `IsLoaded` 判断。
+
+2026-10-14 验证：Unity 6000.3.19f1/macOS Editor 编译通过；资源启动、账号会话、主界面、GameRuntime、场景操作与 UI 根节点 PlayMode 66/66，零跳过，使用独立临时 WSS/PostgreSQL。
+新增覆盖流程停止只释放导航而保留借用的账号会话，以及旧 Main 加载期间重新登录新账号；既有断线、切场停止、显式重试与游戏退出缓存行为通过。
+实际播放 Launch 时 GameEntry、GameFlow、登录面板和 191 条语言配置就绪，只有一个 UI 根节点和一个 UI 相机 Stack 引用，停止播放后无 Console 错误。
+首轮测试在用例开始前受 Test Runner 域重载异常中断，重新启动后整组通过；已恢复场景、EditorSettings、证书偏好、测试环境变量和字体纹理，并清理临时服务、数据库与测试场景。
+本次未执行 Player 脚本编译、正式热更 DLL/资源包构建、IL2CPP 或真机验证。
 
 ## 启动配置与资源服务
 
@@ -158,9 +179,9 @@ UnityEngine.Application.Quit();
 `ResourceLoadManager.Instance.ShutdownAsync()`。这些接口不属于进程退出流程。
 
 Launch.OnApplicationQuit / OnDestroy 负责关闭 UI、发起其余框架系统关闭、关闭语言服务并清空事件；不等待异步完成。
-GameEntry.OnApplicationQuit / OnDestroy 发起幂等 StopAsync，关闭业务面板、等待已发起的主场景导航、清理会话及自己初始化的热更配置；生命周期回调不等待、不关闭框架。
+GameEntry.OnApplicationQuit / OnDestroy 发起幂等 StopAsync，先停止 GameFlow 并等待其主场景导航，再清理会话及自己初始化的热更配置；生命周期回调不等待、不关闭框架。
 Editor 与正式包共用这些简单清理，两次生命周期回调不会重复清理。
-Unity 不保证 Launch 与 GameEntry 退出回调的顺序；业务 UI 导航要求 GameEntry 就绪、GameRuntime 运行且 GameUI 已初始化，异步打开完成后再次核对。框架关闭触发的认证失效仍清空用户与凭据，但不再打开登录或主界面。
+Unity 不保证 Launch 与 GameEntry 退出回调的顺序；业务 UI 导航要求 GameFlow 运行、GameRuntime 运行且 GameUI 已初始化，异步打开完成后再次核对。框架关闭触发的认证失效仍清空用户与凭据，但不再打开登录或主界面。
 Editor 停止播放时，资源系统由 YooAsset 自己的 Editor 驱动关闭。
 GameEntry 创建之前启动失败时，不执行额外的退出回滚；正式包退出由系统回收资源，
 Editor 重新播放使用默认 Domain Reload 重置静态状态。

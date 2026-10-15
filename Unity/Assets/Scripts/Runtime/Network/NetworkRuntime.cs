@@ -19,6 +19,82 @@ namespace GameFrame.Network
         private Exception failure;
         private bool faultCleanupRunning;
         private KcpWorker kcpWorker;
+        private int pumpDepth;
+        private NetworkDurationSnapshot pumpDuration;
+        private NetworkDurationSnapshot outboundDuration;
+        private NetworkDurationSnapshot outboundOutsidePumpDuration;
+        private NetworkDurationSnapshot dispatchDuration;
+        private NetworkDurationSnapshot pushDecodingDuration;
+        private NetworkDurationSnapshot pushHandlerDuration;
+        private long outboundRejected;
+        private long pushDecodeFailures;
+        private long pushHandlerFailures;
+
+        internal bool IsPumping => pumpDepth != 0;
+
+        public NetworkRuntimeMetricsSnapshot GetMetrics()
+        {
+            RequireMainThread();
+            return new NetworkRuntimeMetricsSnapshot(pumpDuration, outboundDuration, outboundOutsidePumpDuration,
+                dispatchDuration, pushDecodingDuration, pushHandlerDuration, outboundRejected,
+                pushDecodeFailures, pushHandlerFailures, clients.Count, Memory.OwnedBytes, Memory.PeakReservedBytes);
+        }
+
+        private static double ElapsedMilliseconds(long started) =>
+            (Stopwatch.GetTimestamp() - started) * (1000.0 / Stopwatch.Frequency);
+
+        internal void RecordOutbound(long started, bool outsidePump, bool admitted)
+        {
+            double elapsed = ElapsedMilliseconds(started);
+            outboundDuration = outboundDuration.Add(elapsed);
+            if (outsidePump)
+            {
+                outboundOutsidePumpDuration = outboundOutsidePumpDuration.Add(elapsed);
+            }
+            if (!admitted)
+            {
+                outboundRejected++;
+            }
+        }
+
+        internal void RecordDispatch(long started)
+        {
+            dispatchDuration = dispatchDuration.Add(ElapsedMilliseconds(started));
+        }
+
+        internal void RecordPushDecoding(long started, bool success)
+        {
+            pushDecodingDuration = pushDecodingDuration.Add(ElapsedMilliseconds(started));
+            if (!success)
+            {
+                pushDecodeFailures++;
+            }
+        }
+
+        internal void RecordPushHandler(long started, bool success)
+        {
+            pushHandlerDuration = pushHandlerDuration.Add(ElapsedMilliseconds(started));
+            if (!success)
+            {
+                pushHandlerFailures++;
+            }
+        }
+
+        private long BeginPump()
+        {
+            pumpDepth++;
+            return Stopwatch.GetTimestamp();
+        }
+
+        private void EndPump(long started)
+        {
+            // Fault cleanup may start synchronously inside an already running Pump.
+            if (--pumpDepth == 0)
+            {
+                pumpDuration = pumpDuration.Add(ElapsedMilliseconds(started));
+            }
+        }
+
         internal KcpWorker GetKcpWorker()
         {
             RequireMainThread();
@@ -66,6 +142,7 @@ namespace GameFrame.Network
                 return;
             }
 
+            long started = BeginPump();
             try
             {
                 Exception workerFailure = kcpWorker?.Failure;
@@ -80,6 +157,10 @@ namespace GameFrame.Network
             catch (Exception error)
             {
                 FailHost(error);
+            }
+            finally
+            {
+                EndPump(started);
             }
         }
 
@@ -164,22 +245,29 @@ namespace GameFrame.Network
                 do
                 {
                     complete = true;
-                    long started = Stopwatch.GetTimestamp();
+                    long started = BeginPump();
                     int count = 0;
-                    foreach (NetworkClient client in clients.ToArray())
+                    try
                     {
-                        for (int i = 0; i < 16 && count < options.MaxMessagesPerPump &&
-                            Stopwatch.GetTimestamp() - started < options.PumpBudget.TotalSeconds * Stopwatch.Frequency; i++)
+                        foreach (NetworkClient client in clients.ToArray())
                         {
-                            if (!client.PumpOne())
+                            for (int i = 0; i < 16 && count < options.MaxMessagesPerPump &&
+                                Stopwatch.GetTimestamp() - started < options.PumpBudget.TotalSeconds * Stopwatch.Frequency; i++)
                             {
-                                break;
+                                if (!client.PumpOne())
+                                {
+                                    break;
+                                }
+
+                                count++;
                             }
 
-                            count++;
+                            complete &= client.HostCleanupComplete;
                         }
-
-                        complete &= client.HostCleanupComplete;
+                    }
+                    finally
+                    {
+                        EndPump(started);
                     }
 
                     if (!complete)

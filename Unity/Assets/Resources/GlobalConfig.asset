@@ -21,3 +21,5 @@ MonoBehaviour:
   - Game.Hotfix
   AotMetadataAssemblies:
   - mscorlib
+  - MemoryPack.Core
+  - UniTask

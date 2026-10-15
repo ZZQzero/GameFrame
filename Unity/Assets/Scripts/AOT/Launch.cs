@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using GameFrame;
 using GameFrame.Audio;
+using GameFrame.Diagnostics;
 using GameFrame.Input;
 using GameFrame.Localization;
 using GameFrame.Network;
@@ -14,16 +15,21 @@ namespace Game.AOT
 {
     /// <summary>首场景入口：初始化框架、准备资源与 Hotfix DLL，再创建热更业务入口。</summary>
     [DisallowMultipleComponent]
+    [DefaultExecutionOrder(-10000)]
     public sealed class Launch : MonoBehaviour
     {
         [SerializeField] GlobalConfig globalConfig;
         [SerializeField] InputRuntimeConfig inputConfig;
         [SerializeField] AudioRuntimeConfig audioConfig;
+        [SerializeField] RuntimeConsoleMode logMode = RuntimeConsoleMode.Always;
         bool ownsStartupState;
+        bool ownsLogs;
 
         void Awake()
         {
             DontDestroyOnLoad(gameObject);
+            RuntimeLogCapture.Initialize(logMode);
+            ownsLogs = true;
         }
 
         void Start()
@@ -76,6 +82,11 @@ namespace Game.AOT
 
         void Cleanup()
         {
+            if (ownsLogs)
+            {
+                ownsLogs = false;
+                RuntimeLogCapture.Shutdown();
+            }
             if (!ownsStartupState)
             {
                 return;

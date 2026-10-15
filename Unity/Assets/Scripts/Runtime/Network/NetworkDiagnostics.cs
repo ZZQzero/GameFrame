@@ -130,6 +130,43 @@ namespace GameFrame.Network
                 Math.Max(MaximumMilliseconds, milliseconds));
     }
 
+    /// <summary>宿主整个生命周期的主线程汇总；各分项有包含关系，不能直接相加。</summary>
+    public readonly struct NetworkRuntimeMetricsSnapshot
+    {
+        public NetworkDurationSnapshot Pump { get; }
+        public NetworkDurationSnapshot Outbound { get; }
+        public NetworkDurationSnapshot OutboundOutsidePump { get; }
+        public NetworkDurationSnapshot Dispatch { get; }
+        public NetworkDurationSnapshot PushDecoding { get; }
+        public NetworkDurationSnapshot PushHandlers { get; }
+        public long OutboundRejected { get; }
+        public long PushDecodeFailures { get; }
+        public long PushHandlerFailures { get; }
+        public int ClientCount { get; }
+        public long OwnedBytes { get; }
+        public long PeakReservedBytes { get; }
+
+        internal NetworkRuntimeMetricsSnapshot(NetworkDurationSnapshot pump, NetworkDurationSnapshot outbound,
+            NetworkDurationSnapshot outboundOutsidePump, NetworkDurationSnapshot dispatch,
+            NetworkDurationSnapshot pushDecoding, NetworkDurationSnapshot pushHandlers,
+            long outboundRejected, long pushDecodeFailures, long pushHandlerFailures,
+            int clientCount, long ownedBytes, long peakReservedBytes)
+        {
+            Pump = pump;
+            Outbound = outbound;
+            OutboundOutsidePump = outboundOutsidePump;
+            Dispatch = dispatch;
+            PushDecoding = pushDecoding;
+            PushHandlers = pushHandlers;
+            OutboundRejected = outboundRejected;
+            PushDecodeFailures = pushDecodeFailures;
+            PushHandlerFailures = pushHandlerFailures;
+            ClientCount = clientCount;
+            OwnedBytes = ownedBytes;
+            PeakReservedBytes = peakReservedBytes;
+        }
+    }
+
     /// <summary>仅统计成功解码的 RPC；任务 continuation 的执行成本不计入。</summary>
     public readonly struct RpcMetricsSnapshot
     {

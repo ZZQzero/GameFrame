@@ -8,6 +8,8 @@ namespace Game.Hotfix
         public static void RegisterAll()
         {
             GameUI.Register<LoginPanel>("LoginPanel", UIGroup.Scene, cache: true);
+            GameUI.Register<RuntimeLogPanel>("RuntimeDebugConsole", UIGroup.Persistent, cache: true);
+            GameUI.Register<RuntimeLogEntryPanel>("RuntimeLogEntryPanel", UIGroup.Persistent, cache: true);
             GameUI.Register<MainPanel>("MainPanel", UIGroup.Scene, cache: true);
             GameUI.Register<SettingsPanel>("SettingsPanel", UIGroup.Scene, cache: true);
             GameUI.Register<WoodenFishMainPanel>("WoodenFishMain", UIGroup.Scene, cache: true);

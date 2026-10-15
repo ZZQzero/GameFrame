@@ -531,6 +531,57 @@ namespace GameFrame.Tests
             await CheckControlAsync();
         });
 
+        [UnityTest]
+        public IEnumerator RuntimeMetricsIncludeRejectedSendsAndPushFailuresWithoutDoubleCounting() => UniTask.ToCoroutine(async () =>
+        {
+            NetworkClient client = CreateClient(observed: true);
+            await ConnectAsync(client, 0);
+            long rejected = runtime.GetMetrics().OutboundRejected;
+            Exception invalid = await OutcomeAsync(Echo(client, new string('x', 129)));
+            Assert.IsNotNull(invalid);
+            Assert.AreEqual(rejected + 1, runtime.GetMetrics().OutboundRejected);
+            Assert.AreEqual(NetworkClientState.Connected, client.State);
+
+            Task<EchoResponse> nested = null;
+            bool insidePump = false;
+            using (client.Subscribe(GameNetRoutes.GomokuRoomSnapshot, _ =>
+            {
+                NetworkRuntimeMetricsSnapshot before = runtime.GetMetrics();
+                nested = Echo(client, "from-push");
+                NetworkRuntimeMetricsSnapshot after = runtime.GetMetrics();
+                insidePump = runtime.IsPumping;
+                Assert.AreEqual(before.Outbound.Count + 1, after.Outbound.Count);
+                Assert.AreEqual(before.OutboundOutsidePump.Count, after.OutboundOutsidePump.Count);
+                long started = Stopwatch.GetTimestamp();
+                while ((Stopwatch.GetTimestamp() - started) * 1000.0 / Stopwatch.Frequency < 2)
+                {
+                }
+            }))
+            {
+                await CommandAsync("push");
+                await WaitAsync(() => nested != null);
+                Assert.AreEqual("from-push", (await nested).Text);
+            }
+            await UniTask.NextFrame();
+            NetworkRuntimeMetricsSnapshot metrics = runtime.GetMetrics();
+            Assert.IsTrue(insidePump);
+            Assert.AreEqual(1, metrics.PushDecoding.Count);
+            Assert.AreEqual(1, metrics.PushHandlers.Count);
+            Assert.GreaterOrEqual(metrics.PushHandlers.MaximumMilliseconds, 2);
+            Assert.GreaterOrEqual(metrics.Pump.MaximumMilliseconds, metrics.PushHandlers.MaximumMilliseconds);
+            Assert.Greater(metrics.Dispatch.Count, 0);
+
+            subscriptions.Add(client.Subscribe(GameNetRoutes.GomokuRoomSnapshot, _ => throw new InvalidOperationException("Injected Push failure.")));
+            await CommandAsync("push");
+            await WaitAsync(() => client.State == NetworkClientState.Faulted);
+            Assert.AreEqual(1, runtime.GetMetrics().PushHandlerFailures);
+            Assert.AreEqual(2, runtime.GetMetrics().PushHandlers.Count);
+            Assert.AreEqual(0, runtime.GetMetrics().PushDecodeFailures);
+            await client.CloseAsync();
+            AssertReleased(client);
+            await CheckControlAsync();
+        });
+
         [UnityTearDown]
         public IEnumerator TearDown()
         {

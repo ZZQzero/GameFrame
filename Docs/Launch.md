@@ -71,6 +71,21 @@ Launch 引用 `Assets/Resources/GlobalConfig.asset`，该 ScriptableObject 随�
 - `UnloadUnusedAssetsAsync` 回收未引用的内存资源，不清理磁盘缓存。
 - 下载进度、总数量及字节数由服务提供，下载 UI 由 Launch/场景负责。
 
+## 包内运行时日志
+
+日志采集与界面分离。Launch.Awake 初始化 `GameFrame.Diagnostics.RuntimeLogCapture`，早于资源准备与 Hotfix 加载；Launch 清理时退订并释放其缓存引用。Launch 场景不挂日志界面 prefab。采集开关为 Launch 的 Log Mode，默认 Always（Release 也采集），可选 EditorAndDevelopment / Disabled。
+
+- `RuntimeLogCapture` 仅负责 Unity 日志订阅与缓存生命周期；`RuntimeLogBuffer` 是线程安全的有界缓存，不依赖界面。首次打开前、关闭进缓存后、销毁面板后均持续采集，打开界面不会新建或清空缓存。停止采集后，已在执行的后台回调仍可安全写完原缓存。
+- 缓存默认最多 1000 条、消息与堆栈共 2097152 个字符，单条 65536 个字符；超限移除旧条目，单条过长时标明截断。堆栈内容取决于 Unity 原有设置。
+- GameEntry 在业务就绪后通过 `GameUI.Tips<RuntimeLogEntryPanel>()` 显示轻量 LOG 入口；点击后通过 `GameUI.Guide<RuntimeLogPanel, RuntimeLogBuffer>(RuntimeLogCapture.Buffer)` 加载日志面板，参数传入既有缓存。两者注册为 Persistent 组，切场关闭 Scene 组不影响它们；Guide 不暂停业务窗口。
+- prefab 为 `Assets/Prefab/Debug/RuntimeLogEntryPanel.prefab` 与 `RuntimeDebugConsole.prefab`，经 YooAsset 的 Debug 组按文件名寻址并带 boot 标签。面板及入口使用既有 UI Canvas、相机、EventSystem；按钮和视图引用使用 UIFrame 生成绑定，位于 `Hotfix/Diagnostics`。面板关闭统一走 CloseSelf，不自行销毁或管理全局采集。
+- `RuntimeDebugConsole` 仅展示传入的缓存；`RuntimeLogList` 复用既有 LoopVerticalScrollRect 与本地行模板。上半区显示日志，下半区显示选中条目的时间、级别、完整消息和可用堆栈；点击行同时复制该条。Copy all logs 复制全部缓存，不受搜索和级别筛选影响。Clear 是用户显式清空缓存的操作；关闭面板不清空。
+- Follow 追踪最新日志，拖动或滚动列表会取消 Follow。刷新使用 unscaledTime；timeScale=0 仍可查看。面板打开期间的已选记录即使被缓存淘汰也保留到下次选择、清空或关闭。
+
+采集无需资源系统就绪，但通过 GameUI 打开界面需要资源包、清单和面板资源可用；资源初始化失败时可能无法打开查看。此功能不能替代原生崩溃、主线程卡死或 UI 输入故障诊断。
+
+2026-10-15 拆分后验证：Editor 编译无错误；EditMode 日志缓存 4/4、PlayMode 日志面板与循环列表/UI 根节点 17/17 通过。测试通过真实 GameUI/YooAsset 模拟加载覆盖首次打开前后台线程采集、缓存关闭后继续采集、销毁后重开保留历史、采集关闭与重启，以及筛选、复制、清空和行复用。实际播放 Launch，GameEntry 就绪且只显示入口，首次点击前日志面板未创建；入口与日志行的 UI 射线点击、完整详情与剪切板、关闭后继续采集均通过，运行期间无错误或布局警告，只有一份 UI Canvas 和 EventSystem。StandaloneOSX 非 Development Player 脚本编译通过，并重新编译拷贝热更 DLL。本次拆分未重新构建原生 IL2CPP 安装包或实跑 Android/iOS，不能沿用拆分前独立 Overlay prefab 的原生包证据。
+
 ## 编辑器
 
 默认选择 `EditorSimulateMode`，使用 `DefaultPackage` 采集设置模拟资源包，
@@ -149,6 +164,21 @@ Launch 在清单加载成功后调用 GameUI.SetPackage；UIFrameRoot 只创建 
 AOT 列表为空时不拷贝 AOT DLL，并在完成日志中说明。
 覆盖已有 `.bytes` 时保留 `.meta` 和 GUID，不清空目录；移除程序集后需手动删除对应的旧资源。
 切换平台后应重新生成、拷贝 DLL，再构建资源包；输出目录不按平台分开。
+
+### AOT 元数据的选择与实跑
+
+`AOTGenericReferences.PatchedAOTAssemblyList` 是泛型分析得到的关联程序集清单，不能直接当作每个程序集都必须补充元数据的证明。
+已有具体 AOT 实现或可复用的泛型共享代码可能已能执行；缺少相应实现、需要 HybridCLR 解释泛型方法时，才需要对应程序集的补充元数据。
+当前 GlobalConfig 保留原有 `mscorlib`，并依据实际 Release Player 故障补入 `MemoryPack.Core` 与 `UniTask`：
+
+- 只有 mscorlib 时，正式 WSS 登录在 `MemoryPackSerializer.Deserialize<LoginResponse>(ReadOnlySpan<byte>, options)` 失败，报告 MemoryPack.Core 的 AOT 泛型方法未实例化。
+- 补入 MemoryPack.Core 后，房间加入、准备与开局可以执行；落子音效调用 `UniTaskExtensions.Forget<AudioPlayResult>` 时仍失败，报告 UniTask 的 AOT 泛型方法未实例化。失败发生在刷新回调中，可使推送派发断开或当前操作进入待查询状态。
+- 补入 UniTask 后，最终未带临时诊断代码的 Release 包完成 Launch、YooAsset、DLL/元数据加载、WSS 登录、Main、加入房间、准备、9 手联机对局、五连结束和主动离房，未出现托管异常。配置与具体限制见 [网络验证证据](ClientNetworkUsage.md#8-验证与现有证据)。
+
+上述三项是当前已验证配置，不代表已证明所有业务的最小必需集合。其他生成出的程序集暂不批量加入；新增泛型调用、业务或发布目标后按实际路径重新验证。
+2026-10-15 进一步使用同一三个元数据文件完成包后新增协议验证：先构建不含新类型的 ARM64 Release/Minimal 安装包，再仅发布新 Hotfix DLL 与 prefab 的 YooAsset 更新。旧包经正式 Host 启动下载更新，全新嵌套 DTO 的双向序列化、三轮 RPC/Push 和网络关闭通过，整包文件及元数据哈希均未改变。此结果验证本次新类型组合，无需再批量加入其他生成的元数据；复验顺序与限制见 [包后新增协议验收](ClientNetworkUsage.md#network-hotupdate-dto)。
+三个 `.dll.bytes` 均由拷贝工具从本次 StandaloneOSX Release 最终构建的裁剪程序集生成，不能用 Development 测试入口一次加载全部关联程序集的结果代替正式配置验收。
+本次资源包与 Player 在系统临时目录构建并清理，仓库已有 StreamingAssets 未更新；发布离线包仍需按上述步骤重新构建、复制资源并验证。
 
 ### 生成产物与 Git
 

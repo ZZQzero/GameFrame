@@ -253,6 +253,19 @@ await client.DisposeAsync();
 
 OwnedBytes 不是 RSS、所有 CLR 对象或 TLS/内核内存；每帧/每 pending512 字节是保守 reservation。当前无空闲缓冲池，MaxIdlePoolBytes 实际 0，仍有逐包分配。KCP 请求 socket 收/发各 256KiB 并报告系统实际值，ClientWebSocket 不开放底层 buffer 设置，不能声称其设置成功。
 
+`GameRuntime.Network.GetMetrics()` 返回宿主生命周期的固定空间累计快照，主线程读取，Shutdown 后保留。它与上述客户端成功 RPC 指标的范围不同：
+
+| 字段 | 测量范围 |
+| --- | --- |
+| Pump | 每次最外层 Pump 的同步工作，包括派发、成功/取消/超时/失败交付、同步 continuation、帧释放清零，以及宿主故障清理每轮同步工作；不含异步等待 |
+| Outbound / OutboundOutsidePump | RequestAsync 的同步准备、SendAsync、TrySendUnreliable 的状态检查、校验、编码和准入，包含拒绝路径；后者只计调用开始时不在 Pump 中的发送，不含等待响应 |
+| Dispatch | 实际做工作的 PumpOne，包含控制/关闭通知和任务交付；空探测不累计，处理过程抛错仍计时 |
+| PushDecoding / PushHandlers | 已订阅 Push 的 DecodeValidated 和同步 handler 分别计时；正文形状校验位于派发流程，包含在 Dispatch/Pump 中；未订阅消息不会产生 DTO 解码样本 |
+| OutboundRejected / PushDecodeFailures / PushHandlerFailures | 同步准入抛错或 TrySend=false，以及对应 Push 阶段抛错次数；已接受请求后来超时不属于准入拒绝 |
+| ClientCount / OwnedBytes / PeakReservedBytes | 宿主当前客户端数、可控自有额度和生命周期预约峰值；不是进程内存 |
+
+每项耗时沿用 NetworkDurationSnapshot 的毫秒口径。窗口主线程成本取 `ΔPump.TotalMilliseconds + ΔOutboundOutsidePump.TotalMilliseconds`；其他分项与它有包含关系，不能相加。同步回调里再次发包已归入 Pump；在回调内部读取快照时，尚未返回的 Pump/handler 还未提交。Connect/Close 的 Pump 外同步工作、网络 IO 线程、异步延后的业务工作和观察快照自身开销另计，不能称此值为整个应用的网络 CPU 时间。Runtime 不保留逐帧历史，不采集 GC 或计算分位数。
+
 ## 7. 协议与依赖维护
 
 修改协议直接编辑仓库根 Protocol/**/*.proto，按 [统一生成步骤](DotNetUsage.md#协议生成与验证) 重新生成两个正式 C#文件；生成目录不放手写代码。客户端.NET 不能只更新一端。manifest/hash/vector 在 Protocol/Generated 仅用于开发验证，不进入 Unity 资源，运行时只用 catalog 内嵌指纹。
@@ -273,7 +286,7 @@ Unity 依赖固定 MemoryPack1.21.4，NuGetForUnity4.5.0 与 MemoryPack.Unity Gi
 
 ### Unity 公开客户端故障验证
 
-PlayMode入口为 `GameFrame.Tests.NetworkKcpFaultTests`，新增9项真实UDP/DTLS用例。测试调用公开 `NetworkClient.ConnectAsync/RequestAsync/CloseAsync`、状态订阅及指标，由实际 `NetworkRuntimeDriver.Update` 派发；不直接创建ConnectionContext或手动调用Pump。每项独立启动一个.NET测试伴随进程，复用已有KcpListenerHost、正式Echo路由和有界UDP转发器，另保留一条每500ms串行Echo的正常连接。无数据库、正式服务器配置、场景或玩法依赖。
+PlayMode入口为 `GameFrame.Tests.NetworkKcpFaultTests`，包含10项真实UDP/DTLS用例。测试调用公开 `NetworkClient.ConnectAsync/RequestAsync/CloseAsync`、状态订阅及指标，由实际 `NetworkRuntimeDriver.Update` 派发；不直接创建ConnectionContext或手动调用Pump。每项独立启动一个.NET测试伴随进程，复用已有KcpListenerHost、正式Echo路由和有界UDP转发器，另保留一条每500ms串行Echo的正常连接。无数据库、正式服务器配置、场景或玩法依赖。
 
 准备时先从仓库根目录编译伴随测试工程：
 
@@ -299,6 +312,7 @@ PlayMode入口为 `GameFrame.Tests.NetworkKcpFaultTests`，新增9项真实UDP/D
 | 持续断网 | 原30秒RPC先因默认心跳故障结束，状态首因与请求异常为同一实例，正常连接保持可用 |
 | 同一个客户端Close后Connect | 暂存旧服务端UDP，旧RPC超时、公开Close完成、显式撤销旧grant并等待旧服务端结束后，用新grant/端点建立generation2；放行旧UDP后新Echo成功，后续事件均属新代且统计重置 |
 | 主线程暂停6秒 | 故意阻塞测试主线程，实际Update/Pump暂停；后台IO仍有双向控制流量，3条响应在2秒期限内到达并保留，恢复后按序在主线程交付；使用测试专用PendingCount=3核验未交付响应仍占准入额度，不改默认容量 |
+| 宿主耗时诊断 | 同步拒绝发送计数，Push 解码/handler 分项，回调内再次发包不重复归入 Pump 外，handler 抛错和故障关闭后统计保留 |
 | 响应保留后取消 | 主线程暂停期间确认响应已到达、deadline已移除，由后台取消；恢复前任务不完成、仍占pending额度；恢复后保留调用者token，释放帧和额度，后续Echo成功 |
 
 主线程停顿是测试注入，不建议业务阻塞主线程或禁用网络Driver来模拟暂停；禁用Driver属于宿主故障，既有NetworkLifecycleTests单独覆盖。内部建连/Hello期限当前可能返回内部token的OperationCanceledException或NetworkException；用例按阶段、未取消的调用者token及默认耗时区分，不能把内部期限错误显示为用户主动取消。
@@ -324,7 +338,7 @@ python3 -B Tools/network_player.py --player /absolute/output/NetworkValidation.a
 
 支持 `--dotnet /absolute/path/to/dotnet`；默认查找 PATH。需要留存证据时显式添加 `--json /absolute/path/result.json`，默认只向终端输出且删除临时运行资料。工具先 locked restore / Release 编译伴随测试工程，核验 native 二进制、双清单及维护源码指纹，再检查 app 内 KCP 插件 hash 一致。打包后对本地验证 app 重新执行 ad-hoc 签名，运行脚本先核验完整签名，再按宿主架构显式选择 arm64 或 x86_64 启动，避免将 universal 构建误当作两个架构都实跑。实际 Player 清除外部 DYLD 和测试 native 路径覆盖，使用包内插件；不重建或替换 native。
 
-验证场景只包含 AOT 验证组件、相机与灯光。组件加载本次编译的 `Game.Hotfix.dll`，并加载 HybridCLR 生成清单要求的、本次最终构建裁剪后的 AOT 补充元数据，然后由 Hotfix 验证代码调用正式 catalog / MemoryPack codec / NetworkClient；不复制 DTO、不修改 Launch、GameEntry、登录、玩法或正常资源包。验证源码位于 `Tests/Player`，asmref 分别归入 Game.AOT / Game.Hotfix，受 `UNITY_EDITOR || DEVELOPMENT_BUILD` 限制，正式非 Development Player 不含这些入口。反射只用于这个独立验证场景的热更入口。
+验证场景只包含 AOT 验证组件、相机与灯光。组件加载本次编译的 `Game.Hotfix.dll`，并加载 HybridCLR 生成清单要求的、本次最终构建裁剪后的 AOT 补充元数据，然后由 Hotfix 验证代码调用正式 catalog / MemoryPack codec / NetworkClient；不复制 DTO、不修改 Launch、GameEntry、登录、玩法或正常资源包。验证源码位于 `Tests/Player`，asmref 分别归入 Game.AOT / Game.Hotfix，正确性入口受 `UNITY_EDITOR || DEVELOPMENT_BUILD` 限制；性能入口另受专用 `GAMEFRAME_NETWORK_PERFORMANCE` 限制，普通正式 Player 不含这些入口。反射只用于这个独立验证场景的热更入口。
 
 七组检查覆盖 DTLS/GFNP Hello 与 native 分配、中文 UTF-8 Echo、精确调用者 token 取消和迟到响应、RPC 超时和后续 Echo、已有服务端在途请求时 Close 与队列/native 归零、同一客户端新 grant / 新代重连和第二次关闭、Dispose 与运行时/worker Shutdown。状态与任务回调必须在 Unity 主线程，关闭前后的服务端会话均需 reason=1 且无 Error，最终伴随进程退出0且资源/转发计账闭合。
 
@@ -351,10 +365,110 @@ Unity 实际 UDP 测试使用 GF_KCP_LOOPBACK_CREDENTIALS 临时 JSON（服务�
 
 Unity TLS 在部分 Editor 平台不继承 `dotnet dev-certs` 的信任。登录联调测试可额外设置 `GF_LOGIN_TEST_CERTIFICATE` 为已核验开发证书的公开 DER 文件；测试仅在执行期间设置 Mono TLS 信任锚，保留证书链、域名和有效期校验，结束恢复原值，不修改正式客户端或系统证书存储。实际环境应为 Unity/目标平台准备可信服务证书。
 
+<a id="network-player-performance"></a>
+
+### macOS Release Player 性能基线
+
+先保存场景，选择 StandaloneOSX / IL2CPP，再执行 `Tools/GameFrame/Network/Build macOS Release Performance Player`，选择空目录。工具临时启用 `GAMEFRAME_NETWORK_PERFORMANCE`、关闭 Development、选宿主原生架构，执行 HybridCLR Generate/All 和完整 IL2CPP 构建；恢复场景、defines、架构和原设置。它与上面的 Development 正确性入口输出相同 app 名，运行工具检查构建标记，禁止混用。独立场景仅初始化 Network，不加载登录、UI、数据库或正式资源包；补充元数据使用最终构建清单，不据此扩大 GlobalConfig 的正式三个元数据配置。
+
+```sh
+python3 -B Tools/network_player.py --mode performance \
+  --player /absolute/output/NetworkValidation.app \
+  --transport kcp --scenario echo --connections 4 --rate 240 \
+  --duration 15 --warmup 3 --text-length 128 --unicode --push --push-moves 225
+```
+
+WSS 使用 `--transport wss --certificate /absolute/path/localhost.pfx`，密码从环境变量 `GF_PERFORMANCE_CERTIFICATE_PASSWORD` 传给伴随服务，不进入 Player。证书必须已受该 Player 信任且匹配 localhost；工具不修改信任或跳过校验。KCP 使用现有共享 native 和每连接独立随机 grant。两种传输都由独立 .NET Explicit `NetworkPlayerPerformanceHostTests.ServePerformance` 提供现有 Echo 与可选 GomokuSnapshot Push，不创建正式房间、不新增协议或生产 handler。
+
+| 参数 | 范围与用途 |
+| --- | --- |
+| scenario | idle、echo、timeout、cancel、backpressure；后三者需要实际命中对应结果，否则失败 |
+| connections / rate | 1～4连接；rate 是所有连接合计提供速率，0～10000次/秒，非 idle 必须大于0；idle 强制0 |
+| duration / warmup | 测量1～120秒、预热1～30秒；rate×duration≤100000；超过工具在途或每帧128次发送额度计入 HarnessLimited，不掩盖为成功 |
+| concurrency / pending-limit | 各1～512；前者是工具总在途上限，后者是每连接 pending 额度，仅作用于验证客户端 |
+| text-length / unicode | 0～128个字符；默认32个ASCII，Unicode改为同长度中文，区分字符数和线上字节数 |
+| push / push-moves | 每次 Echo 可发送一个现有可靠快照，Moves 为0～225；用于解码/数组分配成本，不表示玩法承载能力 |
+| json / dotnet | 可选证据输出绝对路径和SDK可执行路径；默认不保留运行文件，SDK沿用Tools的10.0.401 |
+
+Player 以 `-batchmode -nographics` 运行，锁定目标60fps/vSync=0，预热、排空后测量；不包含实际画面渲染成本。timeout/cancel 使用100ms异步服务处理、客户端30ms期限/20ms取消，不向服务端发送取消协议；延迟响应正常计入迟到响应。backpressure 通过有限 pending 与提供速率制造准入拒绝；每种场景结束都对所有连接执行窗口外 Echo，验证仍可使用，再 Close/Dispose/Shutdown；两端 owned/pending/deadline/native 可追踪资源归零且正常会话 reason1/Error=null 才成功。
+
+复验空闲使用 `--scenario idle --connections 4`；期限/取消使用 `--scenario timeout` 或 `cancel`、`--rate 2`。本轮客户端准入背压采用单连接 `--scenario backpressure --rate 2000 --pending-limit 1`，避免已接受流量超过默认每连接128包/秒的服务端输入限额。工具不放宽该限额；更大pending或速率可能先触发远端策略，出现非预期超时/断线仍判失败，不能吞掉以完成测试。失败报告附带伴随服务的安全测试诊断，不输出grant或正文。
+
+报告口径：
+
+- FrameNetwork 是相邻 LastPostLateUpdate 观察点间的 `ΔPump + ΔOutboundOutsidePump`，含计时探针和同步业务回调；首个样本可能是部分帧。FrameInterval 是观察点墙钟间隔，不能据此归因于 GC。两者及成功 RPC 延迟使用固定上限数组计算最近秩 P95/P99/最大值，排序在测量窗外。
+- Offered/Successful/Backpressure/Timeouts/Cancellations/RpcSuccess 以测量窗发起请求为队列，包含它们排空期间的完成；SuccessfulPerSecond 是这些成功数除以窗口秒数，不能冒充严格窗口内完成吞吐。Pushes 仅计测量窗实际交付。HarnessLimited 非零时只能比较实际完成的负载，不能称完整达到提供速率。
+- Pump/Outbound/Dispatch/Push 阶段 Count/Total/Mean 为测量窗差值；LifetimeMaximumMilliseconds 和 PeakReservedBytes 为截至测量窗结束的生命周期峰值，包含预热及预热后的排空；LifetimeLateResponses 截至测量请求排空完成，包含预热和两次排空，不能当作窗口独立峰值或计数。PeakPending/SendQueue/ReceiveQueue 为各连接在帧末采样的最大值，非原子精确全局高水位。
+- MainThreadAllocatedBytes 是整个 Unity 主线程含工具采样的分配量，包含 DTO/字符串/数组，不代表网络独占分配；先用已知分配探测接口，Available=false 时不能把0解释为零分配。GcCollections 分别报告0/1/2代原值差，不加总。ManagedHeapBytes 是 GC.GetTotalMemory(false)，不是RSS。
+- ProcessSamples 每秒由外部 ps 记录 Player RSS 和ps CPU 平滑统计，MeasurementWindow 标记所在阶段；不是网络线程独占CPU或精确GC停顿。OwnedBytes/native实际与预约分别报告，服务端 native live bytes 仍不可用。重复同参数时比较波动，单次峰值不作跨机器门槛。
+
+此入口建立本机 Release IL2CPP 的有限窗口基线。最低移动设备每帧P95≤2ms、真实业务、其他架构/平台、弱网/后台、完整容量和24h soak 仍独立验收；本机低耗时不能证明这些目标已达成。当前没有据此新增池化、调度器或修改生产预算。
+
+#### 2026-10-15 实跑基线
+
+环境：Apple M5 / macOS ARM64，Unity6000.3.19f1 / HybridCLR，SDK10.0.401；独立 Release IL2CPP、Minimal stripping、目标60fps、batchmode/nographics。完整原生构建0警告/0错误，11个最终构建清单元数据，仅用于独立验证包；正式GlobalConfig保持原有三个元数据。每轮预热3秒、测量15秒，之后排空、逐连接Echo并关闭；WSS使用已有受信localhost开发证书，未改信任。14轮正向运行全部退出0，HarnessLimited=0，两端所有发布会话正常关闭且可追踪资源归零。
+
+idle-1/4表示连接数；echo-small为单连接总20次/秒、ASCII32；echo-push为4连接合计240次/秒、中文128字符、每Echo一个225手快照，两种传输各重复2轮。backpressure为单连接总2000次/秒、pending=1；timeout/cancel为单连接2次/秒。下列耗时均为毫秒，成功数按测量窗发起请求队列统计，不包含预热和窗口外探测；GC为CollectionCount(0)差值，不能与其他代相加，也不是GC停顿时间。
+
+| 运行 | 请求结果 | 帧网络P95 | P99 | 最大值 | 成功RPC P95 | GC0差值 |
+| --- | --- | --- | --- | --- | --- | --- |
+| kcp-idle-1 | 0/0成功 | 0.0023 | 0.0040 | 0.0138 | 无成功样本 | 2 |
+| kcp-idle-4 | 0/0成功 | 0.0059 | 0.0086 | 0.0192 | 无成功样本 | 8 |
+| kcp-echo-small | 299/299成功 | 0.0725 | 0.1187 | 0.3479 | 66.640 | 7 |
+| kcp-echo-push-1 | 3596/3596成功 | 1.6675 | 2.2357 | 3.1989 | 66.916 | 179 |
+| kcp-echo-push-2 | 3599/3599成功 | 1.6397 | 2.1367 | 5.6987 | 67.165 | 178 |
+| kcp-backpressure | 289/29999成功，29710背压 | 4.7504 | 5.2149 | 5.8062 | 66.628 | 293 |
+| kcp-timeout | 0/29成功，29超时 | 0.0687 | 0.4338 | 0.5284 | 无成功样本 | 2 |
+| kcp-cancel | 0/29成功，29取消 | 0.0679 | 0.4071 | 0.4541 | 无成功样本 | 2 |
+| wss-idle-4 | 0/0成功 | 0.0033 | 0.0039 | 0.0122 | 无成功样本 | 7 |
+| wss-echo-push-1 | 3599/3599成功 | 1.3493 | 1.7372 | 2.1422 | 17.221 | 1291 |
+| wss-echo-push-2 | 3595/3595成功 | 1.4928 | 2.7321 | 2.9631 | 17.479 | 1290 |
+| wss-backpressure | 895/29998成功，29103背压 | 2.9655 | 3.5934 | 4.2599 | 17.231 | 418 |
+| wss-timeout | 0/29成功，29超时 | 0.0538 | 0.4537 | 0.5167 | 无成功样本 | 7 |
+| wss-cancel | 0/29成功，29取消 | 0.0567 | 0.4295 | 0.4963 | 无成功样本 | 7 |
+
+主线程分配接口在14轮Release Player中均未通过已知分配探测，Available=false；因此本轮没有可用的主线程bytes/s证据，不把0视为零分配。相同重载参数的KCP两轮P95约1.64～1.67ms、WSS约1.35～1.49ms，P99和峰值存在波动；刻意高频背压路径P95超过2ms。桌面短时结果不能满足最低移动设备门禁，也不能据此声明零GC或生产容量。先保留当前调度/帧所有权，后续重点取得有效分配/GC停顿归因，再比较逐包缓冲、DTO/数组及拒绝路径成本，不因GC计数高就直接引入池化。
+
+| 采样范围 | 框架OwnedBytes最小～最大 | 客户端native实际最小～最大 | Player RSS最小～最大MiB |
+| --- | --- | --- | --- |
+| kcp-idle-4 | 16793092～16793092 | 31760～31760 | 136.61～143.17 |
+| kcp-echo-push-1 | 16793092～16797700 | 31824～34601 | 147.44～152.55 |
+| kcp-echo-push-2 | 16793092～16797700 | 31760～34601 | 88.03～148.78 |
+| wss-idle-4 | 2176～2176 | 0～0 | 153.47～196.84 |
+| wss-echo-push-1 | 2176～2176 | 0～0 | 181.27～199.89 |
+| wss-echo-push-2 | 2176～2176 | 0～0 | 150.06～199.41 |
+
+OwnedBytes为预约，包含每条KCP连接4MiB native额度；native实际和RSS另列。WSS四条空闲接收头合计2176字节是正常在途预约。上述均为有限频率采样，不是精确高水位；RSS有明显启动/运行波动，本轮不宣称长时无泄漏或给出精确常驻内存结论。服务端native live bytes仍不可用。
+
+负向复验：单连接KCP、rate=2000、pending=8先触发默认每连接128包/秒的服务端输入策略，伴随服务明确记录NetworkProtocolException / `Authenticated input rate exceeded local policy.`，Player出现非预期RPC期限错误并返回1；短窗口复现同一原因。随后仅用已有pending=1参数隔离本地准入拒绝，未改生产限额、期限、协议或加入吞错/重试。负向失败不列为14轮成功样本，也不把失败时的兜底终止当作正常资源释放证据。
+
+相关验证：NetworkKcpFaultTests 10项加NetworkLifecycleTests 11项合并21/21 PlayMode通过、0失败/0跳过，包括Push内再次发包不重复计时、拒绝发送和Push异常收尾；.NET伴随工程locked restore与Release编译0警告/0错误，Python参数越界/样本容量/零速率负向4项返回2。普通StandaloneOSX Release Player脚本43程序集编译通过，Game.Hotfix DLL已重新编译并拷贝；通过Cecil检查普通Game.Hotfix/Game.AOT均不包含Validation入口，三个正式元数据文件哈希未变；网络变更收尾检查时Editor Console无Error/Warning。此前的引擎退出allocator诊断未由此任务归因或修复，不宣称引擎日志问题已解决。场景、编译宏、架构和测试设置恢复，临时证书副本/构建/进程与结果清理；正式YooAsset资源包未更新，发布新Runtime前仍需按正式平台重新生成并构建。
+
+网络验证完成后的工作区状态另记：同日19:51并行日志UI改动已在GameEntry/GameUIRegistration引用RuntimeLogPanel、RuntimeLogEntryPanel，但对应脚本尚未就绪，Editor出现CS0246。此变化不在本轮网络改动内，保留其源码且未混入网络修复；上述43程序集/Hotfix证据对应新增这些UI引用之前的源码状态，不能据此声称当前并行修改后的整个工作区编译通过。
+
+<a id="network-hotupdate-dto"></a>
+
+### 安装包发布后新增 DTO / 路由
+
+2026-10-15 已通过 macOS ARM64 Release / Minimal stripping 的实际包后热更验证。使用正式 Launch、HostPlayMode 和 ResourceLoadManager；更新在重新启动旧 Player 时加载，不是在运行中的进程里替换已经加载的程序集。
+
+复验必须保持先后顺序，避免把重新打包误认为热更新成功：
+
+1. 新 DTO 和验证组件尚不存在时，执行正式 HybridCLR 生成、Release IL2CPP 构建，拷贝最终裁剪元数据，构建基线资源并签名。先启动旧包，确认基线清单和 GameEntry 就绪，再冻结整包文件哈希及三个元数据文件。
+2. 原生构建完成后才加入临时 `.proto`，通过现有 NetworkProtocol 生成 DTO/catalog。临时 Hotfix 组件挂在更新后的 GameEntry prefab，等待正式入口就绪后停止业务流程，再借用已初始化的 NetworkRuntime 验证；Launch/GameEntry 源码不加入测试分支。
+3. 仅执行 `CompileAndCopyHotUpdateDlls` 和 YooAsset 资源构建，发布新版本文件、清单与资源到本机 HTTP 服务。此阶段不再执行 GenerateAll、AOT 桥接生成、BuildPlayer 或替换补充元数据，也不改旧 `.app` 的 StreamingAssets 或重新签名。
+4. 用同一个旧包重新启动，经 Host 模式下载更新；服务端编译同源新 catalog。验证双向正文、可靠 Push/RPC 顺序、主线程、Close/Dispose/Shutdown，并比对运行前后整包及元数据哈希。结束后恢复协议、prefab、DLL 资源、场景与设置，删除临时组件/协议、构建、缓存和服务。
+
+本轮临时协议包含全新 HotupdateNode、HotupdatePayload、HotupdateRequest、HotupdateResponse、HotupdatePush，以及 RPC1920 / Push1921；临时 catalog 为16条路由，正式协议恢复为14条。三轮请求覆盖中文/Unicode、嵌套 DTO/DTO 数组、uint 数组及最大值、二进制数组、空数组、可空引用有值/null。独立 .NET 服务逐字段校验请求后编码 Push 和响应；双方 catalog 指纹一致。
+
+HTTP 日志和 YooAsset 构建报告对应：更新仅下载 Game.Hotfix 的96138字节 bundle 和 GameEntry prefab 的2552字节 bundle，另请求新版 version/hash/manifest。旧 `.app` 的53个文件内容哈希全部不变；三个元数据保持原安装包构建的 mscorlib、MemoryPack.Core、UniTask，未增加其他程序集。Hotfix DLL SHA-256 从 `504f29115d91d20c0403ef140526a5120e42b02fbfe293e8303bc5f305a6bf2a` 变为 `2e0387048d1eeba44685f31be1e028c7e7f4f42ad929318d801a4d39ee0988ac`，新 catalog 为 `a88d233a431ce9d6404efad5625ab68e38c185829a49b51c0fca8e2cfa94128d`。这些指纹属于已移除的测试夹具，不是正式发布协议。
+
 以下按实际执行范围记录，各次验证独立，Editor 与 Player 脚本编译不能替代 IL2CPP 或真机验证：
 
 | 日期/实际范围 | 结果 | 不证明的部分 |
 | --- | --- | --- |
+| 2026-10-15 旧安装包新增 DTO/路由，macOS ARM64 Release IL2CPP / Unity6000.3.19f1 / HybridCLR / SDK10.0.401 | 基线原生构建0警告/0错误，Minimal stripping，基线 Host 启动通过；之后才生成五个新DTO和两条新路由，仅重新编译Hotfix/构建资源。正式Launch从本机HTTP获取hotupdate-new-dto，旧包签名与全部53个文件哈希保持不变，补充元数据仍为原构建的三个文件。真实WSS正常证书校验下，三轮RPC和三次Push全部通过，主线程顺序为push1/rpc1/push2/rpc2/push3/rpc3；Close后pending/deadline/接收与owned bytes归零，Dispose与Runtime Shutdown完成。Player和.NET服务均退出0；服务端Close reason1、Error=null、owned bytes=0、无Warning/Error；恢复源码后的Editor编译/Console检查通过 | 临时组件只负责此次自动验收，未加入正式业务或保留测试路由；账号持久化关闭，未重验登录/五子棋/KCP。仅本机HTTP资源服务与localhost WSS，不代表公网CDN/TLS资源发布、移动设备/其他平台或裁剪等级、进程内DLL替换、系统wire/native ABI更新、弱网/容量/soak。Player仍有退出IL2CPP allocator诊断，未归因或宣称已解决；仓库StreamingAssets未更新 |
+| 2026-10-15 正式 Launch 资源链，macOS ARM64 Release IL2CPP / Unity6000.3.19f1 / HybridCLR / SDK10.0.401 | 最终完整 Release 构建0警告/0错误，Minimal stripping，签名验证通过；实际 Launch 经 OfflinePlayMode 加载全新 YooAsset 包、三个同构建裁剪元数据及 Game.Hotfix，再由 prefab Awake 进入业务。真实 Player 通过系统输入完成 WSS 登录→Main→五子棋→加入.NET对端创建的房间→准备，双方交替9手，权威快照 version15、Finished/BlackVictory/FiveInRow、两名成员均在；Player主动离房后version16只剩对端，对端离房关闭房间。最终Player无托管异常并输出GameFrame Shutdown完成，伴随端退出0、owned bytes=0，最终整局服务端无新增Warning/Error。Editor编译/Console无错误警告，DLL逐字节匹配本次Release来源；临时诊断源码、prefab、字体、架构/设置恢复，测试进程/数据库/证书副本和构建清理 | 初轮仅mscorlib在LoginResponse反序列化失败；加入MemoryPack.Core后落子音效的Forget<AudioPlayResult>仍缺少UniTask泛型实现，最终只补这两个元数据资源。实跑使用一个Unity Player和一个.NET对端，账号持久化显式关闭以保护已有凭据，正常证书校验未改；UI操作结果由协议快照和日志核验，未做截图视觉验收。未验Host/CDN更新、账号持久化、两个Unity Player、新DTO包后热更、其他架构/裁剪等级/平台、移动真机或容量/soak；本轮未重验KCP。引擎日志仍有启动sandbox extension诊断与退出IL2CPP allocator诊断，未归因或宣称已解决。仓库StreamingAssets保留原产物，发布前须重新构建 |
 | 2026-10-15 独立 macOS ARM64 IL2CPP Player，Unity6000.3.19f1 / HybridCLR / SDK10.0.401 | 最终 ARM64 Development 完整 IL2CPP 构建成功，Minimal stripping，11个同平台裁剪 AOT 元数据 DLL，构建0警告/0错误；实际加载本次 Game.Hotfix.dll，七组检查全部通过：DTLS/Hello/native分配、UTF-8 Echo/主线程、精确token取消/迟到响应、RPC超时/迟到响应、在途Close/队列释放、同客户端新grant/generation1→2、Dispose/Shutdown。Player与.NET伴随进程退出0，CompanionReleased=true，服务端Close reason1且无Error，资源与转发计账通过。包内native SHA与已核验安装产物一致，签名验证通过。共享fixed缓冲区最终源码.NET KcpLoopbackTests 28/28、Unity断流恢复1项+生命周期11项共12/12，均零跳过；场景/架构/测试环境/设置恢复，临时产物清理 | 初轮旧ByValArray声明在实际Player的Marshal.OffsetOf校验失败；解析global-metadata.dat及生成C++确认字段封送大小0而C++数组布局正确。Pack=4尝试无效并撤回，最终改共享fixed byte声明，保留全部结构校验，无平台分支/校验拆分或跳过。未改native产物、协议或默认期限。仅实跑ARM64/Development/Minimal；不代表x86_64、Release/其他裁剪等级、正式Launch/YooAsset、新DTO包后热更、WSS、移动设备、其他平台、Player弱网/后台/IPv6或容量/soak；服务端native live bytes仍未直接测量 |
 | 2026-10-15 Unity公开客户端故障验证，Unity6000.3.19f1/macOS ARM64 | 最终源码Editor编译完成，无编译错误/警告；新增NetworkKcpFaultTests 9项与既有NetworkLifecycleTests 11项最终合并20/20通过、0失败、0跳过，约69.37秒；9个独立临时.NET伴随进程均确认退出0，两端资源与转发计账通过。先前整组20/20及3秒断流冒烟、补强双向控制流量后的暂停单项1/1不重复计为新用例；收尾误删命名空间造成一次编译失败及0用例的初始化超时，已恢复引用并以上述最终整组复验。伴随测试工程locked restore及Release编译0警告/0错误，新C#空白与git diff --check通过；Launch场景、EditorSettings及临时环境变量恢复，服务进程/目录/凭据清理 | 正式Runtime/协议/默认期限及插件未改。现有macOS Release ABI2插件SHA256=`0cffd5874206055c777a52e1b5ab5875074e7bc17ed108a8e3d26b038249befb`、build ID=`833aea2b337679b5a97e60691d3e7f9566710310b6739b34055b62436e1c876a`与双清单/维护源码指纹只读核验通过；服务端native live bytes仍不可直接测量。生命周期组两条Driver故意失效日志均由既有LogAssert.Expect接收；其余无非预期Console错误。未执行Player脚本编译、IL2CPP、真机/其他平台、系统后台挂起/换网/IPv6、容量或长时soak |
 | 2026-10-15 KCP关闭快照与取消入队，Unity6000.3.19f1/macOS | 最终源码Editor编译完成，无Console Error；NetworkLifecycleTests PlayMode11/11，独立临时local-kcp-dtls服务下NativeUdpHelloEchoAndRelease PlayMode1/1，均零跳过；新增Close后Waitsnd=0断言，native/托管预约释放；.NET的未ACK销毁和三种入口取消/非取消共7项red/green证据见服务端说明 | 保留已有native产物；临时随机grant、服务进程、测试环境变量、Launch场景和EditorSettings恢复/清理。此次未执行Player脚本编译、IL2CPP或真机；Unity用例是直连UDP/DTLS，弱网注入只在.NET测试工具执行，不能当作Unity弱网/其他平台验收 |
@@ -368,7 +482,7 @@ Unity TLS 在部分 Editor 平台不继承 `dotnet dev-certs` 的信任。登录
 | 2026-10-12 重启后 Unity Mono | 新 mbedTLS4.2/ABI2 实际 UDP Hello/Echo/关闭通过，自有缓冲与 native 预留归零 | 非 IL2CPP、移动真机或 Windows 执行 |
 | 2026-10-12 StandaloneOSX | Player 脚本编译 43 程序集通过 | 非最终 native 链接、裁剪或 Player 运行 |
 
-待验收：正式 Launch/Release IL2CPP 与其他架构/裁剪等级、新 DTO 包后热更、移动设备/模拟器、Windows/Linux 平台实跑、Player IPv6/代理/后台/换网/弱网、完整元数据与全部主线程/失败路径诊断、性能容量/24h soak。WebGL WSS 和世界业务延后，不以现有单元/Editor 证据声称全部完成。
+待验收：其他架构/裁剪等级的正式 Launch/Release IL2CPP 与新 DTO 包后热更、公网资源/CDN发布、移动设备/模拟器、Windows/Linux 平台实跑、Player IPv6/代理/后台/换网/弱网、完整元数据与尚未覆盖的建连/关闭/后台和失败细分诊断、有效分配与GC停顿归因、目标设备性能容量/24h soak。macOS ARM64 Release/Minimal 的正式启动与包后新增协议已有上述实跑证据；WebGL WSS 和世界业务延后，不以当前结果声称全部平台完成。
 
 
 ## 五子棋房间（2026-10-14）

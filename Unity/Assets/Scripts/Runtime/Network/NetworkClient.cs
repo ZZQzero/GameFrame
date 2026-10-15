@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Stopwatch = System.Diagnostics.Stopwatch;
 using System.Threading;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
@@ -113,22 +114,61 @@ namespace GameFrame.Network
             TRequest request, TimeSpan timeout, CancellationToken cancellationToken = default)
             where TRequest : class where TResponse : class
         {
-            RequireConnected();
-            return await context.Request(route, request, timeout, cancellationToken);
+            NetworkRuntime.RequireMainThread();
+            long started = Stopwatch.GetTimestamp();
+            bool outsidePump = !runtime.IsPumping;
+            bool admitted = false;
+            Task<TResponse> response;
+            try
+            {
+                RequireConnected();
+                response = context.Request(route, request, timeout, cancellationToken);
+                admitted = true;
+            }
+            finally
+            {
+                runtime.RecordOutbound(started, outsidePump, admitted);
+            }
+
+            return await response;
         }
 
         public UniTask SendAsync<T>(NetSend<T> route, T message, CancellationToken cancellationToken = default) where T : class
         {
-            RequireConnected();
-            context.Send(route, message, cancellationToken);
-            return UniTask.CompletedTask;
+            NetworkRuntime.RequireMainThread();
+            long started = Stopwatch.GetTimestamp();
+            bool outsidePump = !runtime.IsPumping;
+            bool admitted = false;
+            try
+            {
+                RequireConnected();
+                context.Send(route, message, cancellationToken);
+                admitted = true;
+                return UniTask.CompletedTask;
+            }
+            finally
+            {
+                runtime.RecordOutbound(started, outsidePump, admitted);
+            }
         }
 
         public bool TrySendUnreliable<T>(NetUnreliable<T> route, T message) where T : class
         {
-            RequireConnected();
-            catalog.RequireRegistered(route);
-            return context.TrySendUnreliable(route, message);
+            NetworkRuntime.RequireMainThread();
+            long started = Stopwatch.GetTimestamp();
+            bool outsidePump = !runtime.IsPumping;
+            bool admitted = false;
+            try
+            {
+                RequireConnected();
+                catalog.RequireRegistered(route);
+                admitted = context.TrySendUnreliable(route, message);
+                return admitted;
+            }
+            finally
+            {
+                runtime.RecordOutbound(started, outsidePump, admitted);
+            }
         }
 
         public IDisposable Subscribe<T>(NetPush<T> route, Action<T> handler) where T : class
@@ -145,7 +185,33 @@ namespace GameFrame.Network
                 throw new InvalidOperationException($"Opcode {route.Opcode} already has a handler.");
             }
 
-            Action<OwnedFrame> registered = frame => handler(route.Codec.DecodeValidated(frame.Body));
+            Action<OwnedFrame> registered = frame =>
+            {
+                long started = Stopwatch.GetTimestamp();
+                bool success = false;
+                T message;
+                try
+                {
+                    message = route.Codec.DecodeValidated(frame.Body);
+                    success = true;
+                }
+                finally
+                {
+                    runtime.RecordPushDecoding(started, success);
+                }
+
+                started = Stopwatch.GetTimestamp();
+                success = false;
+                try
+                {
+                    handler(message);
+                    success = true;
+                }
+                finally
+                {
+                    runtime.RecordPushHandler(started, success);
+                }
+            };
             pushes.Add(route.Opcode, registered);
             return new Subscription(() =>
             {
@@ -299,7 +365,23 @@ namespace GameFrame.Network
             }
         }
 
-        internal bool PumpOne() => context?.PumpOne() ?? false;
+        internal bool PumpOne()
+        {
+            long started = Stopwatch.GetTimestamp();
+            bool worked = true;
+            try
+            {
+                worked = context?.PumpOne() ?? false;
+                return worked;
+            }
+            finally
+            {
+                if (worked)
+                {
+                    runtime.RecordDispatch(started);
+                }
+            }
+        }
 
         internal bool HostCleanupComplete => context == null || context.HostCleanupComplete;
 

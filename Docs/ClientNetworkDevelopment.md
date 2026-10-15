@@ -178,6 +178,10 @@ Editor 的 Generate Messages/Check Messages 菜单调用 `DotNet/NetworkProtocol
 
 Unity MemoryPack 固定 1.21.4、Core 为.NET Standard2.1，Generator 保留 RoslynAnalyzer 标签且不作为普通 Editor/Player 插件加载。NuGetForUnity/UPM 及配置、依赖 meta/GUID 同步维护，恢复步骤见客户端使用说明，不用.NET10 DLL 替换 Unity 依赖。
 
+正式启动的补充元数据不能直接照抄 HybridCLR 的关联程序集列表。当前保留 mscorlib，另由实际 Release 故障确认需要 MemoryPack.Core 的 `Deserialize<LoginResponse>` 与 UniTask 的 `Forget<AudioPlayResult>` 泛型方法元数据，已补入 GlobalConfig 和对应 `.dll.bytes`。后者由落子音效触发，必须执行实际玩法，不能只以登录或空房间通过判定完成。生成清单与实际需要的区别、构建产物配套规则见 [AOT 元数据配置](Launch.md#aot-元数据的选择与实跑)。
+
+2026-10-15 已在 macOS ARM64 Release/Minimal 用上述三个原构建元数据验证正式 Host 资源更新后的全新 DTO/RPC/Push。基线原生构建必须早于新类型的引入；更新阶段只编译 Hotfix 和构建资源，不重新生成 AOT 桥接或重打 Player，并比较整包及元数据哈希。测试夹具在验证后移除，正式 catalog 保持14条，不为验收保留业务占位；步骤和实际覆盖见 [客户端验收](ClientNetworkUsage.md#network-hotupdate-dto)。
+
 原生 P/Invoke/传输/帧/缓冲保持 Runtime/AOT 可达，DTO 与游戏路由可在 Hotfix；使用生成 codec/catalog 与 HybridCLR 既有 AOT 补充/裁剪流程，不靠 MakeGenericType 反射发现未知类型。新热更 DLL 重新编译，不改名旧 DLL。系统 wire/nativeABI 变化可能需要新安装包；Hotfix 无法替换 iOS native。
 
 验收覆盖：Editor 编译、相关 EditMode/PlayMode、各发布目标 Player 脚本、对应 native 导出/ABI/链接、实际 IL2CPP 客户端与服务器互通、移动真机弱网/后台/IPv6/代理/换网、24h soak。必须测试“发布安装包后热更新加入全新 DTO/路由”并双向序列化/RPC/Push/关闭；Editor 或 Player 脚本成功不代表此项通过。
@@ -186,7 +190,11 @@ Unity MemoryPack 固定 1.21.4、Core 为.NET Standard2.1，Generator 保留 Ros
 
 2026-10-14 已补充当前连接的成功 RPC 编码、完整响应等待、主线程等待、解码与 admission 到解码完成汇总，并公开各子预算当前预约值。复用既有 pending/响应保留/Pump/预算所有权，统计在同步 continuation 前完成；不增加逐请求历史、指标管理器或业务状态。采样定义与失败排除范围见 [关闭与诊断](ClientNetworkUsage.md#6-关闭与诊断)。
 
-当前剩余工作：完整托管元数据预约、全部发送/Push/Pump 与失败路径耗时、分位采样与统一诊断、池化/性能测量、精细期限调度和全部平台/容量验收。World/GameNetworkSession 与 WebGL WSS 继续延后。既有平台证据见 [客户端使用说明](ClientNetworkUsage.md#验证与现有证据)，以日期/版本/实际执行范围为准。
+2026-10-15 补充宿主 `NetworkRuntime.GetMetrics()`：最外层 Pump、同步发送及其 Pump 外子集、实际派发、Push 解码和同步 handler 的累计耗时与阶段失败计数，覆盖成功/拒绝/超时/取消交付和同步 continuation。沿用现有 Runtime/Client，不增加诊断管理器、历史队列或业务依赖；同步重入发送不能重复加入主线程总成本。Connect/Close 的 Pump 外工作、异步业务及后台 IO 不在此总量内，完整口径见 [使用说明](ClientNetworkUsage.md#6-关闭与诊断)。
+
+分位数、整条主线程分配/GC、进程 RSS/CPU 由 Tests/Player 的专用 Release 性能夹具及现有 Python 入口采集，保留有界样本，计算/文件输出在窗口外；Runtime 不保存逐帧历史。构建仅临时添加 `GAMEFRAME_NETWORK_PERFORMANCE`，普通正式 Release 不包含独立测试入口。重用现有 Echo/GomokuSnapshot，测试伴随服务与生产 handler 隔离，不扩展正式协议。步骤与证据见 [性能基线](ClientNetworkUsage.md#network-player-performance)。
+
+当前剩余工作：完整托管元数据预约、尚未覆盖的建连/关闭/后台和失败细分诊断、工作线程轮转与精细队龄、目标设备性能和统一诊断、依据证据决定的池化/期限调度优化，以及全部平台/容量验收。World/GameNetworkSession 与 WebGL WSS 继续延后。既有平台证据见 [客户端使用说明](ClientNetworkUsage.md#验证与现有证据)，以日期/版本/实际执行范围为准。
 
 2026-10-14 实施优先级：按 [NetworkDesign 第 18.1 节](NetworkDesign.md#181-当前优先路线底层框架完善)先完善现有网络底层、诊断和验证。当前五子棋保持既有业务接入，双连接世界会话、世界恢复、移动同步、插值/预测与 AOI 在实际多人玩法需要时扩展；不为将来玩法预先增加 Runtime 业务状态、通用调度器或管理层。
 

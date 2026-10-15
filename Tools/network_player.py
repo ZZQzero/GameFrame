@@ -42,12 +42,118 @@ def stop_process(process):
             process.wait(timeout=5)
 
 
+def performance_run(args, root, app, executable, native, identity):
+    build = (app.parent / "build-succeeded.txt").read_text()
+    if "Release performance" not in build:
+        raise ValueError("performance mode requires the dedicated Release performance build")
+    if args.transport == "wss" and (args.certificate is None or not args.certificate.is_file()):
+        raise ValueError("WSS requires --certificate pointing to an already trusted localhost PFX; trust is never changed")
+    configuration = dict(
+        Transport=args.transport, Scenario=args.scenario, Connections=args.connections,
+        DurationSeconds=args.duration, WarmupSeconds=args.warmup,
+        RequestsPerSecond=0 if args.scenario == "idle" else args.rate,
+        MaxInFlight=args.concurrency, PendingLimit=args.pending_limit,
+        TextLength=args.text_length, Unicode=args.unicode, Push=args.push, PushMoves=args.push_moves)
+    host = player = None
+    with tempfile.TemporaryDirectory(prefix="gameframe-network-performance-") as temporary:
+        directory = Path(temporary)
+        os.chmod(directory, 0o700)
+        (directory / "performance.json").write_text(json.dumps(configuration))
+        settings = ET.Element("RunSettings")
+        parameters = ET.SubElement(settings, "TestRunParameters")
+        ET.SubElement(parameters, "Parameter", name="HostDirectory", value=str(directory))
+        path = directory / "host.runsettings"
+        ET.ElementTree(settings).write(path, encoding="utf-8", xml_declaration=True)
+        with (directory / "host.log").open("w") as host_log, (directory / "stdout.log").open("w") as player_log:
+            try:
+                environment = os.environ.copy()
+                environment["GF_KCP_NATIVE_LIBRARY"] = str(native)
+                if args.certificate is not None:
+                    environment["GF_PERFORMANCE_CERTIFICATE"] = str(args.certificate.resolve())
+                host = subprocess.Popen([
+                    args.dotnet, "test", "NetworkServer.Tests/NetworkServer.Tests.csproj", "-c", "Release",
+                    "--no-build", "--no-restore", "--filter",
+                    "FullyQualifiedName=GameFrame.Tests.NetworkPlayerPerformanceHostTests.ServePerformance",
+                    "--settings", str(path), "--results-directory", str(directory)
+                ], cwd=root / "Tools", env=environment, stdout=host_log, stderr=subprocess.STDOUT, start_new_session=True)
+                wait_file(directory / "ready.json", host, 30)
+                player_env = {key: value for key, value in os.environ.items()
+                              if not key.startswith("DYLD_") and key not in
+                              ("GF_KCP_NATIVE_LIBRARY", "GF_PERFORMANCE_CERTIFICATE", "GF_PERFORMANCE_CERTIFICATE_PASSWORD")}
+                architecture = "arm64" if platform.machine().lower() == "arm64" else "x86_64"
+                player = subprocess.Popen([
+                    "/usr/bin/arch", "-" + architecture, str(executable), "-batchmode", "-nographics",
+                    "-logFile", str(directory / "player.log"), "--gf-network-host", str(directory)
+                ], cwd=directory, env=player_env, stdout=player_log, stderr=subprocess.STDOUT, start_new_session=True)
+                monitor = []
+                started = time.monotonic()
+                deadline = started + args.duration + args.warmup + 80
+                while player.poll() is None:
+                    if time.monotonic() > deadline:
+                        raise TimeoutError("Performance Player lifetime exceeded")
+                    sample = subprocess.run(["/bin/ps", "-p", str(player.pid), "-o", "rss=", "-o", "%cpu="],
+                                            capture_output=True, text=True, check=False).stdout.split()
+                    if len(sample) == 2:
+                        monitor.append(dict(ElapsedSeconds=time.monotonic() - started,
+                                            RssBytes=int(sample[0]) * 1024, PsCpuPercent=float(sample[1]),
+                                            MeasurementWindow=(directory / "measuring").is_file() and
+                                            not (directory / "measured").is_file()))
+                    time.sleep(1)
+                code = player.returncode
+                result_path = directory / "player-result.json"
+                if code != 0 or not result_path.is_file():
+                    failure = directory / "failure.txt"
+                    diagnostic = failure.read_text() if failure.is_file() else "no managed failure record"
+                    server_failures = [json.loads(path.read_text()) for path in sorted(directory.glob("server-failure-*.json"))]
+                    raise RuntimeError(f"Performance Player failed (exit {code}); server failures: {server_failures}: {diagnostic}")
+                result = json.loads(result_path.read_text())
+                if result.get("Passed") is not True:
+                    raise RuntimeError("Performance Player did not pass resource/workload checks")
+                (directory / "stop-performance").touch()
+                wait_file(directory / "performance-host-result.json", host, 30)
+                host_code = host.wait(timeout=15)
+                companion = json.loads((directory / "performance-host-result.json").read_text())
+                if host_code != 0 or companion.get("Passed") is not True:
+                    raise RuntimeError("Performance companion did not release all sessions and buffers")
+                result.update(Companion=companion, PlayerExit=code, CompanionExit=host.returncode, ProcessSamples=monitor,
+                              NativeArtifact=identity, ExecutionArchitecture=architecture, Build=build)
+                rendered = json.dumps(result, ensure_ascii=False, indent=2)
+                if args.json is not None:
+                    args.json.write_text(rendered + "\n")
+                print(rendered)
+            finally:
+                stop_process(player)
+                stop_process(host)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--player", type=Path, required=True, help="NetworkValidation.app from the Unity validation build menu")
     parser.add_argument("--dotnet", default=shutil.which("dotnet"), help="dotnet executable (SDK 10.0.401)")
     parser.add_argument("--json", type=Path, help="optional evidence JSON output; parent must exist")
+    parser.add_argument("--mode", choices=("correctness", "performance"), default="correctness")
+    parser.add_argument("--transport", choices=("kcp", "wss"), default="kcp")
+    parser.add_argument("--scenario", choices=("idle", "echo", "timeout", "cancel", "backpressure"), default="echo")
+    parser.add_argument("--connections", type=int, choices=range(1, 5), default=1)
+    parser.add_argument("--duration", type=int, default=15, help="measurement seconds (1..120)")
+    parser.add_argument("--warmup", type=int, default=3, help="warmup seconds (1..30)")
+    parser.add_argument("--rate", type=int, default=60, help="total offered requests/second across all clients")
+    parser.add_argument("--concurrency", type=int, default=64)
+    parser.add_argument("--pending-limit", type=int, default=512)
+    parser.add_argument("--text-length", type=int, default=32)
+    parser.add_argument("--unicode", action="store_true")
+    parser.add_argument("--push", action="store_true", help="synthetic existing GomokuSnapshot Push per Echo, not gameplay")
+    parser.add_argument("--push-moves", type=int, default=0)
+    parser.add_argument("--certificate", type=Path, help="already trusted localhost PFX for WSS; password in GF_PERFORMANCE_CERTIFICATE_PASSWORD")
     args = parser.parse_args()
+    if not (1 <= args.duration <= 120 and 1 <= args.warmup <= 30
+            and 0 <= args.rate <= 10000 and 1 <= args.concurrency <= 512 and 1 <= args.pending_limit <= 512
+            and 0 <= args.text_length <= 128 and 0 <= args.push_moves <= 225):
+        parser.error("duration/warmup/rate/concurrency/pending/text/push configuration exceeds bounded workload limits")
+    if args.mode == "performance" and args.scenario != "idle" and args.rate * args.duration > 100000:
+        parser.error("rate * duration must not exceed the 100000 RPC sample capacity")
+    if args.mode == "performance" and args.scenario != "idle" and args.rate == 0:
+        parser.error("non-idle workload requires --rate > 0")
     if platform.system() != "Darwin":
         parser.error("this validation entry currently targets macOS only")
     if not args.dotnet or not Path(args.dotnet).is_file():
@@ -68,6 +174,11 @@ def main():
         executable = app / "Contents/MacOS" / plistlib.load(stream)["CFBundleExecutable"]
     subprocess.run([args.dotnet, "build", "NetworkServer.Tests/NetworkServer.Tests.csproj", "-c", "Release",
                     "-p:RestoreLockedMode=true", "--nologo", "-v:q"], cwd=root / "Tools", check=True)
+    if args.mode == "performance":
+        performance_run(args, root, app, executable, native, identity)
+        return
+    if "Development" not in (app.parent / "build-succeeded.txt").read_text():
+        parser.error("correctness mode requires the Development validation build")
     host = player = None
     with tempfile.TemporaryDirectory(prefix="gameframe-network-player-") as temporary:
         directory = Path(temporary)

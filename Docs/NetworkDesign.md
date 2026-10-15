@@ -955,7 +955,9 @@ KCP MIT、MemoryPack MIT 及 mbedTLS 对应版本许可证/第三方声明随安
 
 2026-10-14 当前实现补充 `NetworkMetricsSnapshot.Rpc/Memory`：复用 pending admission、IO ResponseReserved 和主线程 Complete 记录时间，汇总成功解码 RPC 的 Encoding、ResponseWait、MainThreadWait、Decoding、Completion；使用高精度单调时间，均值/最近值/累计/最大值为固定空间，业务 continuation 开始前提交统计。ResponseWait 包含发送排队与服务端处理，Completion 从 admission 起算且不含请求编码；不把它们称为纯网络 RTT，也不从汇总推算分位数。失败/取消/超时与全部主线程成本另测。子预算快照直接读取现有额度，包含在途和保守预约，不声称精确 CLR 布局或 RSS。详细口径见 [客户端关闭与诊断](ClientNetworkUsage.md#6-关闭与诊断)。
 
-宿主另报 Pump 用时、Pump 外发送校验/编码耗时、每帧网络主线程总耗时/分配量、每帧派发条数/最长处理器耗时、工作线程轮转延迟、全局额度、客户端数。队列分别记录当前/最大队龄、入口背压次数、过期丢弃和 UDP output 滞留时间。业务另报 Ready 时长、恢复次数、eventVersion 断档、snapshot 基线错误、输入校正幅度。RTT、业务处理耗时与主线程排队必须分开，不能统一叫“延迟”。
+2026-10-15 已补宿主固定空间 Pump、发送/Pump外发送、派发、Push解码/同步回调汇总及拒绝/阶段异常次数；Pump 包含同步任务 continuation 和清零，主线程窗口总量按 Pump+Pump外发送取差值，分项不重复相加。独立 Release IL2CPP 性能入口在测试层有界采样每帧分位数、整条主线程分配/GC和进程RSS/CPU，连接至独立.NET伴随服务，覆盖idle/echo/timeout/cancel/backpressure和可选既有快照Push；不新增生产协议、池化或调度层。范围、使用和实际结果见[客户端性能基线](ClientNetworkUsage.md#network-player-performance)。该指标不含建连/关闭的Pump外工作、后台IO或异步延后业务，不能视为所有网络CPU成本。
+
+后续按需补充工作线程轮转延迟、完整失败细分和队列当前/最大队龄、过期丢弃、UDP output滞留时间。业务另报 Ready 时长、恢复次数、eventVersion 断档、snapshot 基线错误、输入校正幅度。RTT、业务处理耗时与主线程排队必须分开，不能统一叫“延迟”。
 
 默认不记录登录凭据、resumeToken、ticket、PSK、完整消息正文和聊天/个人信息。Login/ResumeLogin/RequestWorldGrant 的请求与响应在开发解码日志中也禁止输出敏感字段。协议日志只含 opcode、长度、correlation、代际、时间与结果码；其他开发解码日志显式启用并有采样和环形容量，不再次序列化每条消息。正式包故障导出由用户/业务触发，避免每个网络包写文件或同步刷日志。
 
@@ -1000,6 +1002,12 @@ KCP MIT、MemoryPack MIT 及 mbedTLS 对应版本许可证/第三方声明随安
 同日补齐Unity公开NetworkClient故障验证：新增9项Editor PlayMode用例，经实际Update/Pump、公开连接/请求/订阅/关闭和同客户端复用，覆盖DTLS/Hello取消与默认期限、3秒断流恢复、持续断网、旧UDP延后放行、主线程暂停6秒期间的IO/控制流量与保留响应顺序，以及响应已保留后的后台取消。使用独立临时.NET测试伴随进程与现有有界转发器，不改Runtime、协议、默认期限或插件。新增9项与生命周期11项合并20/20通过、零跳过；补强双向控制流量断言后暂停用例单独复验通过。运行方式与分层证据见[客户端故障入口](ClientNetworkUsage.md#unity-kcp-fault)。这组证据仅覆盖Unity6000.3.19f1/macOS Editor与本机独立.NET服务进程，不代表Player/IL2CPP、真机、其他平台或长时容量；上述同进程核心矩阵与本轮公开客户端覆盖分别记录。
 
 macOS 独立 Development IL2CPP 验证入口已接入：独立临时场景 + HybridCLR 同平台编译/桥接/裁剪元数据 + 实际 Hotfix DLL 加载 + 正式 NetworkClient/catalog，伴随端复用现有测试 listener/relay，外部脚本统一拥有进程与临时凭据。覆盖连接、UTF-8 Echo、取消/超时与迟到响应、在途关闭、同客户端新 grant/代际重连及最终释放，不改正常启动或协议。Unity6000.3.19f1/macOS ARM64 Development、Minimal stripping 的完整 IL2CPP 构建与实际七组检查已通过，Hotfix DLL 与11个裁剪 AOT 元数据 DLL 均来自本次平台构建。实际 Player 暴露的 ByValArray 偏移查询问题通过共享 fixed 缓冲区解决，保留全部 ABI 校验，不改原生 ABI/插件。构建/运行与实际证据见[Player验证](ClientNetworkUsage.md#network-player)；不能推广到其他架构/Release/裁剪等级、正式 Launch 资源链、新 DTO 包后热更、移动设备或容量。
+
+2026-10-15 补验正式启动资源链：Unity6000.3.19f1/macOS ARM64 Release、Minimal stripping，使用实际 Launch、OfflinePlayMode、全新 YooAsset 包和对应 Release DLL/裁剪元数据。正式 WSS 登录与落子实跑分别暴露 MemoryPack.Core 的 Deserialize<LoginResponse>、UniTask 的 Forget<AudioPlayResult> 缺少 AOT 泛型实现；在原 mscorlib 配置上仅补这两个程序集及资源，未增加启动分支或泛型替代实现。最终移除临时诊断后，真实 Player 与独立.NET对端完成加入、准备、9手对局、五连结束和主动离房，Player无托管异常。具体证据与离线配置、账号持久化关闭及平台限制见 [客户端验证](ClientNetworkUsage.md#8-验证与现有证据)；新增DTO包后热更、资源服务器更新链与其他平台仍待验证。
+
+2026-10-15 已进一步完成本机资源服务器与新增DTO的包后热更验证：先冻结不含新类型的 macOS ARM64 Release/Minimal 原生安装包和三个补充元数据，再生成临时新协议、编译Hotfix并发布YooAsset新版本。正式Launch/Host从HTTP只下载更新的DLL/prefab两个bundle；旧包全部文件和原元数据哈希不变，未重新生成AOT桥接或重打Player。五个全新DTO及两条路由经正常证书校验的WSS完成三轮RPC/Push、主线程有序派发、关闭与Shutdown，双端退出0且owned bytes=0。测试夹具恢复后正式协议仍为14条；详细过程与平台/CDN限制见[包后热更验收](ClientNetworkUsage.md#network-hotupdate-dto)，不推广为任意泛型组合或其他平台通过。
+
+2026-10-15 客户端主线程观测与Release性能基线已完成首轮：复用Runtime/Client固定汇总和独立Player构建，macOS ARM64 Release/Minimal完整IL2CPP构建0警告/错误；KCP/WSS共14轮有限负载通过，含各两轮4连接240次/秒的中文长消息与225手快照、空闲、pending背压、期限和取消。相关PlayMode21/21通过；普通Release脚本43程序集与Hotfix重新编译，验证入口排除。主线程分配API在该Player不可用，GC原值和RSS另报；刻意高频背压成本超过2ms，不能宣称最低设备门禁或容量达标。仅调整测试pending参数隔离默认服务端输入限速，未改生产预算/协议或加池化；具体数值、负向复验和限制集中在[客户端性能基线](ClientNetworkUsage.md#network-player-performance)。
 
 ### 18.2 已有阶段划分与未来业务路线
 

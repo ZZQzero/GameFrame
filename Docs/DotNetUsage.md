@@ -317,6 +317,8 @@ grant 注册后 30 秒内完成 DTLS+GFNP Hello 单次绑定，过期不自动�
 
 ### KCP 性能测量
 
+Unity 客户端另有独立进程的 [macOS Release IL2CPP 性能入口](ClientNetworkUsage.md#network-player-performance)。其 Explicit `NetworkPlayerPerformanceHostTests.ServePerformance` 由现有 `Tools/network_player.py --mode performance` 启停，复用正式框架和现有 Echo/可选 GomokuSnapshot；不运行 Game.Server、数据库或正式房间逻辑，不增加生产路由。KCP 每连接独立短时随机grant，WSS 使用调用方提供且已受Player信任的localhost PFX；两端关闭/自有资源与会话错误均核验。具体参数、测量边界和证据集中在客户端说明，不用独立客户端的短时结果替代生产容量或本节服务端owner指标。
+
 meter 为 `GameFrame.Server.Network.Kcp`，使用 MeterListener 或现有 .NET 指标采集器订阅。安装了 dotnet-counters 的环境可运行 `dotnet-counters monitor --process-id <PID> --counters GameFrame.Server.Network.Kcp`；该工具是额外诊断依赖，不是服务启动依赖。
 
 | Histogram | 单位 | 采样范围 |
@@ -722,6 +724,8 @@ CLI负向：2连接、40次/秒、Pump=100ms、无预热、测量1秒，计划80
 2026-10-15，Unity6000.3.19f1/macOS ARM64 的独立 Development IL2CPP Player 实跑七组全部通过，Player 与伴随进程均退出0，资源和转发计账通过；构建/架构/裁剪/元数据及 ABI 故障根因见[客户端验证记录](ClientNetworkUsage.md#验证与现有证据)。共享 Peer/Grant 改用 fixed 缓冲区后，最终 .NET KcpLoopbackTests 28/28、零跳过，Release 编译/locked restore 通过。仍使用此前已核验的 macOS universal Release ABI2 native，未重新构建或安装插件。此结果不代表正式 Game.Server/PG、其他平台、Release Player 或容量验证。
 
 macOS 入口与构建步骤见[客户端 Player 验证](ClientNetworkUsage.md#network-player)。`Tools/network_player.py` 复用现有 Explicit 伴随测试 host 和正式 Echo 路由，自动在独立进程启动临时 KCP listener/relay、注入一次性 grant，并等待 Player 完成及两端释放后退出；不用数据库，不启动或修改正式 Game.Server。普通 .NET 回归不启动此 host；.NET 编译通过只表示伴随端可用，实际 IL2CPP 结果由独立 Player 和退出码共同确认。
+
+2026-10-15 另行完成正式 Launch/Host 旧包新增 DTO/路由实跑，详见[包后热更验收](ClientNetworkUsage.md#network-hotupdate-dto)。伴随服务只在系统临时目录编译，由同源生成器产出的新 catalog 注册一个 RPC handler，其余入站路由显式 Reject，可靠 Push 使用现有 ServerConnectionContext；复用 WssServer/DI HostedService 和正常 localhost TLS 校验，不需要账号或数据库。临时16条路由中的两条新增路由完成三次 RPC/三次 Push，服务端确认 Close reason1、无连接错误、owned bytes=0并退出0，Release编译0警告/0错误。验证后临时协议/组件移除，正式14条路由、Game.Server及框架实现均未修改；此项不代替正式账号业务、KCP或平台/容量验收。
 
 ## 五子棋联调（2026-10-14）
 

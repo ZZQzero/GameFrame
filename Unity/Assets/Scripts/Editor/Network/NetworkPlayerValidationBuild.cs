@@ -28,8 +28,18 @@ namespace GameFrame.Editor
             }
         }
 
+        [MenuItem("Tools/GameFrame/Network/Build macOS Release Performance Player")]
+        private static void BuildPerformanceFromMenu()
+        {
+            string output = EditorUtility.SaveFolderPanel("Network Release performance output", Path.GetTempPath(), "");
+            if (!string.IsNullOrEmpty(output))
+            {
+                ScheduleBuild(output, true);
+            }
+        }
+
         // Scheduling lets MCP return before Unity's synchronous native build starts.
-        public static void ScheduleBuild(string output)
+        public static void ScheduleBuild(string output, bool performance = false)
         {
             if (scheduled || BuildPipeline.isBuildingPlayer || EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isCompiling)
             {
@@ -67,16 +77,18 @@ namespace GameFrame.Editor
                 }
 
                 EditorApplication.update -= run;
-                Build(output);
+                Build(output, performance);
             };
             EditorApplication.update += run;
         }
 
-        private static void Build(string output)
+        private static void Build(string output, bool performance)
         {
             SceneSetup[] scenes = EditorSceneManager.GetSceneManagerSetup();
             EditorBuildSettingsScene[] buildScenes = EditorBuildSettings.scenes;
             bool development = EditorUserBuildSettings.development;
+            var architecture = UnityEditor.OSXStandalone.UserBuildSettings.architecture;
+            string[] defines = PlayerSettings.GetScriptingDefineSymbols(NamedBuildTarget.Standalone).Split(';');
             string buildLocation = EditorUserBuildSettings.GetBuildLocation(BuildTarget.StandaloneOSX);
             string il2cppPath = Environment.GetEnvironmentVariable("UNITY_IL2CPP_PATH");
             UnityEngine.Object[] preloaded = PlayerSettings.GetPreloadedAssets();
@@ -94,13 +106,21 @@ namespace GameFrame.Editor
                 EditorSceneManager.SaveScene(scene, scenePath);
                 EditorSceneManager.RestoreSceneManagerSetup(scenes);
                 EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(scenePath, true) };
-                EditorUserBuildSettings.development = true;
+                EditorUserBuildSettings.development = !performance;
+                if (performance)
+                {
+                    PlayerSettings.SetScriptingDefineSymbols(NamedBuildTarget.Standalone,
+                        defines.Append("GAMEFRAME_NETWORK_PERFORMANCE").Distinct().ToArray());
+                    UnityEditor.OSXStandalone.UserBuildSettings.architecture =
+                        System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.Arm64
+                            ? UnityEditor.Build.OSArchitecture.ARM64 : UnityEditor.Build.OSArchitecture.x64;
+                }
                 PrebuildCommand.GenerateAll();
                 string app = Path.Combine(output, "NetworkValidation.app");
                 BuildReport report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
                 {
                     scenes = new[] { scenePath }, locationPathName = app, target = BuildTarget.StandaloneOSX,
-                    options = BuildOptions.Development | BuildOptions.StrictMode
+                    options = (performance ? BuildOptions.None : BuildOptions.Development) | BuildOptions.StrictMode
                 });
                 if (report.summary.result != BuildResult.Succeeded)
                 {
@@ -131,7 +151,7 @@ namespace GameFrame.Editor
                 File.WriteAllLines(Path.Combine(payload, "metadata.txt"), metadata);
                 SignPlayer(app);
                 File.WriteAllText(Path.Combine(output, "build-succeeded.txt"),
-                    "StandaloneOSX IL2CPP Development / HybridCLR enabled\n" +
+                    "StandaloneOSX IL2CPP " + (performance ? "Release performance" : "Development") + " / HybridCLR enabled\n" +
                     "Stripping=" + PlayerSettings.GetManagedStrippingLevel(NamedBuildTarget.Standalone) + "\n" +
                     "Architecture=" + UnityEditor.OSXStandalone.UserBuildSettings.architecture + "\n" +
                     "AOT metadata=" + metadata.Length + "\n" +
@@ -147,6 +167,8 @@ namespace GameFrame.Editor
             {
                 EditorBuildSettings.scenes = buildScenes;
                 EditorUserBuildSettings.development = development;
+                UnityEditor.OSXStandalone.UserBuildSettings.architecture = architecture;
+                PlayerSettings.SetScriptingDefineSymbols(NamedBuildTarget.Standalone, defines);
                 EditorUserBuildSettings.SetBuildLocation(BuildTarget.StandaloneOSX, buildLocation);
                 Environment.SetEnvironmentVariable("UNITY_IL2CPP_PATH", il2cppPath);
                 PlayerSettings.SetPreloadedAssets(preloaded);

@@ -1,4 +1,4 @@
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
+#if UNITY_EDITOR || DEVELOPMENT_BUILD || GAMEFRAME_NETWORK_PERFORMANCE
 using System;
 using System.IO;
 using System.Reflection;
@@ -41,7 +41,12 @@ namespace Game.AOT.Validation
                 }
 
                 Assembly hotfix = Assembly.Load(File.ReadAllBytes(Path.Combine(payload, "Game.Hotfix.dll.bytes")));
-                MethodInfo entry = hotfix.GetType("Game.Hotfix.Validation.NetworkPlayerProbe", true)
+#if GAMEFRAME_NETWORK_PERFORMANCE
+                const string probe = "Game.Hotfix.Validation.NetworkPerformanceProbe";
+#else
+                const string probe = "Game.Hotfix.Validation.NetworkPlayerProbe";
+#endif
+                MethodInfo entry = hotfix.GetType(probe, true)
                     .GetMethod("RunAsync", BindingFlags.Public | BindingFlags.Static);
                 await (Task)entry.Invoke(null, new object[] { directory });
                 Debug.Log("[NetworkPlayerValidation] PASS: native IL2CPP + HybridCLR public-client verification.");
@@ -53,7 +58,7 @@ namespace Game.AOT.Validation
                 if (directory != null)
                 {
                     string abi = error.Message.StartsWith("Native ABI ", StringComparison.Ordinal) ? error.Message + "\n" : "";
-                    File.WriteAllText(Path.Combine(directory, "failure.txt"), error.GetType().FullName + "\n" + abi + error.StackTrace);
+                    File.WriteAllText(Path.Combine(directory, "failure.txt"), error.ToString() + "\n" + abi);
                 }
 
                 Debug.LogError("[NetworkPlayerValidation] FAIL: " + error.GetType().FullName);

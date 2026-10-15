@@ -167,6 +167,10 @@ namespace GameFrame.Tests
 
                             break;
                         }
+                        case "push":
+                            await sessions[command.Index].PushAsync(GameNetRoutes.GomokuRoomSnapshot, new GomokuSnapshot());
+                            response = new { Ok = true };
+                            break;
                         case "cut":
                             relay.SetBlackhole(command.Index, command.Enabled);
                             response = new { Ok = true };

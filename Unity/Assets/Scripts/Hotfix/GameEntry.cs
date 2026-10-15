@@ -5,6 +5,7 @@ using Cysharp.Threading.Tasks;
 using Game.AOT;
 using Game.Hotfix.TableConfig;
 using GameFrame;
+using GameFrame.Diagnostics;
 using GameFrame.Localization;
 using GameFrame.UI;
 using UnityEngine;
@@ -39,6 +40,10 @@ namespace Game.Hotfix
             }
 
             flow.StartAsync().Forget();
+            if (RuntimeLogCapture.IsCapturing)
+            {
+                GameUI.Tips<RuntimeLogEntryPanel>().Forget();
+            }
         }
 
         void Initialize()

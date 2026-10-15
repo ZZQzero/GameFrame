@@ -402,7 +402,19 @@ Player 以 `-batchmode -nographics` 运行，锁定目标60fps/vSync=0，预热�
 - MainThreadAllocatedBytes 是整个 Unity 主线程含工具采样的分配量，包含 DTO/字符串/数组，不代表网络独占分配；先用已知分配探测接口，Available=false 时不能把0解释为零分配。GcCollections 分别报告0/1/2代原值差，不加总。ManagedHeapBytes 是 GC.GetTotalMemory(false)，不是RSS。
 - ProcessSamples 每秒由外部 ps 记录 Player RSS 和ps CPU 平滑统计，MeasurementWindow 标记所在阶段；不是网络线程独占CPU或精确GC停顿。OwnedBytes/native实际与预约分别报告，服务端 native live bytes 仍不可用。重复同参数时比较波动，单次峰值不作跨机器门槛。
 
+分配与 GC 归因使用同一负载的独立采样包：菜单 `Tools/GameFrame/Network/Build macOS Allocation Profiling Player`，运行时将 `--mode performance` 改为 `--mode profiling`。此包保留 `GAMEFRAME_NETWORK_PERFORMANCE` 并启用 Development，默认不启用全局 Profiler，也不启用自动连接或 Deep Profiling；只有显式分配栈参数会开启短时全局采集。构建标记、命令模式与 Player 的 `Debug.isDebugBuild` 必须一致。正确性包、Release 性能包和 Development 采样包不能混用，Development 的耗时不能代替 Release 门槛。
+
+两种负载包均在窗口外以 1 MiB 数组和一次主动 `GC.Collect()` 校验 `ProfilerRecorder`，再初始化网络、预热和排空；主动 GC 不属于测量窗口。报告中的 `FrameAllocations` 是 Unity 的 `GC Allocated In Frame` 字节计数，包含引擎、工具和负载，不称为网络独占或主线程精确字节数；`MainThreadGcCollect` 是仅限当前主线程的 `GC.Collect` 时间标记，单位纳秒，不称为全部 GC 工作或精确的 stop-the-world 停顿。`Available` 只代表指标存在，`CalibrationPassed` 才代表已知探针得到有效值；Development 采样包的分配校验失败直接拒绝负载，Release 未提供该指标时明确报告不可用。
+
+Recorder 使用65536个固定容量帧槽、不循环覆盖，按帧求和，容量耗尽报错；开始和结束位于 LastPostLateUpdate，丢弃首个部分帧，Stop仍可能提交末尾部分帧。`Frames/Total/MaximumPerFrame/SampleCount` 是记录器返回样本的统计，与请求 cohort 和墙钟窗口存在帧边界差异；GC marker 的 SampleCount 不等同 CollectionCount，多个增量切片或嵌套标记不能推断完整回收次数。读取/数组转换与文件写出在窗口外，记录器自身开销仍存在。先以相同连接数/速率/字符串对比 Echo、0手 Push、225手 Push，再以相同pending对比低速正常与高频背压；跨构建数据分别列出，不相减制造精确归因。
+
+已核对6000.3.19f1本机 IL2CPP 源码：`icalls/mscorlib/System/GC.cpp` 的 `GetAllocatedBytesForCurrentThread` 为 `IL2CPP_NOT_IMPLEMENTED_ICALL` 后返回0；`gc/BoehmGC.cpp` 的 `GetCollectionCount(generation)` 忽略 generation，返回同一个 `GC_get_gc_no()`。因此主线程API探针失败不是网络零分配，三个代数计数相同也不是执行了三次独立回收。没有为取得数据修改引擎、补充native统计钩子或绕过计数器校验。
+
 此入口建立本机 Release IL2CPP 的有限窗口基线。最低移动设备每帧P95≤2ms、真实业务、其他架构/平台、弱网/后台、完整容量和24h soak 仍独立验收；本机低耗时不能证明这些目标已达成。当前没有据此新增池化、调度器或修改生产预算。
+
+需要调用栈时，在profiling命令增加 `--duration 3 --allocation-trace /absolute/temp/echo.raw`；父目录必须存在，目标文件必须尚不存在。仅允许profiling、测量窗最多10秒。预热排空后，Player以256MiB Profiler缓冲开启二进制日志和分配栈，在 `GameFrame.Network.TraceCalibration` 内分配1MiB数组，再用 `GameFrame.Network.MeasurementBegin/End` 标记墙钟窗口；窗口结束下一帧停止并恢复设置。原始文件在进程成功退出、双端收尾通过后导出，临时运行目录仍清理；普通运行不生成raw文件。此采集有显著开销，不能引用其耗时作为Release性能。
+
+在空闲且停止采集的Editor调用 `GameFrame.Editor.NetworkAllocationTraceAnalysis.Analyze(rawPath, reportPath)`，reportPath也须为新文件。工具通过Unity官方RawFrameDataView读取所有记录线程，在标记时间内按线程名、单次大小、完整栈分组，输出次数、字节、首个已解析托管方法及缺栈/未解析统计；先要求已知数组至少1MiB带栈记录及有效窗口，失败不产出成功报告。最多4096帧、每帧256线程、65536个分组，容量耗尽拒绝；已有Profiler历史先保存、结束后恢复，原来无历史则清除本次导入。解析量是记录中的GC.Alloc，包含引擎和夹具；不能保证未注册/未记录线程覆盖或无丢样。`UnresolvedStackBytes`表示栈中存在任一未解析native地址，`WithoutManagedFrameBytes`表示整栈缺少带程序集标识的托管方法。原始记录检查后按需清理，不提交到仓库。
 
 #### 2026-10-15 实跑基线
 
@@ -444,7 +456,93 @@ OwnedBytes为预约，包含每条KCP连接4MiB native额度；native实际和RS
 
 相关验证：NetworkKcpFaultTests 10项加NetworkLifecycleTests 11项合并21/21 PlayMode通过、0失败/0跳过，包括Push内再次发包不重复计时、拒绝发送和Push异常收尾；.NET伴随工程locked restore与Release编译0警告/0错误，Python参数越界/样本容量/零速率负向4项返回2。普通StandaloneOSX Release Player脚本43程序集编译通过，Game.Hotfix DLL已重新编译并拷贝；通过Cecil检查普通Game.Hotfix/Game.AOT均不包含Validation入口，三个正式元数据文件哈希未变；网络变更收尾检查时Editor Console无Error/Warning。此前的引擎退出allocator诊断未由此任务归因或修复，不宣称引擎日志问题已解决。场景、编译宏、架构和测试设置恢复，临时证书副本/构建/进程与结果清理；正式YooAsset资源包未更新，发布新Runtime前仍需按正式平台重新生成并构建。
 
-网络验证完成后的工作区状态另记：同日19:51并行日志UI改动已在GameEntry/GameUIRegistration引用RuntimeLogPanel、RuntimeLogEntryPanel，但对应脚本尚未就绪，Editor出现CS0246。此变化不在本轮网络改动内，保留其源码且未混入网络修复；上述43程序集/Hotfix证据对应新增这些UI引用之前的源码状态，不能据此声称当前并行修改后的整个工作区编译通过。
+#### 2026-10-15 分配与热点对照
+
+本轮使用同一台 Apple M5 / macOS ARM64、Unity6000.3.19f1 / HybridCLR、Minimal stripping和原native产物；每轮预热2秒、测量10秒，中文128字符。idle4/Echo/Push使用4连接，Echo与Push合计240次/秒；low1使用单连接2次/秒、pending=1，reject1使用单连接2000次/秒、pending=1。Release和Development profiling分别完整构建；Release构建0警告/0错误，Development构建0错误、3条TextMeshPro大方法独立生成C++文件的编译提示。未启用Deep Profiling或自动连接Profiler，WSS沿用已核验既有localhost证书，未改信任。
+
+Release耗时对照，单位毫秒；分配/GC时间计数器在此包均未通过探针，未使用其0值。
+
+| 负载 | 成功/提供 | 背压 | 帧网络P95 | P99 | 最大值 |
+| --- | --- | --- | --- | --- | --- |
+| kcp-idle4 | 0/0 | 0 | 0.0044 | 0.0054 | 0.0097 |
+| kcp-echo4 | 2397/2397 | 0 | 0.3423 | 1.3829 | 1.5401 |
+| kcp-push0 | 2396/2396 | 0 | 0.4008 | 1.4938 | 2.3842 |
+| kcp-push225 | 2396/2396 | 0 | 1.8970 | 2.3037 | 3.1810 |
+| kcp-low1 | 19/19 | 0 | 0.0620 | 0.0892 | 0.1304 |
+| kcp-reject1 | 188/19998 | 19810 | 3.4012 | 4.1147 | 4.6988 |
+| wss-idle4 | 0/0 | 0 | 0.0072 | 0.0109 | 0.0139 |
+| wss-echo4 | 2398/2398 | 0 | 0.4691 | 2.1496 | 2.9674 |
+| wss-push0 | 2396/2396 | 0 | 1.4272 | 3.0335 | 3.4022 |
+| wss-push225 | 2396/2396 | 0 | 2.3835 | 3.3923 | 3.6576 |
+| wss-low1 | 19/19 | 0 | 0.0046 | 0.1686 | 0.1934 |
+| wss-reject1 | 596/19998 | 19402 | 3.0282 | 3.4699 | 3.7071 |
+
+以下为独立Development采样包结果，分配包含引擎/夹具/负载；MiB=1048576字节，速率以墙钟测量秒数归一，仅用于同口径对照，存在上述帧边界差异。每轮1MiB探针实测1060850字节，GC时间探针均非零。GC时间是主线程标记，不能代表整个进程GC停顿。
+
+| 负载 | 记录帧槽 | 分配MiB | MiB/s | GC0差值 | 主线程GC标记累计ms | 最大帧GC标记ms |
+| --- | --- | --- | --- | --- | --- | --- |
+| kcp-idle4 | 596 | 2.05 | 0.21 | 5 | 1.426 | 0.678 |
+| kcp-echo4 | 596 | 18.98 | 1.90 | 43 | 16.580 | 1.253 |
+| kcp-push0 | 596 | 22.73 | 2.27 | 50 | 10.518 | 1.481 |
+| kcp-push225 | 596 | 49.80 | 4.97 | 118 | 60.979 | 1.990 |
+| kcp-low1 | 599 | 0.62 | 0.06 | 2 | 1.817 | 1.016 |
+| kcp-reject1 | 593 | 74.12 | 7.41 | 186 | 75.468 | 1.074 |
+| wss-idle4 | 583 | 2.03 | 0.20 | 5 | 1.958 | 1.143 |
+| wss-echo4 | 599 | 258.17 | 25.80 | 476 | 16.273 | 2.400 |
+| wss-push0 | 597 | 346.48 | 34.65 | 636 | 13.896 | 2.517 |
+| wss-push225 | 597 | 450.94 | 45.03 | 845 | 86.050 | 2.584 |
+| wss-low1 | 599 | 2.64 | 0.26 | 6 | 0.770 | 0.770 |
+| wss-reject1 | 600 | 135.71 | 13.55 | 308 | 69.506 | 0.993 |
+
+对照与源码核验支持以下结论：
+
+- 225手相对0手快照的主线程增量主要出现在Push派发；其中解码已有单独计时，校验与释放等尚未进一步分离。Release的KCP/WSS PushDecoding累计约240.5/271.2ms，占对应主线程网络总量约50.2%/47.3%；测试handler累计仅约3.2/4.1ms。生成的GomokuMoveData是独立引用DTO，快照还有Moves数组及线上正文；本轮夹具未保留快照，仍观察到随225手增加的分配。不能据此把DTO归池或取消正文校验，业务允许保留DTO的所有权契约仍需保持。
+- reject1的Release网络总耗时约99%位于OutboundOutsidePump；源码中RPC在pending额度检查前已进行编码、帧分配和Pending/TaskCompletionSource创建，拒绝后还会释放清零并交付异常。Development采样证实提供请求大量被拒绝时仍有明显分配，但尚未逐项分离异常、编码和对象成本。优先控制调用方在途与提供速率，再独立评估提前检查准入；提前检查会改变无效正文与背压同时出现时的错误先后，不能在未明确契约和回归前直接挪动判断。
+- 同负载下WSS的帧分配计数明显高于KCP，且大量CollectionCount没有对应的主线程GC标记。此结果要求继续检查后台WSS/TLS/运行库路径，不能把进程回收次数换算成主线程停顿，也不能将全部差额归到GameFrame的OwnedFrame。框架的WSS固定头验证/正文扩容本身存在分配，但本轮未取得各调用栈的分配字节占比；具体传输库内部热点仍待分配栈验证。
+- 保留现有正式Runtime、协议、默认预算和DTO所有权。当前证据已定位负载敏感路径，尚不足以选择池化、零复制或更换调度模型；本轮只补采样与验证工具。桌面短窗口仍不代表最低移动设备P95门禁、生产容量或24h稳定性。
+
+关键负载复测：Release完整快照的KCP帧P95/P99/最大值为1.7969/2.3271/2.7284ms，WSS为2.8022/3.5274/3.9154ms；两轮范围说明耗时有波动，不能只引用较低一次。Development中KCP纯Echo分配19902576→19935634字节、完整快照52219944→52155302字节；WSS纯Echo270705873→270623103字节、完整快照472842463→472329106字节，四组差异均小于0.2%，支持本轮分配差异可重复，但仍不是调用栈级归因。
+
+本轮共30轮实跑（Release14、Development profiling16），全部Player/伴随进程退出0、HarnessLimited=0，测量请求结果计账一致，窗口外Echo正常，两端可追踪资源归零；16轮Development的分配/GC探针均通过。新增Python模式隔离2项、参数越界/容量/零速率4项负向检查均拒绝；伴随.NET工程locked restore/Release编译0警告/0错误。普通StandaloneOSX Release Player脚本43程序集编译通过，Cecil核验Game.AOT/Game.Hotfix均没有Validation类型；Editor编译/Console无Error/Warning。本轮仅改Tests/Player、构建与启动验证脚本和文档，未修改正式网络源码，也未重跑既有故障PlayMode组或做全模块源码审查。引擎既有退出allocator诊断不属于已解决项。场景、defines、架构、EditorSettings及构建引起的字体缓存已恢复；正式Hotfix资源和三个元数据文件哈希与测试前一致，HybridCLR编译输出已恢复为普通Release，未更新YooAsset发布包。临时Player、证书副本、报告与本轮进程已清理。
+
+
+#### 2026-10-15 WSS 分配栈归因
+
+沿用上述M5、Unity6000.3.19f1、macOS ARM64 Development IL2CPP/HybridCLR/Minimal，重新完整构建0警告/0错误。每轮4连接、中文128字符、预热2秒、测量3秒，非空闲负载合计240次/秒。以下为raw标记窗口的所有已记录线程GC.Alloc，与前面的10秒帧槽统计口径不同。
+
+| 负载 | 成功请求 | GC.Alloc字节 | TLS缓冲重建字节 | 占比 | FrameMemoryBudget直接分配字节 |
+| --- | --- | --- | --- | --- | --- |
+| KCP Echo | 716 | 5978898 | 0 | 0% | 1218916 |
+| WSS Echo | 716 | 81110211 | 71382528 | 88.01% | 1327468 |
+| KCP 225手Push | 717 | 15557235 | 0 | 0% | 3441788 |
+| WSS 225手Push | 716 | 141415014 | 118730176 | 83.96% | 3677380 |
+| WSS Echo复测 | 716 | 81046667 | 71382528 | 88.07% | 与首轮同路径 |
+| WSS idle | 0 | 879760 | 527168 | 59.92% | 含控制流量，不作业务逐包值 |
+
+6份raw均记录到1048608字节的已知数组及非空调用栈，窗口分配没有空栈；native栈仍含未解析地址，不声称完整符号化。WSS Echo首轮只有196730字节（约0.24%）缺少可解析托管方法，约98%分配发生在Scripting Threads。核心栈为 `WebSocketFrameTransport.ReceiveAsync → ManagedWebSocket.ReceiveAsyncPrivate/EnsureBufferContainsAsync → Stream.ReadAsync → MobileAuthenticatedStream.StartOperation`；发送对应 `ManagedWebSocket.SendFrameFallbackAsync → Stream.WriteAsync → StartOperation`。直接分配处首个托管帧是StartOperation的MoveNext，内联方法通过同包生成C++交叉核验。
+
+生成的System.cpp确认：MobileAuthenticatedStream的读/写缓冲InitialSize分别为16500/16384；`BufferOffsetSize2.Reset()`每次执行 `new byte[InitialSize]`，StartOperation在读写开始及finally各Reset一次。记录的单次16532/16416字节与数组及本包数组头吻合，这是分配量，不是正文大小或GC后活内存。WSS Echo记录到2880次读数组、1448次写数组，包含控制流量和窗口边界。GameFrame的32字节头验证后再读正文会增加上层Receive调用，但TLS内部缓冲不由OwnedFrame池或ClientWebSocket普通收发缓冲设置控制。
+
+方案比较：池化OwnedFrame只涉及本轮WSS约1.6%～2.6%的直接分配，不能解决主要差额；反射替换TLS私有字段、修改Unity缓存/运行库或按消息大小加特殊分支不采用。接收暂存的后续评估见下节：应用层Receive调用减少不等于TLS读取减少，本次候选方案没有收益，保持正式Runtime和证书校验。
+
+本轮另执行WSS/KCP Echo各一轮不开raw的计数对照，合计8轮Player负载全部Passed、HarnessLimited=0、窗口外Echo正常、双端退出0、可追踪资源归零。一次额外复测在伴随工程构建时遇到MSBuild子节点提前退出，未进入Player；随后串行、关闭构建节点复用后完成最终复测，不计为负载成功。5项参数负向检查均拒绝，已有输出未覆盖；实际Profiler历史保存/恢复及无历史清理通过。普通Release Player脚本43程序集及Hotfix重新编译通过，验证类型排除；Editor最终无Error/Warning。场景、设置和正式DLL/元数据资源保持，测试输出恢复普通Release；临时app/证书副本/raw/报告与自有进程清理。未重跑故障PlayMode、重打Release原生包或验移动设备；完整GC停顿、其他平台、容量/soak仍待验收，本次定向源码核对不是全模块审查。
+
+#### 2026-10-15 WSS 接收暂存评估：不采用
+
+沿用上述M5/macOS ARM64、Unity6000.3.19f1、HybridCLR/Minimal环境，分别完整构建原实现和临时4KiB接收暂存候选的Development profiling Player，两包均0警告/0错误。复用现有入口，4连接、中文128字符、总240次/秒、预热2秒、测量3秒；伴随服务在四轮负载中均使用原实现，只有候选Player的接收流程不同。候选只在固定4KiB范围内暂存，头部及路由校验通过后才分配实际帧长度，保留旧+新预算、EndOfMessage校验、全容量清零和finally释放，不引入池、消息特例或运行库修改。
+
+| 负载/实现 | 成功RPC | Push | raw GC.Alloc字节 | TLS缓冲重建字节 | 总分配/成功RPC（字节，四舍五入） |
+| --- | --- | --- | --- | --- | --- |
+| Echo / 原实现 | 716 | 0 | 81121184 | 71382528 | 113298 |
+| Echo / 4KiB暂存 | 719 | 0 | 84252845 | 71679408 | 117181 |
+| 225手Push / 原实现 | 716 | 716 | 141386114 | 118730176 | 197467 |
+| 225手Push / 4KiB暂存 | 716 | 716 | 146928483 | 118730176 | 205207 |
+
+raw包含引擎、夹具、控制流量及墙钟窗口边界；请求数有差异，因此同时列出成功数与归一结果，不将全部字节称为网络独占成本或精确业务逐包成本。Echo/完整快照归一总分配分别增加约3.43%/3.92%；Echo归一TLS分配约99696→99693字节，差异约-0.003%，完整快照TLS分配完全相同。读数组次数为2880→2892、5744→5744，写数组为1448→1454、1448→1448，与请求/控制数量相符，未获得主要TLS分配下降。四连接等待下一帧的预约由2176增加到18432字节，即每连接544→4608；框架直接分配分别1327468→4287543、3677380→9529540字节。
+
+原因通过同包只读生成C++核对：`ManagedWebSocket`构造时已有125字节内部接收缓冲；`EnsureBufferContainsAsync`向剩余缓冲读入WebSocket头和部分应用正文，`ReceiveAsyncPrivate`先消费内部数据，再按用户缓冲及剩余payload读取TLS。当前32字节GFNP头已经在这份内部数据中；合并应用层头/正文Receive调用并没有消除取得剩余正文的TLS读取。每条WebSocket消息本身的读取边界及TLS操作重建缓冲仍存在，连接复用暂存也不能仅凭上层调用次数推断收益。
+
+四轮均Passed、HarnessLimited=0、请求结果一致，窗口外Echo正常，Player/伴随进程退出0且可追踪资源归零；四份raw的已知数组带栈校验均为1048608字节，没有空分配栈，仍存在未解析native地址。候选源码的独立.NET框架回归13/13通过，但这不代表完整分片/故障/平台验收。候选已因分配和预约成本增加被淘汰，正式接收源码逐字节恢复，不保留新接口、预算或测试分支；没有继续构建Release性能对照或扩大故障矩阵，不引用Development耗时证明Release收益。恢复后的ServerReceiveBudgetTests/ConnectionRaceTests共33/33通过、零跳过，Release编译无警告/错误；普通Release脚本/Hotfix重新编译，输出43程序集，Cecil确认Game.AOT/Game.Hotfix的Validation类型均为0。Editor最终Console无Error/Warning，Launch、ProjectSettings、正式DLL/元数据资源哈希与本轮开始一致，defines为空、Development=false；Profiler历史恢复，临时Player/raw/报告/证书副本和密码及自有进程清理。当前任务只更新上述评估和对应进度文档。WSS暂存不再作为当前必做优化；其他Unity版本或传输方案需有新证据再评估。
 
 <a id="network-hotupdate-dto"></a>
 
@@ -482,7 +580,7 @@ HTTP 日志和 YooAsset 构建报告对应：更新仅下载 Game.Hotfix 的9613
 | 2026-10-12 重启后 Unity Mono | 新 mbedTLS4.2/ABI2 实际 UDP Hello/Echo/关闭通过，自有缓冲与 native 预留归零 | 非 IL2CPP、移动真机或 Windows 执行 |
 | 2026-10-12 StandaloneOSX | Player 脚本编译 43 程序集通过 | 非最终 native 链接、裁剪或 Player 运行 |
 
-待验收：其他架构/裁剪等级的正式 Launch/Release IL2CPP 与新 DTO 包后热更、公网资源/CDN发布、移动设备/模拟器、Windows/Linux 平台实跑、Player IPv6/代理/后台/换网/弱网、完整元数据与尚未覆盖的建连/关闭/后台和失败细分诊断、有效分配与GC停顿归因、目标设备性能容量/24h soak。macOS ARM64 Release/Minimal 的正式启动与包后新增协议已有上述实跑证据；WebGL WSS 和世界业务延后，不以当前结果声称全部平台完成。
+待验收：其他架构/裁剪等级的正式 Launch/Release IL2CPP 与新 DTO 包后热更、公网资源/CDN发布、移动设备/模拟器、Windows/Linux 平台实跑、Player IPv6/代理/后台/换网/弱网、完整元数据与尚未覆盖的建连/关闭/后台和失败细分诊断、分配剩余细项与完整GC停顿归因、目标设备性能容量/24h soak。macOS ARM64 Release/Minimal 的正式启动与包后新增协议已有上述实跑证据；WebGL WSS 和世界业务延后，不以当前结果声称全部平台完成。
 
 
 ## 五子棋房间（2026-10-14）

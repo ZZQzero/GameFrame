@@ -38,9 +38,23 @@ namespace GameFrame.Editor
             }
         }
 
-        // Scheduling lets MCP return before Unity's synchronous native build starts.
-        public static void ScheduleBuild(string output, bool performance = false)
+        [MenuItem("Tools/GameFrame/Network/Build macOS Allocation Profiling Player")]
+        private static void BuildProfilingFromMenu()
         {
+            string output = EditorUtility.SaveFolderPanel("Network allocation profiling output", Path.GetTempPath(), "");
+            if (!string.IsNullOrEmpty(output))
+            {
+                ScheduleBuild(output, true, true);
+            }
+        }
+
+        // Scheduling lets MCP return before Unity's synchronous native build starts.
+        public static void ScheduleBuild(string output, bool performance = false, bool profiling = false)
+        {
+            if (profiling && !performance)
+            {
+                throw new ArgumentException("Profiling uses the performance workload.");
+            }
             if (scheduled || BuildPipeline.isBuildingPlayer || EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isCompiling)
             {
                 throw new InvalidOperationException("Editor is busy.");
@@ -77,12 +91,12 @@ namespace GameFrame.Editor
                 }
 
                 EditorApplication.update -= run;
-                Build(output, performance);
+                Build(output, performance, profiling);
             };
             EditorApplication.update += run;
         }
 
-        private static void Build(string output, bool performance)
+        private static void Build(string output, bool performance, bool profiling)
         {
             SceneSetup[] scenes = EditorSceneManager.GetSceneManagerSetup();
             EditorBuildSettingsScene[] buildScenes = EditorBuildSettings.scenes;
@@ -106,7 +120,7 @@ namespace GameFrame.Editor
                 EditorSceneManager.SaveScene(scene, scenePath);
                 EditorSceneManager.RestoreSceneManagerSetup(scenes);
                 EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(scenePath, true) };
-                EditorUserBuildSettings.development = !performance;
+                EditorUserBuildSettings.development = !performance || profiling;
                 if (performance)
                 {
                     PlayerSettings.SetScriptingDefineSymbols(NamedBuildTarget.Standalone,
@@ -120,7 +134,7 @@ namespace GameFrame.Editor
                 BuildReport report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
                 {
                     scenes = new[] { scenePath }, locationPathName = app, target = BuildTarget.StandaloneOSX,
-                    options = (performance ? BuildOptions.None : BuildOptions.Development) | BuildOptions.StrictMode
+                    options = (EditorUserBuildSettings.development ? BuildOptions.Development : BuildOptions.None) | BuildOptions.StrictMode
                 });
                 if (report.summary.result != BuildResult.Succeeded)
                 {
@@ -151,7 +165,7 @@ namespace GameFrame.Editor
                 File.WriteAllLines(Path.Combine(payload, "metadata.txt"), metadata);
                 SignPlayer(app);
                 File.WriteAllText(Path.Combine(output, "build-succeeded.txt"),
-                    "StandaloneOSX IL2CPP " + (performance ? "Release performance" : "Development") + " / HybridCLR enabled\n" +
+                    "StandaloneOSX IL2CPP " + (profiling ? "Development profiling" : performance ? "Release performance" : "Development correctness") + " / HybridCLR enabled\n" +
                     "Stripping=" + PlayerSettings.GetManagedStrippingLevel(NamedBuildTarget.Standalone) + "\n" +
                     "Architecture=" + UnityEditor.OSXStandalone.UserBuildSettings.architecture + "\n" +
                     "AOT metadata=" + metadata.Length + "\n" +

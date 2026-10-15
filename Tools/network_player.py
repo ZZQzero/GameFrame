@@ -44,8 +44,9 @@ def stop_process(process):
 
 def performance_run(args, root, app, executable, native, identity):
     build = (app.parent / "build-succeeded.txt").read_text()
-    if "Release performance" not in build:
-        raise ValueError("performance mode requires the dedicated Release performance build")
+    expected_build = "Development profiling" if args.mode == "profiling" else "Release performance"
+    if expected_build not in build:
+        raise ValueError(f"{args.mode} mode requires the dedicated {expected_build} build")
     if args.transport == "wss" and (args.certificate is None or not args.certificate.is_file()):
         raise ValueError("WSS requires --certificate pointing to an already trusted localhost PFX; trust is never changed")
     configuration = dict(
@@ -53,7 +54,8 @@ def performance_run(args, root, app, executable, native, identity):
         DurationSeconds=args.duration, WarmupSeconds=args.warmup,
         RequestsPerSecond=0 if args.scenario == "idle" else args.rate,
         MaxInFlight=args.concurrency, PendingLimit=args.pending_limit,
-        TextLength=args.text_length, Unicode=args.unicode, Push=args.push, PushMoves=args.push_moves)
+        TextLength=args.text_length, Unicode=args.unicode, Push=args.push, PushMoves=args.push_moves,
+        Profiling=args.mode == "profiling", AllocationTrace=args.allocation_trace is not None)
     host = player = None
     with tempfile.TemporaryDirectory(prefix="gameframe-network-performance-") as temporary:
         directory = Path(temporary)
@@ -117,6 +119,14 @@ def performance_run(args, root, app, executable, native, identity):
                     raise RuntimeError("Performance companion did not release all sessions and buffers")
                 result.update(Companion=companion, PlayerExit=code, CompanionExit=host.returncode, ProcessSamples=monitor,
                               NativeArtifact=identity, ExecutionArchitecture=architecture, Build=build)
+                if args.allocation_trace is not None:
+                    trace = directory / "allocations.raw"
+                    if not trace.is_file() or trace.stat().st_size == 0:
+                        raise RuntimeError("Player produced no allocation trace")
+                    # Exclusive creation protects existing profiler evidence from accidental replacement.
+                    with args.allocation_trace.open("xb") as target, trace.open("rb") as source:
+                        shutil.copyfileobj(source, target)
+                    result["AllocationTrace"] = str(args.allocation_trace.resolve())
                 rendered = json.dumps(result, ensure_ascii=False, indent=2)
                 if args.json is not None:
                     args.json.write_text(rendered + "\n")
@@ -131,7 +141,8 @@ def main():
     parser.add_argument("--player", type=Path, required=True, help="NetworkValidation.app from the Unity validation build menu")
     parser.add_argument("--dotnet", default=shutil.which("dotnet"), help="dotnet executable (SDK 10.0.401)")
     parser.add_argument("--json", type=Path, help="optional evidence JSON output; parent must exist")
-    parser.add_argument("--mode", choices=("correctness", "performance"), default="correctness")
+    parser.add_argument("--mode", choices=("correctness", "performance", "profiling"), default="correctness")
+    parser.add_argument("--allocation-trace", type=Path, help="optional new raw Profiler file; profiling mode only, duration <= 10s")
     parser.add_argument("--transport", choices=("kcp", "wss"), default="kcp")
     parser.add_argument("--scenario", choices=("idle", "echo", "timeout", "cancel", "backpressure"), default="echo")
     parser.add_argument("--connections", type=int, choices=range(1, 5), default=1)
@@ -146,13 +157,18 @@ def main():
     parser.add_argument("--push-moves", type=int, default=0)
     parser.add_argument("--certificate", type=Path, help="already trusted localhost PFX for WSS; password in GF_PERFORMANCE_CERTIFICATE_PASSWORD")
     args = parser.parse_args()
+    if args.allocation_trace is not None:
+        if args.mode != "profiling" or args.duration > 10:
+            parser.error("--allocation-trace requires --mode profiling and --duration <= 10")
+        if not args.allocation_trace.parent.is_dir() or args.allocation_trace.exists():
+            parser.error("--allocation-trace requires an existing parent and a new output file")
     if not (1 <= args.duration <= 120 and 1 <= args.warmup <= 30
             and 0 <= args.rate <= 10000 and 1 <= args.concurrency <= 512 and 1 <= args.pending_limit <= 512
             and 0 <= args.text_length <= 128 and 0 <= args.push_moves <= 225):
         parser.error("duration/warmup/rate/concurrency/pending/text/push configuration exceeds bounded workload limits")
-    if args.mode == "performance" and args.scenario != "idle" and args.rate * args.duration > 100000:
+    if args.mode != "correctness" and args.scenario != "idle" and args.rate * args.duration > 100000:
         parser.error("rate * duration must not exceed the 100000 RPC sample capacity")
-    if args.mode == "performance" and args.scenario != "idle" and args.rate == 0:
+    if args.mode != "correctness" and args.scenario != "idle" and args.rate == 0:
         parser.error("non-idle workload requires --rate > 0")
     if platform.system() != "Darwin":
         parser.error("this validation entry currently targets macOS only")
@@ -174,10 +190,10 @@ def main():
         executable = app / "Contents/MacOS" / plistlib.load(stream)["CFBundleExecutable"]
     subprocess.run([args.dotnet, "build", "NetworkServer.Tests/NetworkServer.Tests.csproj", "-c", "Release",
                     "-p:RestoreLockedMode=true", "--nologo", "-v:q"], cwd=root / "Tools", check=True)
-    if args.mode == "performance":
+    if args.mode != "correctness":
         performance_run(args, root, app, executable, native, identity)
         return
-    if "Development" not in (app.parent / "build-succeeded.txt").read_text():
+    if "Development correctness" not in (app.parent / "build-succeeded.txt").read_text():
         parser.error("correctness mode requires the Development validation build")
     host = player = None
     with tempfile.TemporaryDirectory(prefix="gameframe-network-player-") as temporary:

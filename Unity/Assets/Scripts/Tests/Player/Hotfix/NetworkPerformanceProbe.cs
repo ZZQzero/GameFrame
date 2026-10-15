@@ -8,7 +8,11 @@ using Cysharp.Threading.Tasks;
 using Game.Protocol;
 using GameFrame;
 using GameFrame.Network;
+using Unity.Profiling;
+using Unity.Profiling.LowLevel;
+using Unity.Profiling.LowLevel.Unsafe;
 using UnityEngine;
+using UnityEngine.Profiling;
 using Stopwatch = System.Diagnostics.Stopwatch;
 
 namespace Game.Hotfix.Validation
@@ -30,6 +34,8 @@ namespace Game.Hotfix.Validation
             public bool Unicode;
             public bool Push;
             public int PushMoves;
+            public bool Profiling;
+            public bool AllocationTrace;
         }
 
         [Serializable]
@@ -108,6 +114,223 @@ namespace Game.Hotfix.Validation
         }
 
         [Serializable]
+        private sealed class RecorderResult
+        {
+            public string Name;
+            public string Scope;
+            public string Unit;
+            public bool Available;
+            public bool CalibrationPassed;
+            public long CalibrationValue;
+            public int Frames;
+            public long SampleCount;
+            public long Total;
+            public long MaximumPerFrame;
+        }
+
+        // Counter sampling stays independent of the optional, expensive allocation trace.
+        private sealed class GcSampling : IDisposable
+        {
+            private const int Capacity = 65536;
+            private ProfilerRecorder allocations;
+            private ProfilerRecorder collections;
+            internal readonly RecorderResult Allocations = new RecorderResult
+            {
+                Name = "GC Allocated In Frame", Unit = "Bytes",
+                Scope = "Unity engine frame counter, including workload, harness and engine; not network-only or a current-thread counter."
+            };
+            internal readonly RecorderResult Collections = new RecorderResult
+            {
+                Name = "GC.Collect", Unit = "TimeNanoseconds",
+                Scope = "Main-thread GC.Collect marker duration; not an exact stop-the-world pause or the sum of all GC-related markers."
+            };
+
+            internal GcSampling()
+            {
+                var handles = new List<ProfilerRecorderHandle>();
+                ProfilerRecorderHandle.GetAvailable(handles);
+                foreach (ProfilerRecorderHandle handle in handles)
+                {
+                    ProfilerRecorderDescription description = ProfilerRecorderHandle.GetDescription(handle);
+                    var options = ProfilerRecorderOptions.SumAllSamplesInFrame;
+                    if (description.Name == Allocations.Name && description.UnitType == ProfilerMarkerDataUnit.Bytes)
+                    {
+                        allocations = new ProfilerRecorder(handle, Capacity, options);
+                    }
+                    else if (description.Name == Collections.Name && description.UnitType == ProfilerMarkerDataUnit.TimeNanoseconds)
+                    {
+                        collections = new ProfilerRecorder(handle, Capacity, options | ProfilerRecorderOptions.CollectOnlyOnCurrentThread);
+                    }
+                }
+                Allocations.Available = allocations.Valid;
+                Collections.Available = collections.Valid;
+            }
+
+            internal async UniTask CalibrateAsync()
+            {
+                Start();
+                await UniTask.NextFrame(PlayerLoopTiming.LastPostLateUpdate);
+                var knownAllocation = new byte[1024 * 1024];
+                GC.Collect();
+                GC.KeepAlive(knownAllocation);
+                await UniTask.NextFrame(PlayerLoopTiming.LastPostLateUpdate);
+                await UniTask.NextFrame(PlayerLoopTiming.LastPostLateUpdate);
+                Stop();
+                Allocations.CalibrationValue = Sum(allocations);
+                Collections.CalibrationValue = Sum(collections);
+                Allocations.CalibrationPassed = Allocations.Available && Allocations.CalibrationValue >= knownAllocation.Length;
+                Collections.CalibrationPassed = Collections.Available && Collections.CalibrationValue > 0;
+            }
+
+            private static long Sum(ProfilerRecorder recorder)
+            {
+                long total = 0;
+                if (recorder.Valid)
+                {
+                    foreach (ProfilerRecorderSample sample in recorder.ToArray())
+                    {
+                        total += sample.Value;
+                    }
+                }
+                return total;
+            }
+
+            internal void Start()
+            {
+                if (allocations.Valid)
+                {
+                    allocations.Reset();
+                    allocations.Start();
+                }
+                if (collections.Valid)
+                {
+                    collections.Reset();
+                    collections.Start();
+                }
+            }
+
+            internal void Stop()
+            {
+                if (allocations.Valid)
+                {
+                    allocations.Stop();
+                }
+                if (collections.Valid)
+                {
+                    collections.Stop();
+                }
+            }
+
+            internal void Finish()
+            {
+                Read(allocations, Allocations);
+                Read(collections, Collections);
+            }
+
+            private static void Read(ProfilerRecorder recorder, RecorderResult result)
+            {
+                if (!result.CalibrationPassed)
+                {
+                    return;
+                }
+                if (recorder.Count >= Capacity || recorder.WrappedAround)
+                {
+                    throw new InvalidOperationException("GC recorder capacity exceeded.");
+                }
+                ProfilerRecorderSample[] samples = recorder.ToArray();
+                // Recording starts at LastPostLateUpdate; discard the first, partial frame.
+                for (int i = 1; i < samples.Length; i++)
+                {
+                    result.Frames++;
+                    result.Total += samples[i].Value;
+                    result.SampleCount += samples[i].Count;
+                    result.MaximumPerFrame = Math.Max(result.MaximumPerFrame, samples[i].Value);
+                }
+            }
+
+            public void Dispose()
+            {
+                allocations.Dispose();
+                collections.Dispose();
+            }
+        }
+
+        private sealed class AllocationTrace : IDisposable
+        {
+            private readonly bool active;
+            private readonly string previousLog;
+            private readonly bool previousBinary;
+            private readonly bool previousCallstacks;
+            private readonly int previousMemory;
+            private bool disposed;
+
+            internal AllocationTrace(string path)
+            {
+                if (path == null)
+                {
+                    return;
+                }
+                if (!Debug.isDebugBuild || !Profiler.supported || Profiler.enabled)
+                {
+                    throw new InvalidOperationException("Allocation trace requires an idle Development Player profiler.");
+                }
+                active = true;
+                previousLog = Profiler.logFile;
+                previousBinary = Profiler.enableBinaryLog;
+                previousCallstacks = Profiler.enableAllocationCallstacks;
+                previousMemory = Profiler.maxUsedMemory;
+                Profiler.logFile = path;
+                Profiler.maxUsedMemory = 256 * 1024 * 1024;
+                Profiler.enableBinaryLog = true;
+                Profiler.enableAllocationCallstacks = true;
+                Profiler.enabled = true;
+            }
+
+            internal async UniTask CalibrateAsync()
+            {
+                if (!active)
+                {
+                    return;
+                }
+                await UniTask.NextFrame(PlayerLoopTiming.LastPostLateUpdate);
+                Profiler.BeginSample("GameFrame.Network.TraceCalibration");
+                try
+                {
+                    var knownAllocation = new byte[1024 * 1024];
+                    GC.KeepAlive(knownAllocation);
+                }
+                finally
+                {
+                    Profiler.EndSample();
+                }
+                await UniTask.NextFrame(PlayerLoopTiming.LastPostLateUpdate);
+            }
+
+            internal void Mark(string name)
+            {
+                if (active)
+                {
+                    Profiler.BeginSample(name);
+                    Profiler.EndSample();
+                }
+            }
+
+            public void Dispose()
+            {
+                if (!active || disposed)
+                {
+                    return;
+                }
+                disposed = true;
+                Profiler.enabled = false;
+                Profiler.enableBinaryLog = previousBinary;
+                Profiler.enableAllocationCallstacks = previousCallstacks;
+                Profiler.logFile = previousLog;
+                Profiler.maxUsedMemory = previousMemory;
+            }
+        }
+
+        [Serializable]
         private sealed class Report
         {
             public bool Passed;
@@ -136,6 +359,8 @@ namespace Game.Hotfix.Validation
             public long MainThreadAllocatedBytes;
             public double MainThreadAllocatedBytesPerSecond;
             public int[] GcCollections;
+            public RecorderResult FrameAllocations;
+            public RecorderResult MainThreadGcCollect;
             public MemorySample[] Memory;
             public int PeakPending;
             public int PeakSendQueue;
@@ -365,7 +590,13 @@ namespace Game.Hotfix.Validation
                 Check((long)settings.RequestsPerSecond * settings.DurationSeconds <= rpc.Length, "RPC sample capacity exceeded by configuration.");
                 Check(settings.Transport == "kcp" || settings.Transport == "wss", "Invalid transport.");
                 Check(Array.IndexOf(new[] { "idle", "echo", "timeout", "cancel", "backpressure" }, settings.Scenario) >= 0, "Invalid scenario.");
-                Check(!Debug.isDebugBuild, "Use the dedicated Release performance build.");
+                Check(Debug.isDebugBuild == settings.Profiling, "Workload mode does not match the dedicated Player build.");
+                Check(!settings.AllocationTrace || (settings.Profiling && settings.DurationSeconds <= 10),
+                    "Allocation traces require profiling mode and a window of at most 10 seconds.");
+                using var gcSampling = new GcSampling();
+                await gcSampling.CalibrateAsync();
+                Check(!settings.Profiling || gcSampling.Allocations.CalibrationPassed,
+                    "Profiling allocation counter failed known-allocation calibration.");
                 var ready = JsonUtility.FromJson<Ready>(File.ReadAllText(Path.Combine(directory, "ready.json")));
                 File.Delete(Path.Combine(directory, "ready.json"));
                 var endpoint = new Uri(ready.Endpoint);
@@ -428,20 +659,32 @@ namespace Game.Hotfix.Validation
                     }
                     await WindowAsync(settings.WarmupSeconds, false);
                     await DrainAsync();
+                    using var trace = new AllocationTrace(settings.AllocationTrace ? Path.Combine(directory, "allocations.raw") : null);
+                    await trace.CalibrateAsync();
                     bool allocationAvailable = AllocationCounterAvailable();
                     File.WriteAllText(Path.Combine(directory, "measuring"), "window begins");
                     var before = GameRuntime.Network.GetMetrics();
                     var collections = new[] { GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2) };
                     long allocated = allocationAvailable ? GC.GetAllocatedBytesForCurrentThread() : 0;
+                    gcSampling.Start();
+                    trace.Mark("GameFrame.Network.MeasurementBegin");
                     long started = Stopwatch.GetTimestamp();
                     await WindowAsync(settings.DurationSeconds, true);
                     double seconds = Milliseconds(started) / 1000;
+                    trace.Mark("GameFrame.Network.MeasurementEnd");
+                    gcSampling.Stop();
                     long allocatedBytes = allocationAvailable ? GC.GetAllocatedBytesForCurrentThread() - allocated : 0;
                     for (int i = 0; i < collections.Length; i++)
                     {
                         collections[i] = GC.CollectionCount(i) - collections[i];
                     }
                     var after = GameRuntime.Network.GetMetrics();
+                    gcSampling.Finish();
+                    if (settings.AllocationTrace)
+                    {
+                        await UniTask.NextFrame(PlayerLoopTiming.LastPostLateUpdate);
+                        trace.Dispose();
+                    }
                     File.WriteAllText(Path.Combine(directory, "measured"), "window ended");
                     memory.Add(SampleMemory(seconds));
                     await DrainAsync();
@@ -468,7 +711,7 @@ namespace Game.Hotfix.Validation
                     Check(settings.Scenario != "cancel" || cancellations > 0, "Cancellation was not exercised.");
                     var report = new Report
                     {
-                        Passed = true, Runtime = "Release IL2CPP + HybridCLR", Configuration = settings,
+                        Passed = true, Runtime = (settings.Profiling ? "Development profiling" : "Release") + " IL2CPP + HybridCLR", Configuration = settings,
                         RequestCounterScope = "Requests offered during measurement, including their completions during drain; Pushes counts measurement deliveries only.",
                         MeasuredSeconds = seconds, Offered = offered, HarnessLimited = limited, Successful = successful,
                         Backpressure = backpressure, Timeouts = timeouts, Cancellations = cancellations, Pushes = pushes,
@@ -480,6 +723,7 @@ namespace Game.Hotfix.Validation
                         PushHandlers = new Duration(before.PushHandlers, after.PushHandlers),
                         MainThreadAllocatedBytesAvailable = allocationAvailable, MainThreadAllocatedBytes = allocatedBytes,
                         MainThreadAllocatedBytesPerSecond = allocatedBytes / seconds, GcCollections = collections,
+                        FrameAllocations = gcSampling.Allocations, MainThreadGcCollect = gcSampling.Collections,
                         Memory = memory.ToArray(), PeakPending = peakPending, PeakSendQueue = peakSend, PeakReceiveQueue = peakReceive,
                         LifetimeLateResponses = late, PeakReservedBytes = after.PeakReservedBytes, ReleasedOwnedBytes = final.OwnedBytes
                     };

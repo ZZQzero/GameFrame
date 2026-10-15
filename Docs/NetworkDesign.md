@@ -1009,6 +1009,10 @@ macOS 独立 Development IL2CPP 验证入口已接入：独立临时场景 + Hyb
 
 2026-10-15 客户端主线程观测与Release性能基线已完成首轮：复用Runtime/Client固定汇总和独立Player构建，macOS ARM64 Release/Minimal完整IL2CPP构建0警告/错误；KCP/WSS共14轮有限负载通过，含各两轮4连接240次/秒的中文长消息与225手快照、空闲、pending背压、期限和取消。相关PlayMode21/21通过；普通Release脚本43程序集与Hotfix重新编译，验证入口排除。主线程分配API在该Player不可用，GC原值和RSS另报；刻意高频背压成本超过2ms，不能宣称最低设备门禁或容量达标。仅调整测试pending参数隔离默认服务端输入限速，未改生产预算/协议或加池化；具体数值、负向复验和限制集中在[客户端性能基线](ClientNetworkUsage.md#network-player-performance)。
 
+同日补齐独立Development profiling模式及已知分配/GC探针：本机IL2CPP的主线程分配API未实现，Release帧分配/GC时间探针也无有效数据，因此Release继续只测耗时，Development以相同负载取得有效帧分配和限定主线程的GC时间标记。新增30轮KCP/WSS对照及关键负载复测通过；完整快照Push解码、高频背压发送路径及WSS相对较高的分配计数已定位，具体WSS内部调用栈及完整GC停顿尚未归因。四组关键分配复测差异小于0.2%；统计保留在验证工具，正式Runtime、协议、预算和DTO所有权不变，暂不据此加池化或调度层。详见上述客户端性能章节，不以采样包耗时替代Release或最低设备门禁。
+
+同日进一步完成WSS定向分配栈归因：独立Development IL2CPP包新增可选短时raw采集和Editor分析，已知1MiB数组与测量标记校验通过；6轮带栈及2轮普通计数负载均通过。WSS Echo/225手Push约88%/84%的记录分配来自Unity TLS MobileAuthenticatedStream的读写缓冲重建，同包生成代码确认StartOperation开始/finally调用Reset并重新分配16500/16384字节数组；框架帧缓冲仅占约1.6%～2.6%。随后以两个Development IL2CPP包、四轮同参数负载评估4KiB接收暂存：ManagedWebSocket已有125字节内部缓冲，应用层Receive调用减少未减少主要TLS分配，归一总分配反增约3.43%/3.92%，四连接等待预约2176→18432字节。候选已撤回，正式Runtime保持，不将WSS暂存列为当前必做优化；无需为此增加池、调度层或替换运行库。该结论限定本次版本和方案，完整GC停顿与设备/平台门槛仍独立验收，详细证据见上述客户端性能章节。
+
 ### 18.2 已有阶段划分与未来业务路线
 
 下表保留完整项目路线与各阶段退出条件，不是当前完成清单。P0～P2 核心及 P3/P4 底层已实现并有本地验证；P3/P4 的跨平台/容量门禁仍未全部通过。P5 及 P4 中入场/世界授权业务延后，P6 仍需发布平台验收。当前缺口见 [服务端开发规范](DotNetDevelopment.md#当前范围与待完成项2026-10-13)，底层规则见 [共享 C KCP/DTLS 规范](DotNetDevelopment.md#7-共享-c-kcpdtls-实现规则)。

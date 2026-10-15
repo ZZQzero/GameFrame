@@ -192,7 +192,11 @@ Unity MemoryPack 固定 1.21.4、Core 为.NET Standard2.1，Generator 保留 Ros
 
 2026-10-15 补充宿主 `NetworkRuntime.GetMetrics()`：最外层 Pump、同步发送及其 Pump 外子集、实际派发、Push 解码和同步 handler 的累计耗时与阶段失败计数，覆盖成功/拒绝/超时/取消交付和同步 continuation。沿用现有 Runtime/Client，不增加诊断管理器、历史队列或业务依赖；同步重入发送不能重复加入主线程总成本。Connect/Close 的 Pump 外工作、异步业务及后台 IO 不在此总量内，完整口径见 [使用说明](ClientNetworkUsage.md#6-关闭与诊断)。
 
-分位数、整条主线程分配/GC、进程 RSS/CPU 由 Tests/Player 的专用 Release 性能夹具及现有 Python 入口采集，保留有界样本，计算/文件输出在窗口外；Runtime 不保存逐帧历史。构建仅临时添加 `GAMEFRAME_NETWORK_PERFORMANCE`，普通正式 Release 不包含独立测试入口。重用现有 Echo/GomokuSnapshot，测试伴随服务与生产 handler 隔离，不扩展正式协议。步骤与证据见 [性能基线](ClientNetworkUsage.md#network-player-performance)。
+分位数、分配/GC探针、进程 RSS/CPU 由 Tests/Player 的专用负载夹具及现有 Python 入口采集，保留有界样本，计算/文件输出在窗口外；Runtime 不保存逐帧历史。构建仅临时添加 `GAMEFRAME_NETWORK_PERFORMANCE`，普通正式 Release 不包含独立测试入口。重用现有 Echo/GomokuSnapshot，测试伴随服务与生产 handler 隔离，不扩展正式协议。步骤与证据见 [性能基线](ClientNetworkUsage.md#network-player-performance)。
+
+IL2CPP 分配接口和 ProfilerRecorder 必须经已知分配/GC探针校验，接口存在或返回0不能视为有效。Release不提供的计数器使用独立 Development profiling 包运行相同负载；构建/命令/Player检查模式一致，不能将采样包耗时混入Release门槛。Unity帧分配计数包含工具和引擎，GC时间标记仅代表其指定线程及标记覆盖范围，不冒充网络独占分配或完整停顿。采样器、容量和统计均留在Tests/Player，不为诊断添加正式Runtime开关、引擎修改或native钩子；具体边界见上述使用说明。
+
+分配栈采集仅由验证脚本的显式 `--allocation-trace` 开启，限制Development profiling和最多10秒窗口；保留已知分配校验、测量标记、容量边界和Profiler设置/历史恢复。2026-10-15真实IL2CPP栈及同包生成代码确认，WSS Echo/完整快照约88%/84%的记录分配来自Unity TLS的MobileAuthenticatedStream在操作开始/结束时重建读写缓冲；OwnedFrame池化不能解决此主要差额。同日完成4KiB接收暂存对照：ManagedWebSocket已有125字节内部缓冲，合并应用层头/正文读取未减少主要TLS分配，归一总分配反增约3.43%/3.92%，四连接等待预约2176→18432字节，因此撤回候选并保持正式Runtime。WSS暂存不列为当前必做优化；后续需有新证据再评估，不能跳过头校验、替换运行库私有字段或添加消息特例。具体实跑与符号覆盖限制见客户端使用说明。
 
 当前剩余工作：完整托管元数据预约、尚未覆盖的建连/关闭/后台和失败细分诊断、工作线程轮转与精细队龄、目标设备性能和统一诊断、依据证据决定的池化/期限调度优化，以及全部平台/容量验收。World/GameNetworkSession 与 WebGL WSS 继续延后。既有平台证据见 [客户端使用说明](ClientNetworkUsage.md#验证与现有证据)，以日期/版本/实际执行范围为准。
 

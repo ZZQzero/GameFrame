@@ -321,7 +321,7 @@ event 借用 child handle，listener 是唯一销毁者；Closed 保存在每连
 | event / 72 | size0 version4 kind8 reason12 connection_id16 generation24 grant_id32 connection_ptr40 peer48 |
 | udp_metadata / 64 | size0 version4 enqueued_ms8 reserved12 connection_id16 generation24 peer32 reserved_tail[2]56 |
 
-peer family 为 4/6；address 为网络序字节，IPv4 使用前 4 bytes，后 12 bytes 必须为 0；port 为主机序。初版拒绝 IPv6 link-local/scoped 地址。托管 `Marshal.SizeOf/OffsetOf` 与 C 静态断言共同校验布局。
+peer family 为 4/6；address 为网络序字节，IPv4 使用前 4 bytes，后 12 bytes 必须为 0；port 为主机序。初版拒绝 IPv6 link-local/scoped 地址。托管 `Marshal.SizeOf/OffsetOf` 与 C 静态断言共同校验布局。共享 C# 的 Peer/Grant 使用 Sequential + fixed byte 直接表达内联数组，保持默认自然对齐，不使用 ByValArray 或另加 Pack。Runtime/Core 允许局部 unsafe，固定缓冲区仅在绑定内部复制/清零，不向调用方暴露地址或悬空 Span。服务端在 grant 注册命令完成后清零结构内的凭据及临时摘要，地址转换保持 IPv4 尾部清零和 IPv6 的16字节。所有结构保留 size/offset 校验，错误包含预期/实际值；不拆出平台专用的校验路径，不改变 ABI2 或 native 产物。IL2CPP 的旧 ByValArray 偏移查询故障与实跑证据见客户端规范/使用说明。
 
 Config create 同步复制 16-byte identity、32-byte PSK。role=1 client / 2 standalone server；standalone server 用于底层 harness，实际多客户端服务使用 listener。全部输入/输出 byte buffer 只在调用期间有效。grant 注册复制全部数据；ticket_digest 为 SHA-256，原始票据不保存到 native grant 表。
 
@@ -370,6 +370,24 @@ capabilities=1 只表示基础 KCP/队列/内存统计。锁定 mbedTLS 未开�
 
 ## 9. 安全、容量、诊断与发布验收
 
+持续负载基线使用 [网络负载入口](DotNetUsage.md#network-load)，测试专用应用与正式业务分开。新增场景继续复用现有客户端核心、强类型路由与host，不修改正式协议或默认限额来迎合测量；发压按固定速率并显式统计工具跳过/在途满额及失败，不依赖响应完成才发起下一次请求。采集使用有界存储，明确采样与测量开销；同进程CPU/分配不能标作服务端独占成本。长测显式运行，普通回归保留短时正确性检查；每次结果记录参数、环境与资源收尾，当前已实现范围见使用说明。
+
+已支持单连接慢处理器场景：复用Echo.DelayMs，仅测试应用异步等待并传递连接取消；保持每连接串行派发。正常/慢组独立记录请求终态、吞吐、延迟及客户端队列采样，总计汇总请求和直方图。两组均须无跳过和失败才通过，故意积压/超时的负向运行仍返回非零；不为其放宽正式限额或增加允许失败开关。该场景验证异步等待下的连接隔离，不代表阻塞线程、CPU密集业务或生产容量。
+
+空闲场景仅保持连接与现有GFNP心跳，分别记录预热、正式窗口及窗口外Echo探测。正式窗口至少6秒并核验每连接双向控制活动、连接存活及业务队列/pending/deadline为空，最后每连接一次Echo成功才通过。内存报告起止和采样范围，进程CPU/分配按实际窗口归一化；测量含测试工具/Pump/采样开销，不把进程增长直接归因于网络，也不以有限窗口代替泄漏/soak验收。零业务请求不是独立的通过依据，不修改生产心跳周期来缩短测试。
+
+突发场景按单调时钟和固定间隔发起同相位批次，各连接依序调用Request，批内不等待响应或Pump。每阶段半开窗口从t=0计首批，错过的旧批次按请求数记工具跳过，不补发；在途满额、网络背压、超时和其他失败分别计账。BurstClientIssueLatency仅统计每连接每批工具发起耗时，不能称为整波耗时或调度延迟。支持复用Echo.DelayMs叠加单慢连接，保持默认运行时预算；故意超额返回非零，核验所有请求终态及资源释放，不为得到固定失败数量修改限额。参数、阶段边界及实际证据见使用说明。
+
+集中关闭场景在持续Echo排空后独立准备空闲或在途请求，再由客户端BeginClose或服务端RequestClose(3)依序触发全部关闭，最后join两端。测试门闩确认每连接首条handler已进入且指定RPC仍未完成；客户端关闭释放门闩以允许正常排空，服务端关闭保持等待并核验连接取消和停止后续派发。预期关闭单列ClosedRequests，背压/超时/响应或其他错误不能充当关闭成功；持续窗口仍要求全成功，关闭阶段要求处理器退出、两端完成且最终资源归零。完成延迟从共同触发时刻到工具观察完成，包含Pump/轮询，不用首个请求结束代表清理完成，不修改正式关闭契约或默认限额。操作、报告与实际证据见使用说明。
+
+KCP五种负载场景复用同一发压、计账、关闭与心跳检查，真实UDP/DTLS共享listener/worker；最多64连接，listener保持默认预算，测试worker容量仅按发压连接数设置。每连接即时注册独立临时grant，建连结束清零凭据；使用生产可靠catalog，不增加世界或不可靠消息。CLI先只读核验原生二进制/ABI/build ID/源码指纹，缺失或漂移返回错误。阶段内订阅既有owner/排队meter并用有界直方图统计，额外采样客户端native实际/预约、队列、socket字节与超时重传，最终join worker/listener并核验可追踪资源归零。服务端native实时内存无公开快照，明确不可测，不以托管OwnedBytes替代。回环客户端共享来源IP预算，先记录实际成本，不改轮询、池化或正式限额。
+
+KCP弱网注入仅属于测试工具：稳定端点的双向UDP转发器在全部建连后按固定包序号/种子注入丢包、延迟、抖动与乱序，不改生产传输或协议。队列同时限制包数和正文总字节，溢出及socket故障判失败；配置未实际触发不能判通过。报告区分计划延后与实际乱序，保留注入、停机丢弃、转发计账和owner/socket/队列释放证据。关闭准备前停止新增注入，已排队包继续按期限转发，客户端与worker停止后释放转发器，最后停止listener，避免排队UDP向已关闭监听端点发送；不将这组结果当作弱网握手/关闭、真实WAN或长时容量验收。相同种子只保证相同到包序列的规则决定可复现，不保证OS调度和重传产生完全相同的轨迹。
+
+分阶段故障使用同入口的KCP `fault` 固定矩阵，独立于持续负载profile：覆盖DTLS丢包/取消/默认建连期限、确定到达ClientHello后的取消/默认Hello期限、3秒断流及持续断网、两端关闭阶段短暂/完全丢包、旧代UDP延后放行与显式新授权/新代连接。测试始终保留正常对照连接，核验默认心跳失效与发起端有界关闭；对端未收到Close时不要求它知道关闭原因。预期故障必须命中指定类型/token/阶段且资源释放，不能通用允许失败。暂存与断流只属于有界测试转发器，旧包不改投新端点，RPC不在工具层重试；详细固定参数、报告与证据见[故障验证](DotNetUsage.md#network-fault)。真实KCP核心generation验证与Unity公开客户端/IL2CPP验证分开记录。
+
+Unity公开客户端的PlayMode故障用例由Explicit `KcpUnityFaultHostTests.ServeUnityFaults`作为独立伴随进程，复用已有listener/转发器及正式Echo；一次性grant和故障控制通过私有临时目录顺序确认，不增加生产profile、协议或框架控制接口。正常对照与新代关闭原因、会话Completion、托管自有预算及转发器释放均需核验；运行前预编译Release测试工程，具体启用与证据见[客户端入口](ClientNetworkUsage.md#unity-kcp-fault)。
+
 WSS 仅 HTTPS/WebSocket，平台正常验证域名、证书链与有效期；不从 URL/query/Authorization/cookie 认证，不忽略证书、强制 IPv4 或自行实现握手。Origin 精确 allowlist 不是身份验证；禁用应用压缩。协议哈希不同在提交账号凭据前 Reject，不猜测兼容。
 
 网络选项构造时校验并复制，不运行中改容量。KCP ABI2 硬上限：Connections1～64、Handshakes1～16、Grants1～256、NativeBytes64KiB～256MiB；越界构造时报字段，其他组合约束仍适用。多个 listener 共享 native 进程/PSA 资源，不能每 listener 无限复制上限。WSS/Kestrel 连接、TLS 额度需配套；业务在框架限额之外限制认证、数据库和玩法并发。
@@ -388,6 +406,10 @@ KcpListenerHost 通过 System.Diagnostics.Metrics 的 `GameFrame.Server.Network.
 - 发布平台必须执行真实服务进程、对应 native 与客户端互通；Windows 交叉编译、PE 检查、CI 配置不等于 Windows 执行，移动 archive 存在不等于最终链接或真机通过。
 - 生产报告给出目标 shard 连接数、峰值 RPC、owner/DB 等待、AOI 热点、上下行、CPU/内存/GC、tick/P99 及至少 30%余量，并执行 24 小时 soak。弱网至少 RTT20/100/200ms、抖动 0/30/100ms、丢包 1/5/10%、重复/乱序 5%、3 秒断流、32KiB/s 带宽和 100%丢包到超时。
 - 同步协议发布先准备服务/安装包/热更，维护窗口终止或隔离旧入口，设置最低版本后准入新 hash；不支持新旧消息混连，不实现客户端自动版本回退。
+
+### 独立 Player 的测试伴随服务
+
+macOS IL2CPP / HybridCLR 验证复用既有 `KcpUnityFaultHostTests.ServeUnityFaults` 与顺序控制文件，调用方是 `Tools/network_player.py`，不新增生产监听、协议或 grant 策略。Python 拥有伴随与 Player 进程，Player 通过正式 NetworkClient/catalog 通信；只有 Player 七组检查、两端关闭、host 资源计账与退出码全部成功才接受本轮结果。操作与平台边界见[客户端说明](ClientNetworkUsage.md#network-player)。
 
 ### 当前范围与待完成项（2026-10-13）
 

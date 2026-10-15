@@ -45,6 +45,12 @@ Dispose完成 → Disposed（不再复用）
 
 每次连接创建独立 ConnectionContext/generation，拥有 socket、CTS、IO 任务、native、pending、队列与首因；异步循环只捕获该 context，不读取下次连接替换的字段。generation 用于本地隔离，不是鉴权。故障拒绝新工作，必须 await Close 后再 Connect，旧工作不得进入新 generation，计数耗尽拒绝继续。
 
+KCP核心故障验证入口见[分阶段故障验证](DotNetUsage.md#network-fault)。验证区分调用者取消、内部握手/Hello期限、RPC期限和连接心跳失效；短暂断流恢复既有RPC不等同于自动重发业务。完全断流期间，主动方关闭释放不依赖对端收包；未收到Close的对端依照自身期限失效，不伪造ReasonCode。显式新连接必须在旧代释放后使用新grant，不把测试工具的context切换冒充Unity公开NetworkClient实跑。
+
+Unity公开接口的故障回归使用[NetworkKcpFaultTests](ClientNetworkUsage.md#unity-kcp-fault)，经真实Update/Pump和独立.NET伴随进程验证取消/期限、断流、同客户端Close后Connect、主线程暂停与响应保留后取消。故障注入与本地控制仅属于测试层，不增加Runtime开关或自动重连接口。内部握手/Hello期限当前可能产生内部token的OperationCanceledException，区分调用者取消时同时检查调用者信号和token，不仅按异常类型判断。
+
+独立 macOS IL2CPP / HybridCLR Player 验证见[Player入口](ClientNetworkUsage.md#network-player)。测试代码留在 Tests/Player，通过 asmref 归入 AOT/Hotfix，正式非 Development 构建排除；正常 Launch/GameEntry 不引用验证入口。保持正式生成协议同源，使用最终构建的裁剪元数据与包内 native。伴随进程归外部验证脚本拥有，Player 只调用公开网络接口；不得把 Development 场景结果当作正式资源发布、移动端或新 DTO 包后热更验收。
+
 Connect 完成意味着 TLS/DTLS+GFNP Hello 完成，不代表登录或世界 Ready；KCP 虽绑定 grant，业务仍需自己确认阶段。Connect 调用取消只作用于本次建连，成功解除注册；会话 CTS 不能代替显式异步关闭。
 
 Close/Dispose/Shutdown 先发布唯一共享任务再通知可重入观察者；旧 context 收尾不能清除新 context。关闭拒绝 admission、结束未决请求、停止 IO/socket、等待 owner 实际退出、排空缓冲、销毁 native 后完成。系统 Close/标准 WebSocket 关闭确认最多尽力 2 秒后 Abort，Abort 后仍 join，不把超时当已释放。
@@ -55,7 +61,7 @@ Close/Dispose/Shutdown 先发布唯一共享任务再通知可重入观察者；
 
 宿主 Pump/worker 不变量破坏或 Runner/root 提前销毁、禁用，锁首因并使全部客户端失败、拒绝新客户端/连接。独立 PlayerLoop 清理不依赖受损 Runner，不解码/执行 Push；Close/Dispose/Shutdown 仍可完成。关闭单客户端不恢复宿主，显式 Shutdown 后重新初始化。
 
-清理失败仍尝试其他独立资源；保留首因，资源不自动重试。native destroy 未确认成功不归还 allowance 或报告零。Dispose 即使 Close 失败也注销订阅/宿主登记，重复调用得到同一结果；Shutdown 仍尝试 worker 收尾。
+清理失败仍尝试其他独立资源；保留首因，资源不自动重试。KCP发送/接收/关闭操作入队时先检查其取消信号，再检查传输终态，防止StopIo已取消后到达的操作把有序远端关闭覆盖为普通Abort故障；未取消的传输故障仍按原异常处理。native destroy 未确认成功不归还 allowance 或报告零。 destroy确认成功后，当前Waitsnd与其他队列/占用快照同时归零，不能把销毁前未确认的KCP段数残留为实时待发数；累计/峰值统计继续保留。Dispose 即使 Close 失败也注销订阅/宿主登记，重复调用得到同一结果；Shutdown 仍尝试 worker 收尾。
 
 ## 4. RPC 期限与取消
 
@@ -161,6 +167,10 @@ Connect 后显式 Login/Resume，独立 Register 可选；Login 自动创建不�
 购买/结算等结果不确定通过原 commandId 查询或在服务端明确幂等契约下显式重发，不能生成新 ID 再扣一次；位置输入用 tick/序号去重和过期，不用持久经济幂等表。大型快照/资源走 HTTPS 或明确有总量/hash/deadline 的业务分块，不让 Runtime 自动聚合无限消息。
 
 ## 8. MemoryPack、HybridCLR 与平台验收
+
+KCP ABI2 的 Peer/Grant 使用共享 `Sequential` 声明和 `fixed byte` 缓冲区，直接对应 C 的内联数组；局部 unsafe 仅用于绑定内的复制和清零，不能将缓冲区指针或 Span 返回给调用方。Unity6000.3.19f1 的实际 IL2CPP 产物中，旧 ByValArray 声明虽然生成了正确的 C++ 内联数组，但 global-metadata.dat 将 Address/Identity/Psk/TicketDigest 的字段封送大小记录为0，Marshal.OffsetOf 依此错误累加偏移；Pack=4 不能解决该问题。这不是已证明的裁剪缺失，不能靠保留属性、平台分支或拆分/跳过校验处理。所有结构仍执行 size/offset 校验，错误报告预期和实际值；共享绑定修改必须经实际 Player 和 .NET 监听回归验证，具体结果见使用说明。
+
+已进一步核对该版本 IL2CPP 生成器：`ObjectFactoryComponent` 为 ByValArray 选择 `FixedArrayMarshalInfoWriter`，其 `WriteFieldDeclaration` 使用定长信息生成正确的 C++ 数组，但它及数组基类均未重写 `GetNativeSizeWithoutPointers`，沿用 `DefaultMarshalInfoWriter` 返回0的默认实现。`MetadataCollector.MarshaledSizeFromFields` 将这个返回值写入字段封送大小表；运行时 `Marshal.OffsetOf` 经 `Class.GetFieldMarshaledSize` 使用该值累加偏移。因此0来自生成器默认值，不是 SizeConst 丢失或实际数组长度为0。项目使用的与 Unity 安装目录同版本的 `Unity.IL2CPP.dll` SHA256一致，不能将此问题归因于 HybridCLR 修改了生成器；结论仅针对已核对的6000.3.19f1工具链，不推断其他版本。
 
 共享消息只能改.proto，再运行工具同步双端；字段/枚举/类型/上限/hash 规则见 [共享协议规范](DotNetDevelopment.md#6-共享-protomemorypack-编写规则)，命令见 [生成说明](DotNetUsage.md#协议生成与验证)。不要手工写网络 MemoryPack DTO、UnityEngine 字段、Nullable 数值、自定义 formatter/回调或启用 VersionTolerant 兼容。
 

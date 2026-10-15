@@ -84,6 +84,7 @@ namespace GameFrame.Tests
                 await client.CloseAsync();
                 Assert.AreEqual(0, client.GetMetrics().OwnedBytes);
                 Assert.AreEqual(0, client.GetMetrics().Kcp.NativeReservedBytes);
+                Assert.AreEqual(0, client.GetMetrics().Kcp.Waitsnd);
                 Assert.AreEqual(1, client.GetMetrics().Rpc.SuccessfulResponses);
                 Assert.AreEqual(0, client.GetMetrics().Memory.ReliableReceiveReservedBytes);
                 await client.DisposeAsync();

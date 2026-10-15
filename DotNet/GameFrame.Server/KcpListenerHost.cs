@@ -168,13 +168,14 @@ namespace GameFrame.Network
             long deadline = checked(NetworkClock.GetMilliseconds() + ttlMs);
             await started.Task.ConfigureAwait(false);
             ulong id = checked((ulong)Interlocked.Increment(ref grantSequence));
+            byte[] digest = SHA256.HashData(ticket);
             var grant = new KcpNative.Grant
             {
-                Size = 104, Version = KcpNative.Version, Id = id, Conv = conv, RemainingTtlMs = (uint)ttlMs,
-                Identity = (byte[])identity.Clone(), Psk = (byte[])psk.Clone(), TicketDigest = SHA256.HashData(ticket)
+                Size = 104, Version = KcpNative.Version, Id = id, Conv = conv, RemainingTtlMs = (uint)ttlMs
             };
             try
             {
+                grant.SetCredentials(identity, psk, digest);
                 await CommandAsync(listener =>
                 {
                     long now = NetworkClock.GetMilliseconds();
@@ -189,9 +190,8 @@ namespace GameFrame.Network
             }
             finally
             {
-                CryptographicOperations.ZeroMemory(grant.Psk);
-                CryptographicOperations.ZeroMemory(grant.Identity);
-                CryptographicOperations.ZeroMemory(grant.TicketDigest);
+                grant.ClearCredentials();
+                CryptographicOperations.ZeroMemory(digest);
             }
         }
 
@@ -1353,17 +1353,16 @@ namespace GameFrame.Network
 
         private static KcpNative.Peer ToPeer(IPEndPoint peer)
         {
-            byte[] address = new byte[16];
-            peer.Address.GetAddressBytes().CopyTo(address, 0);
-            return new KcpNative.Peer
-            {
-                AddressFamily = peer.AddressFamily == AddressFamily.InterNetwork ? 4u : 6u,
-                Address = address, Port = (ushort)peer.Port
-            };
+            return new KcpNative.Peer(peer.AddressFamily == AddressFamily.InterNetwork ? 4u : 6u,
+                peer.Address.GetAddressBytes(), (ushort)peer.Port);
         }
 
-        private static IPEndPoint FromPeer(KcpNative.Peer peer) => new IPEndPoint(
-            new IPAddress(peer.Address.AsSpan(0, peer.AddressFamily == 4 ? 4 : 16)), peer.Port);
+        private static IPEndPoint FromPeer(KcpNative.Peer peer)
+        {
+            Span<byte> address = stackalloc byte[16];
+            peer.CopyAddressTo(address);
+            return new IPEndPoint(new IPAddress(address.Slice(0, peer.AddressFamily == 4 ? 4 : 16)), peer.Port);
+        }
 
         public async ValueTask DisposeAsync()
         {

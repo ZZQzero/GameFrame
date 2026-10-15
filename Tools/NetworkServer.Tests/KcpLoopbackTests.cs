@@ -1,7 +1,6 @@
 using System.Net;
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
-using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Threading.Channels;
 using Game.Protocol;
@@ -17,15 +16,7 @@ namespace GameFrame.Tests
         [OneTimeSetUp]
         public void LoadVerifiedLibrary()
         {
-            string? path = Environment.GetEnvironmentVariable("GF_KCP_NATIVE_LIBRARY");
-            if (string.IsNullOrEmpty(path))
-            {
-                Assert.Ignore("Set GF_KCP_NATIVE_LIBRARY to a verified host build to run native UDP integration.");
-            }
-
-            NativeLibrary.SetDllImportResolver(typeof(KcpNative).Assembly, (name, assembly, search) =>
-                name == "gameframe_kcp" ? NativeLibrary.Load(path!) : IntPtr.Zero);
-            KcpNative.ValidateAbi();
+            KcpTestLibrary.Load();
         }
 
         private static async Task<EchoResponse> Echo(ServerConnectionContext connection, EchoRequest request, CancellationToken token)
@@ -155,6 +146,125 @@ namespace GameFrame.Tests
             {
                 Interlocked.Increment(ref Closes);
                 return ValueTask.CompletedTask;
+            }
+        }
+
+        [Test]
+        public async Task DestroyedTransportClearsWaitsndEvenWithoutAPeerAck()
+        {
+            await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), Application());
+            var grant = await Grant(host, 897);
+            var memory = new FrameMemoryBudget(64 * 1024 * 1024);
+            var worker = new KcpWorker();
+            ConnectionContext client = Context(grant.Connect, memory, worker);
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Task? paused = null;
+            Task<EchoResponse>? pending = null;
+            try
+            {
+                await PumpUntil(client, client.ConnectTask);
+                // Freeze the test peer before sending, so the client's final KCP
+                // snapshot certainly contains an unacknowledged reliable segment.
+                paused = OnListener(host, _ =>
+                {
+                    entered.TrySetResult();
+                    release.Task.GetAwaiter().GetResult();
+                });
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                pending = client.Request(GameNetRoutes.Echo, new EchoRequest { Text = "unacknowledged" },
+                    TimeSpan.FromSeconds(10), default);
+                long deadline = NetworkClock.GetMilliseconds() + 5000;
+                while (client.Metrics().Kcp.Waitsnd == 0 && NetworkClock.GetMilliseconds() < deadline)
+                {
+                    await Task.Delay(2);
+                }
+
+                Assert.That(client.Metrics().Kcp.Waitsnd, Is.GreaterThan(0));
+                await Close(client);
+                Assert.Multiple(() =>
+                {
+                    Assert.That(client.Metrics().Kcp.Waitsnd, Is.Zero);
+                    Assert.That(client.Metrics().Kcp.NativeOwnedBytes, Is.Zero);
+                    Assert.That(client.Metrics().Kcp.NativeReservedBytes, Is.Zero);
+                    Assert.That(memory.OwnedBytes, Is.Zero);
+                });
+            }
+            finally
+            {
+                release.TrySetResult();
+                if (paused != null)
+                {
+                    await paused.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+
+                await Close(client);
+                await worker.ShutdownAsync();
+                if (pending != null)
+                {
+                    try
+                    {
+                        await pending;
+                    }
+                    catch (NetworkException)
+                    {
+                        // BeginClose terminates the intentionally unacknowledged RPC.
+                    }
+                }
+            }
+        }
+
+        [TestCase("send", true)]
+        [TestCase("receive", true)]
+        [TestCase("close", true)]
+        [TestCase("send", false)]
+        [TestCase("receive", false)]
+        [TestCase("close", false)]
+        public async Task CanceledKcpAdmissionDoesNotReplaceCancellationWithAnAbortFault(string operation, bool canceled)
+        {
+            var worker = new KcpWorker();
+            var memory = new FrameMemoryBudget(64 * 1024 * 1024);
+            var options = new NetworkClientOptions();
+            NetworkConnectOptions connect = NetworkConnectOptions.Kcp(new Uri("udp://127.0.0.1:9"),
+                new byte[1], 1, new byte[16], new byte[32], NetworkClock.GetMilliseconds() + 30000, unreliableLimit: 0);
+            var transport = new KcpTransport(worker, connect, options, memory, () =>
+            {
+            });
+            using var cancellation = new CancellationTokenSource();
+            using OwnedFrame frame = memory.Allocate(32);
+            try
+            {
+                // A sibling IO task can reach admission after StopIo canceled its
+                // token and aborted the transport. This must remain cancellation.
+                if (canceled)
+                {
+                    cancellation.Cancel();
+                }
+
+                transport.Abort();
+                Action admit = operation switch
+                {
+                    "send" => () => transport.SendAsync(frame, cancellation.Token),
+                    "receive" => () => transport.ReceiveAsync(memory, 4096, 0, FrameDirection.ServerToClient,
+                        false, cancellation.Token, (_, _) =>
+                        {
+                        }),
+                    _ => () => transport.CloseOutputAsync(cancellation.Token)
+                };
+                if (canceled)
+                {
+                    OperationCanceledException? error = Assert.Throws<OperationCanceledException>(() => admit());
+                    Assert.That(error!.CancellationToken, Is.EqualTo(cancellation.Token));
+                }
+                else
+                {
+                    Assert.Throws<NetworkException>(() => admit());
+                }
+            }
+            finally
+            {
+                transport.Dispose();
+                await worker.ShutdownAsync();
             }
         }
 

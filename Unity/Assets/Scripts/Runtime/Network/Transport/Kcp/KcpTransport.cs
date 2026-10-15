@@ -149,6 +149,9 @@ namespace GameFrame.Network
         {
             lock (gate)
             {
+                // StopIo cancels sibling operations before aborting the transport.
+                // Late admission must preserve that cancellation during orderly Close.
+                token.ThrowIfCancellationRequested();
                 RequireRunning();
                 if (send != null || closeOutput != null)
                 {
@@ -166,6 +169,7 @@ namespace GameFrame.Network
         {
             lock (gate)
             {
+                token.ThrowIfCancellationRequested();
                 RequireRunning();
                 if (receive != null)
                 {
@@ -186,6 +190,7 @@ namespace GameFrame.Network
         {
             lock (gate)
             {
+                token.ThrowIfCancellationRequested();
                 RequireRunning();
                 if (send != null)
                 {
@@ -649,6 +654,7 @@ namespace GameFrame.Network
                     if (nativeDestroyed)
                     {
                         stats.OwnedBytes = 0;
+                        stats.Waitsnd = 0;
                         stats.PendingReliableBytes = stats.InflightReliableBytes = 0;
                         stats.InputCount = stats.OutputCount = stats.OutputBytes = stats.PlaintextCount = stats.PlaintextBytes = 0;
                     }

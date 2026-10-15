@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    </PropertyGroup>
     <ItemGroup>
         <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/ProtocolContracts/*.cs" Link="Contracts/%(Filename)%(Extension)" />
         <Compile Include="../../Unity/Assets/Scripts/Runtime/Network/Protocol/*.cs" Link="Protocol/%(Filename)%(Extension)" />

@@ -1,6 +1,7 @@
 #nullable disable
 using System;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 
 namespace GameFrame.Network
 {
@@ -41,11 +42,35 @@ namespace GameFrame.Network
         }
 
         [StructLayout(LayoutKind.Sequential)]
-        internal struct Peer
+        internal unsafe struct Peer
         {
             internal uint AddressFamily;
-            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)] internal byte[] Address;
+            internal fixed byte Address[16];
             internal ushort Port, Reserved;
+
+            internal Peer(uint addressFamily, ReadOnlySpan<byte> address, ushort port)
+            {
+                this = default;
+                if (address.Length != 4 && address.Length != 16)
+                {
+                    throw new ArgumentException("An IP address must contain 4 or 16 bytes.", nameof(address));
+                }
+
+                AddressFamily = addressFamily;
+                Port = port;
+                fixed (byte* target = Address)
+                {
+                    address.CopyTo(new Span<byte>(target, 16));
+                }
+            }
+
+            internal void CopyAddressTo(Span<byte> address)
+            {
+                fixed (byte* source = Address)
+                {
+                    new ReadOnlySpan<byte>(source, 16).CopyTo(address);
+                }
+            }
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -55,13 +80,38 @@ namespace GameFrame.Network
         }
 
         [StructLayout(LayoutKind.Sequential)]
-        internal struct Grant
+        internal unsafe struct Grant
         {
             internal uint Size, Version, Conv, RemainingTtlMs;
             internal ulong Id;
-            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)] internal byte[] Identity;
-            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] internal byte[] Psk;
-            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] internal byte[] TicketDigest;
+            internal fixed byte Identity[16];
+            internal fixed byte Psk[32];
+            internal fixed byte TicketDigest[32];
+
+            internal void SetCredentials(ReadOnlySpan<byte> identity, ReadOnlySpan<byte> psk, ReadOnlySpan<byte> ticketDigest)
+            {
+                if (identity.Length != 16 || psk.Length != 32 || ticketDigest.Length != 32)
+                {
+                    throw new ArgumentException("Invalid native KCP grant credential lengths.");
+                }
+
+                fixed (byte* identityTarget = Identity, pskTarget = Psk, digestTarget = TicketDigest)
+                {
+                    identity.CopyTo(new Span<byte>(identityTarget, 16));
+                    psk.CopyTo(new Span<byte>(pskTarget, 32));
+                    ticketDigest.CopyTo(new Span<byte>(digestTarget, 32));
+                }
+            }
+
+            internal void ClearCredentials()
+            {
+                fixed (byte* identity = Identity, psk = Psk, digest = TicketDigest)
+                {
+                    CryptographicOperations.ZeroMemory(new Span<byte>(identity, 16));
+                    CryptographicOperations.ZeroMemory(new Span<byte>(psk, 32));
+                    CryptographicOperations.ZeroMemory(new Span<byte>(digest, 32));
+                }
+            }
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -113,15 +163,17 @@ namespace GameFrame.Network
 
         private static void ValidateLayout<T>(int size, string[] fields, int[] offsets) where T : struct
         {
-            if (Marshal.SizeOf<T>() != size)
+            int actualSize = Marshal.SizeOf<T>();
+            if (actualSize != size)
             {
-                throw new NetworkException($"Native ABI size mismatch for {typeof(T).Name}.");
+                throw new NetworkException($"Native ABI size mismatch for {typeof(T).Name}: expected {size}, actual {actualSize}.");
             }
             for (int i = 0; i < fields.Length; i++)
             {
-                if (Marshal.OffsetOf<T>(fields[i]).ToInt32() != offsets[i])
+                int actualOffset = Marshal.OffsetOf<T>(fields[i]).ToInt32();
+                if (actualOffset != offsets[i])
                 {
-                    throw new NetworkException($"Native ABI offset mismatch for {typeof(T).Name}.{fields[i]}.");
+                    throw new NetworkException($"Native ABI offset mismatch for {typeof(T).Name}.{fields[i]}: expected {offsets[i]}, actual {actualOffset}.");
                 }
             }
         }

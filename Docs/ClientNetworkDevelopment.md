@@ -2,7 +2,7 @@
 
 适用于 `Unity/Assets/Scripts/Runtime/Network`、Hotfix 网络调用及关联配置、协议、插件与测试。使用步骤见 [客户端网络使用说明](ClientNetworkUsage.md)；共享 GFNP/协议生成/原生 ABI 以 [服务端全局开发规范](DotNetDevelopment.md) 为唯一维护入口，不在客户端维护第二套参数或协议格式。
 
-总体设计与验收契约保留在 [NetworkDesign](NetworkDesign.md)，本文说明客户端开发规则和当前实现边界。当前框架支持 WSS 可靠和 C KCP/DTLS 双通道，第一版不实现 WebGL WSS。GameNetworkSession、世界/角色/AOI/移动/恢复处理器未实现；生成世界消息只是预留接入契约。设计变化同步更新 NetworkDesign，其他改动更新四份规范和说明，不新增重复的实施或审查记录。
+总体设计与验收契约保留在 [NetworkDesign](NetworkDesign.md)，本文说明客户端开发规则和当前实现边界。当前框架支持 WSS 可靠和 C KCP/DTLS 双通道，第一版不实现 WebGL WSS。GameNetworkSession、世界/角色/AOI/移动/恢复处理器未实现；未使用的世界 Proto/生成路由已删除，当前 catalog 为账号、Echo 与五子棋共 14 条可靠路由；世界内容只保留文档候选契约。设计变化同步更新 NetworkDesign，其他改动更新四份规范和说明，不新增重复的实施或审查记录。
 
 ## 1. 职责与程序集
 

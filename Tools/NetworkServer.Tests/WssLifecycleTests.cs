@@ -21,7 +21,8 @@ namespace GameFrame.Tests
     {
         internal sealed class LogCapture : ILoggerProvider
         {
-            internal readonly ConcurrentQueue<(string Category, LogLevel Level, Exception? Error, string Text)> Entries = new();
+            internal readonly ConcurrentQueue<(string Category, LogLevel Level, Exception? Error, string Text,
+                EventId EventId, IReadOnlyDictionary<string, object?> Fields)> Entries = new();
             private sealed class Logger : ILogger
             {
                 private readonly LogCapture owner;
@@ -33,8 +34,13 @@ namespace GameFrame.Tests
                 }
                 public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
                 public bool IsEnabled(LogLevel logLevel) => true;
-                public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? error, Func<TState, Exception?, string> formatter) =>
-                    owner.Entries.Enqueue((category, level, error, formatter(state, error)));
+                public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? error, Func<TState, Exception?, string> formatter)
+                {
+                    var fields = state is IEnumerable<KeyValuePair<string, object?>> values
+                        ? values.ToDictionary(pair => pair.Key, pair => pair.Value)
+                        : new Dictionary<string, object?>();
+                    owner.Entries.Enqueue((category, level, error, formatter(state, error), eventId, fields));
+                }
             }
             public ILogger CreateLogger(string categoryName) => new Logger(this, categoryName);
             public void Dispose()
@@ -54,6 +60,7 @@ namespace GameFrame.Tests
         [SetUp]
         public void Prepare()
         {
+            logs.Entries.Clear();
             guard = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             logging = LoggerFactory.Create(builder => builder.AddProvider(logs));
             using RSA rsa = RSA.Create(2048);
@@ -223,18 +230,84 @@ namespace GameFrame.Tests
         [Test]
         public async Task ActualStartupCompositionRecordsHandlerFailureThroughTheInjectedLogger()
         {
-            var failure = new InvalidOperationException("Injected repository/handler failure.");
-            await Start(ServerCloseTests.Application((_, _, _) => throw failure));
-            await Send(GameNetRoutes.Echo, new EchoRequest { Text = "sensitive-message-must-not-be-logged" });
+            const string secret = "sensitive-message-must-not-be-logged";
+            var failure = new InvalidOperationException(secret, new Exception(secret));
+            failure.Data["credential"] = secret;
+            ServerConnectionContext? context = null;
+            await Start(ServerCloseTests.Application((connection, _, _) =>
+            {
+                context = connection;
+                throw failure;
+            }));
+            await Send(GameNetRoutes.Echo, new EchoRequest { Text = secret }, 42);
             using (OwnedFrame response = (await Receive())!)
             {
                 Assert.That(response.Header.StatusCode, Is.EqualTo(3));
             }
 
             await Closed(1);
-            Assert.That(logs.Entries.Any(entry => entry.Category == typeof(WssServer).FullName &&
-                entry.Level == LogLevel.Error && ReferenceEquals(entry.Error, failure)), Is.True);
-            Assert.That(logs.Entries.All(entry => !entry.Text.Contains("sensitive-message-must-not-be-logged", StringComparison.Ordinal)), Is.True);
+            var entry = logs.Entries.Single(entry => entry.EventId == NetworkLog.ConnectionFailure);
+            Assert.That(entry.Category, Is.EqualTo(typeof(WssServer).FullName));
+            Assert.That(entry.Level, Is.EqualTo(LogLevel.Error));
+            Assert.That(entry.Error, Is.Null, "Providers must never receive the original application exception.");
+            Assert.That(entry.Fields["ConnectionId"], Is.EqualTo(context!.Id));
+            Assert.That(entry.Fields["Generation"], Is.EqualTo(context.Generation));
+            Assert.That(entry.Fields["Transport"], Is.EqualTo(NetworkTransportKind.WebSocket));
+            Assert.That(entry.Fields["Opcode"], Is.EqualTo(GameNetRoutes.Echo.Opcode));
+            Assert.That(entry.Fields["CorrelationId"], Is.EqualTo(42UL));
+            Assert.That(entry.Fields["Stage"], Is.EqualTo("Dispatch"));
+            Assert.That(entry.Fields["ExceptionStack"], Is.Not.Empty);
+            Assert.That((await context.Completion).Error, Is.SameAs(failure), "Public error semantics retain the first exception.");
+            Assert.That(logs.Entries.All(entry => !entry.Text.Contains(secret, StringComparison.Ordinal)), Is.True);
+        }
+
+        private sealed class FailingCloseSession : ServerSession
+        {
+            internal readonly Exception Error = new InvalidOperationException("private-cleanup-credential");
+            internal Exception? Observed;
+
+            public override ValueTask ClosedAsync(ServerConnectionContext connection, ServerCloseInfo result)
+            {
+                Observed = result.Error;
+                throw Error;
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task ClosedFailureIsRecordedIndependentlyAndPreservesTheFirstError(bool failHandler)
+        {
+            var session = new FailingCloseSession();
+            var primary = new InvalidOperationException("private-handler-credential");
+            ServerConnectionContext? context = null;
+            await Start(ServerCloseTests.Application((connection, _, _) =>
+            {
+                context = connection;
+                if (failHandler)
+                {
+                    throw primary;
+                }
+
+                connection.RequestClose(1);
+                return Task.FromResult(new EchoResponse());
+            }, _ => session));
+            await Send(GameNetRoutes.Echo, new EchoRequest());
+            if (failHandler)
+            {
+                using OwnedFrame response = (await Receive())!;
+                Assert.That(response.Header.StatusCode, Is.EqualTo(3));
+            }
+
+            await Closed(1);
+            var cleanup = logs.Entries.Single(entry => entry.EventId == NetworkLog.ConnectionCleanupFailure);
+            Assert.That(cleanup.Fields["Stage"], Is.EqualTo("Closed"));
+            Assert.That(cleanup.Fields["ConnectionId"], Is.EqualTo(context!.Id));
+            Assert.That(logs.Entries.Count(entry => entry.EventId == NetworkLog.ConnectionFailure), Is.EqualTo(failHandler ? 1 : 0));
+            Assert.That(session.Observed, Is.SameAs(failHandler ? primary : null));
+            Assert.That((await context.Completion).Error, Is.SameAs(failHandler ? primary : session.Error));
+            Assert.That(logs.Entries.All(entry => entry.Error == null &&
+                !entry.Text.Contains("private-cleanup-credential", StringComparison.Ordinal) &&
+                !entry.Text.Contains("private-handler-credential", StringComparison.Ordinal)), Is.True);
         }
     }
 }

@@ -82,6 +82,7 @@ namespace GameFrame.Network
             internal ushort CloseReason;
             internal ulong LastCorrelation;
             private Exception? failure;
+            internal bool TryRecordFailure(Exception error) => Interlocked.CompareExchange(ref failure, error, null) == null;
             internal Exception? Failure
             {
                 get => Volatile.Read(ref failure);
@@ -349,8 +350,7 @@ namespace GameFrame.Network
                         }
                         catch (Exception error)
                         {
-                            child.Failure = error;
-                            logger.LogWarning(error, "KCP connection {ConnectionId}/{Generation} failed.", child.Event.Id, child.Event.Generation);
+                            RecordChildFailure(child, error, "Transport");
                             if (child.TransportEnded)
                             {
                                 releaseReady.Enqueue(child);
@@ -388,6 +388,8 @@ namespace GameFrame.Network
             catch (Exception error)
             {
                 failure = error;
+                NetworkLog.Failure(logger, LogLevel.Critical, NetworkLog.ListenerFailure, error,
+                    NetworkTransportKind.Kcp, 0, 0, "Owner");
                 started.TrySetException(error);
             }
             finally
@@ -451,15 +453,29 @@ namespace GameFrame.Network
             }
             catch (Exception error)
             {
-                if (failure == null)
-                {
-                    failure = error;
-                }
-                else
-                {
-                    logger.LogError(error, "KCP listener cleanup failed.");
-                }
+                failure ??= error;
+                NetworkLog.Failure(logger, LogLevel.Error, NetworkLog.ListenerCleanupFailure, error,
+                    NetworkTransportKind.Kcp, 0, 0, "Cleanup");
             }
+        }
+
+        private void RecordChildFailure(Child child, Exception error, string stage, uint opcode = 0, ulong correlationId = 0)
+        {
+            if (child.TryRecordFailure(error))
+            {
+                LogLevel level = error is NetworkException or SocketException or OperationCanceledException
+                    ? LogLevel.Warning : LogLevel.Error;
+                NetworkLog.Failure(logger, level, NetworkLog.ConnectionFailure, error, NetworkTransportKind.Kcp,
+                    child.Event.Id, child.Event.Generation, stage, opcode, correlationId, child.CloseReason);
+            }
+        }
+
+        private void RecordChildCleanupFailure(Child child, Exception error, string stage)
+        {
+            child.Failure = error;
+            child.CleanupFailure ??= error;
+            NetworkLog.Failure(logger, LogLevel.Error, NetworkLog.ConnectionCleanupFailure, error,
+                NetworkTransportKind.Kcp, child.Event.Id, child.Event.Generation, stage, closeReason: child.CloseReason);
         }
 
         private void PollEvents(IntPtr listener)
@@ -508,7 +524,7 @@ namespace GameFrame.Network
                         }
                         if (connectionEvent.Reason != 0)
                         {
-                            child.Failure ??= new NetworkException($"Native KCP connection closed ({connectionEvent.Reason}).");
+                            RecordChildFailure(child, new NetworkException($"Native KCP connection closed ({connectionEvent.Reason})."), "NativeClose");
                         }
 
                         Retire(child);
@@ -909,7 +925,9 @@ namespace GameFrame.Network
                 child.Context = new ServerConnectionContext(child.Event.Id, child.Event.Generation, child.Event.GrantId,
                     NetworkTransportKind.Kcp, FromPeer(child.Event.Peer), catalog, child.SendMemory, child.Lifetime.Token,
                     frame => EnqueuePush(child, frame), () => RequestStop(child));
-                child.Context.ReportSecondaryFailure = error => logger.LogError(error, "Application response cleanup failed.");
+                child.Context.ReportSecondaryFailure = (error, opcode, correlation) => NetworkLog.Failure(logger, LogLevel.Error,
+                    NetworkLog.ConnectionCleanupFailure, error, NetworkTransportKind.Kcp, child.Event.Id,
+                    child.Event.Generation, "ReleaseResponse", opcode, correlation);
                 child.Dispatch = Task.Run(() => DispatchAsync(child));
             }
             else if (opcode == ControlOpcode.Ping)
@@ -1007,15 +1025,22 @@ namespace GameFrame.Network
 
         private async Task DispatchAsync(Child child)
         {
+            string stage = "Initialize";
+            uint opcode = 0;
+            ulong correlationId = 0;
             try
             {
                 application.Initialize(child.Context!);
                 child.SessionReady = true;
+                stage = "Connected";
                 await child.Context!.Session.ConnectedAsync(child.Context).ConfigureAwait(false);
                 child.ApplicationReady = true;
                 int reliableCount = 0;
                 while (true)
                 {
+                    stage = "WaitForInput";
+                    opcode = 0;
+                    correlationId = 0;
                     await child.InputSignal.WaitAsync(child.Lifetime.Token).ConfigureAwait(false);
                     OwnedFrame? frame;
                     lock (child.InputGate)
@@ -1057,6 +1082,9 @@ namespace GameFrame.Network
                             DispatchQueueAge.Record(Math.Max(0, NetworkClock.GetMilliseconds() - frame.AdmittedAt));
                         }
 
+                        stage = "Dispatch";
+                        opcode = frame.Header.Opcode;
+                        correlationId = frame.Header.CorrelationId;
                         OwnedFrame? reply = await application.DispatchAsync(child.Context!, frame, child.SendMemory).ConfigureAwait(false);
                         if (reply != null)
                         {
@@ -1116,11 +1144,7 @@ namespace GameFrame.Network
             }
             catch (Exception error)
             {
-                child.Failure = error;
-                if (child.Context?.RequestedCloseReason is > 0)
-                {
-                    logger.LogError(error, "KCP handler failed while connection {ConnectionId}/{Generation} was closing.", child.Event.Id, child.Event.Generation);
-                }
+                RecordChildFailure(child, error, stage, opcode, correlationId);
             }
         }
 
@@ -1154,9 +1178,7 @@ namespace GameFrame.Network
             }
             catch (Exception error)
             {
-                child.Failure ??= error;
-                child.CleanupFailure ??= error;
-                logger.LogError(error, "KCP connection {ConnectionId}/{Generation} cancellation cleanup failed.", child.Event.Id, child.Event.Generation);
+                RecordChildCleanupFailure(child, error, "Cancel");
             }
             finally
             {
@@ -1186,9 +1208,7 @@ namespace GameFrame.Network
             }
             catch (Exception error)
             {
-                child.Failure ??= error;
-                child.CleanupFailure ??= error;
-                logger.LogError(error, "KCP connection {ConnectionId}/{Generation} final cancellation failed.", child.Event.Id, child.Event.Generation);
+                RecordChildCleanupFailure(child, error, "FinalCancel");
             }
 
             try
@@ -1200,9 +1220,7 @@ namespace GameFrame.Network
             }
             catch (Exception error)
             {
-                child.Failure ??= error;
-                child.CleanupFailure ??= error;
-                logger.LogError(error, "KCP connection {ConnectionId}/{Generation} Closed notification failed.", child.Event.Id, child.Event.Generation);
+                RecordChildCleanupFailure(child, error, "Closed");
             }
         }
 
@@ -1305,7 +1323,7 @@ namespace GameFrame.Network
                     {
                         if (children.TryGetValue(metadata.Id, out Child? expired))
                         {
-                            expired.Failure = new NetworkBackpressureException("Listener UDP output age exceeded.");
+                            RecordChildFailure(expired, new NetworkBackpressureException("Listener UDP output age exceeded."), "UdpOutputDeadline");
                         }
                         KcpNative.Check(KcpNative.CloseConnection(listener, metadata.Id, metadata.Generation), "expire UDP output");
                     }

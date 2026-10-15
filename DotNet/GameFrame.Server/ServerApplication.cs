@@ -63,7 +63,7 @@ namespace GameFrame.Network
         private readonly object lifecycleGate = new object();
         private readonly IPEndPoint remoteEndpoint;
         private bool trafficEnded;
-        internal Action<Exception> ReportSecondaryFailure { get; set; } = _ => { };
+        internal Action<Exception, uint, ulong> ReportSecondaryFailure { get; set; } = (_, _, _) => { };
         private readonly TaskCompletionSource<ServerCloseInfo> completion = new TaskCompletionSource<ServerCloseInfo>(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<ushort> closeRequested = new TaskCompletionSource<ushort>(TaskCreationOptions.RunContinuationsAsynchronously);
         private int closeAfterResponse;
@@ -301,7 +301,7 @@ namespace GameFrame.Network
                     }
                     catch (Exception cleanup)
                     {
-                        connection.ReportSecondaryFailure(cleanup);
+                        connection.ReportSecondaryFailure(cleanup, frame.Header.Opcode, frame.Header.CorrelationId);
                     }
 
                     throw;

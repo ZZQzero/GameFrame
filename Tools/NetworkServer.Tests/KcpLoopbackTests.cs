@@ -540,7 +540,8 @@ namespace GameFrame.Tests
             var logs = new WssLifecycleTests.LogCapture();
             using ILoggerFactory logging = LoggerFactory.Create(builder => builder.AddProvider(logs));
             var connected = Channel.CreateBounded<ServerConnectionContext>(1);
-            var failure = new InvalidOperationException("Injected KCP handler failure.");
+            var failure = new InvalidOperationException("private-message", new Exception("private-message"));
+            failure.Data["credential"] = "private-message";
             await using var host = new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0),
                 Application((_, _, _) => throw failure, session: _ => new CaptureSession(connected)),
                 logger: logging.CreateLogger<KcpListenerHost>());
@@ -556,10 +557,21 @@ namespace GameFrame.Tests
                 Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest { Text = "private-message" },
                     TimeSpan.FromSeconds(3), default);
                 Assert.CatchAsync<NetworkException>(async () => await PumpUntil(client, request));
-                await server.Completion.WaitAsync(timeout.Token);
-                Assert.That(logs.Entries.Any(entry => entry.Category == typeof(KcpListenerHost).FullName &&
-                    entry.Error?.InnerException == failure), Is.True);
-                Assert.That(logs.Entries.All(entry => !entry.Text.Contains("private-message", StringComparison.Ordinal)), Is.True);
+                ServerCloseInfo closed = await server.Completion.WaitAsync(timeout.Token);
+                Assert.That(closed.Error, Is.SameAs(failure));
+                var entry = logs.Entries.Single(entry => entry.EventId == NetworkLog.ConnectionFailure);
+                Assert.That(entry.Category, Is.EqualTo(typeof(KcpListenerHost).FullName));
+                Assert.That(entry.Level, Is.EqualTo(LogLevel.Error));
+                Assert.That(entry.Error, Is.Null);
+                Assert.That(entry.Fields["ConnectionId"], Is.EqualTo(server.Id));
+                Assert.That(entry.Fields["Generation"], Is.EqualTo(server.Generation));
+                Assert.That(entry.Fields["Transport"], Is.EqualTo(NetworkTransportKind.Kcp));
+                Assert.That(entry.Fields["Stage"], Is.EqualTo("Dispatch"));
+                Assert.That(entry.Fields["Opcode"], Is.EqualTo(GameNetRoutes.Echo.Opcode));
+                Assert.That(entry.Fields["CorrelationId"], Is.Not.EqualTo(0UL));
+                Assert.That(entry.Fields["ExceptionStack"], Is.Not.Empty);
+                Assert.That(logs.Entries.All(entry => entry.Error == null &&
+                    !entry.Text.Contains("private-message", StringComparison.Ordinal)), Is.True);
                 await Close(client);
             }
             finally

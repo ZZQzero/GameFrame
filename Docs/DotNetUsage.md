@@ -361,7 +361,7 @@ JSON 外层包含 Timestamp（UTC）、Level、Category、Message、MessageTempl
 | 2003 / KcpReady | Information | KCP/DTLS 已监听，含 Endpoint |
 | 2004 / WssReady | Information | WSS 已启动，含 Port |
 
-应用入口失败不再向进程抛出未处理异常，返回退出码 1；为避免第三方异常 Message 泄漏配置，仅记录阶段、类型与堆栈。模块内部仍按原错误契约传播异常。日志初始化失败、刷新/输出失败使用固定安全 stderr，后者也返回 1。已有网络异常输出保持原行为，完整网络/业务异常脱敏与事件统一仍是 L0/L2/L3 待办，本轮测试标记不泄漏不等同于完成全量安全审查。
+应用入口失败不再向进程抛出未处理异常，返回退出码 1；为避免第三方异常 Message 泄漏配置，仅记录阶段、类型与堆栈。模块内部仍按原错误契约传播异常。日志初始化失败、刷新/输出失败使用固定安全 stderr，后者也返回 1。网络故障出口现使用 [1000～1003 事件](DotNetDevelopment.md#server-network-fault-events)，关联连接/代际、Opcode/CorrelationId 与 Stage。Provider 只接收 ExceptionType/ExceptionStack，原异常保留给 Completion/调用方；Message、内链、Data 和自定义异常格式化不输出。业务/第三方日志、正常生命周期事件与洪峰成本仍待完善，测试标记不泄漏不等同于完成所有第三方内部安全审计。
 
 应用拥有独立 NLog LogFactory 和 ILoggerFactory，不使用全局 LogManager。WSS 清除默认 Provider 并注册外部 Factory 实例，宿主不释放它；KCP listener 也只借用。关闭顺序为停止准入、join 网络/业务、释放宿主与业务/数据库/证书、记录停止、刷新并释放日志。重复 `DisposeAsync` 等待同一结果。
 
@@ -392,8 +392,14 @@ PG 测试角色需能创建 schema，测试创建随机 schema 并只删除自�
 
 2026-10-14 底层核对覆盖 Runtime 网络与 Core/Server、GameRuntime/Launch/GameEntry 和登录接入、协议定义/生成工具/正式生成代码、Editor 网络工具、关联 .NET/Unity 测试、KCP 桥接与仓库内第三方 KCP 源码、构建安装脚本，以及依赖锁/程序集/原生 importer/五组安装清单和网络 CI 配置。主要实施缺口是客户端 RPC 阶段及子预算可见性，已直接补入既有快照；保留当前状态仲裁和关闭所有权，暂不调整传输参数、池化或调度模型。完整 CLR 元数据成本和发布平台门禁仍未完成。外部 mbedTLS/PSA、MemoryPack、平台 TLS/SDK 的实现内部未逐文件审计，只核对版本、接入配置、边界与运行证据，不将本轮核对称为所有第三方实现的完整安全审计。
 
+本轮 ET 借鉴实施前的基线复核完整阅读了仓库清单内 254 项：五份网络文档、关联启动/五子棋/作用域/错误契约，Runtime 网络与 Core/Server/Logging、Game.Server、Hotfix 登录/房间/导航/UI 调用方，协议源/生成器/正式产物/向量，关联 .NET/Unity 测试、Editor 网络与程序集工具、KCP 桥接和仓库内 KCP 第三方源码/测试/构建安装脚本，以及配置、锁、程序集、入口/场景、五平台 importer/安装清单和网络 CI。另核对第 22 节列出的 11 个 ET 参考文件，并非 ET 全仓审计。外部 mbedTLS/PSA、MemoryPack、NLog、Unity/BCL/平台 TLS 实现内部未逐文件审计；仅核对其锁定版本、接入与运行边界。
+
+主要发现是文档混写当前实现与未来世界候选、WSS/KCP 故障输出遗漏或重复、请求关联不足，以及原异常格式化可能暴露敏感信息。方案比较后选择在既有故障所有者处修正诊断，保留首因与关闭/资源流程；没有依据重建调度或新增通用管理器。现已实施四类故障事件及安全异常视图；其余业务/生命周期事件和洪峰成本仍待完成。
+
 | 日期与范围 | 证据 | 限制 |
 | --- | --- | --- |
+| 2026-10-14 ET 借鉴基线与网络故障诊断，macOS ARM64 / SDK10.0.401 / PG18 | 八工程 Release 编译 0 警告/错误，解决方案及四测试工程 locked restore 通过；Server187/187、Framework13/13、Protocol167/167、Logging13/13，共380/380、零跳过；最后合并重复 catch 并移除未使用的清理参数后，WSS 生命周期/日志/关闭/心跳/接收预算相关组22/22复验通过；协议 check --artifacts 五文件一致。真实 WSS/KCP handler 故障仅一个主事件，关联连接/代际/Opcode/CorrelationId；独立 Closed 故障含首次清理失败有记录，Completion 保留原异常；NLog Text/JSON 不调用自定义异常格式化、不输出 Message/Inner/Data 中的敏感标记。五组原生安装产物的 binary/ABI/build ID/源码指纹核验通过 | Server 使用独立临时 PG 与现有 macOS Release native，临时数据库与进程已清理；初次新增日志用例受 fixture 历史捕获污染，清空后通过。未改客户端、协议、native ABI 或 Logging 实现；未执行 Unity/Player/IL2CPP/真机、其他平台、远端 CI、native 重构建/sanitizer、故障洪峰性能、生产容量或24h soak |
+| 2026-10-14 KCP 单连接低负载复测，同上环境 | 16 次预热、128 次串行小 Echo；560 个 owner 样本：工作 P95=0.127ms、循环间隔 P95=12.143ms、owner 分配 P95=1,256By/轮；发送排队 P95=12ms、派发排队 P95=1ms、含客户端轮询/Pump 的 RPC RTT P95=61.423ms | 开启 MeterListener、NullLogger、正常 loopback 样本，包含采集开销；不是纯网络 RTT、故障日志成本或容量门禁，尚缺多连接/空闲/洪峰及GC、复制清零、锁成本对照，不据此决定池化或期限堆 |
 | 2026-10-14 日志工程合并，macOS ARM64 / SDK10.0.401 | 日志选项与 NLog 实现合并为单一 GameFrame.Logging 工程，类型统一命名空间；八工程 Release 编译 0 警告/错误，解决方案及两个相关测试工程 locked restore 通过；Logging13/13、WssLifecycle/ServerLogging6/6，均零跳过；临时 publish 仅含 GameFrame.Logging.dll，依赖清单无旧适配程序集；发布目录进程验证 JSON 启动失败、None 过滤和无效日志配置退出行为，临时产物已清理 | 本次调整工程边界与引用，沿用原输出行为和 Meter 标识；未重跑完整 Server、PG/UDP/DTLS、Unity/Player/IL2CPP、其他平台或性能容量测试 |
 | 2026-10-14 NLog 框架接入，macOS ARM64 / SDK10.0.401 | 九工程 Release 编译 0 警告/错误；解决方案及 Logging/NetworkServer.Tests locked restore 通过；Logging13/13，覆盖字段/模板/异常/UTC、并行 Scope、过滤、独立所有权、满队列、写入失败与刷新失败/超时；Server 全组 141 通过、41 跳过（共 182），新增真实 WSS host 释放后写日志用例另跑 1/1；八类早期失败进程均退出 1 且测试敏感标记未泄漏；真实 KCP 进程输出 Ready/Stopped，SIGINT 退出 0，凭据未输出 | 未配置 GF_POSTGRES_TEST_CONNECTION，PG 及依赖 PG 的 WssServerTests 跳过，不能计为数据库/完整 WSS 业务验收；KCP 使用已核验 hash 的现有 macOS native，未重构建/安装。临时 grant 和进程已清理；未执行 Unity/Player/IL2CPP、远端 CI、其他平台、全量敏感信息审查、文件部署、生产容量或 soak |
 | 2026-10-14 底层诊断与回归，macOS/.NET SDK10.0.401、PG18 | 最终 Server163/163、Framework13/13、Protocol182/182，均 0 跳过；三个测试工程 locked restore、协议 check --artifacts 五文件一致；独立临时 PG 与现有 macOS Release native 验证真实 WSS/数据库/UDP/DTLS；新增可控时钟测试覆盖分阶段耗时、同步 continuation 排除、连接汇总重置、保留响应后取消及在途额度、远端错误/期限/解码失败样本排除；KCP ACK16/16、调度4/4和分配75项（assertions/NDEBUG/ASan+UBSan）通过；五组安装产物的 binary/build ID/生产源码指纹核验通过 | 首轮新增远端错误用例错误携带正文，被现有 GFNP 规则拒绝；改为协议规定的空正文后整组复验通过。没有修改 wire/native ABI、重构建或替换插件；算法 sanitizer 不是完整 gfnet/DTLS sanitizer。临时库/进程已清理；Unity 证据见客户端表。未验其他平台实跑、远端 CI、生产容量/soak、IL2CPP/新热更 DTO |

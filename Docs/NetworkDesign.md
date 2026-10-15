@@ -1,16 +1,16 @@
 # GameFrame 商业网络模块设计
 
-> 状态：分阶段实施中，2026-10-13。本文保留总体设计与第一版验收契约；已完成项与验证范围见双方使用说明，不代表完整模块已经通过正式包验证。
+> 状态：分阶段实施中，2026-10-14。本文区分当前实现、未来业务候选与发布验收目标；已完成项与验证范围见双方使用说明，不代表完整模块已经通过正式包验证。
 > 技术基线：WebSocket/WSS、MemoryPack 1.21.4、原版 C KCP；服务端已确定为 C#/.NET 10。
-> 会话入口：WSS 建连与协议握手 → 登录 RPC → 大厅会话；战斗按配置复用 WSS，或通过大厅申请授权后建立 KCP/DTLS。
+> 当前会话入口：WSS 建连与协议握手 → 登录或显式恢复 RPC → 大厅 → 两人五子棋房间。未来实时玩法可选择 WSS 或 KCP/DTLS；账号到世界的 KCP 授权链尚未实现。
 
 > 文档入口：[服务端 .NET 全局开发规范](DotNetDevelopment.md)、[服务端使用说明](DotNetUsage.md)、[客户端网络开发规范](ClientNetworkDevelopment.md)、[客户端网络使用说明](ClientNetworkUsage.md)。本文定义总体架构、目标与业务接入契约；四份文档说明开发规则、实现细节和操作步骤。设计变化同步修改相关文档，未实现或未验收项不能据设计描述认定完成。
 
 > GameFrame 完善方向：[第 22 节](#22-etframework-可借鉴设计与-gameframe-实施提案)以本框架的实际需求为依据，借鉴 ET 的有效经验，列出候选改进、接入点和验收条件。目标是提高 GameFrame 的正确性、完整性和可维护性，不以复刻 ET 或达到架构一致为目标；该节不代表世界业务或分布式路由已经实现。
 
-> 当前实施方向（2026-10-14）：现有玩法只有五子棋，先完善通用网络底层；近期顺序与验收见[第 18.1 节](#181-当前优先路线底层框架完善)。房间联网、实时世界、AOI、预测与跨进程路由在实际多人玩法需要时再扩展。
+> 当前实施方向（2026-10-14）：已有 WSS 联网五子棋，继续完善通用网络底层；近期顺序与验收见[第 18.1 节](#181-当前优先路线底层框架完善)。实时世界、AOI、预测与跨进程路由在实际玩法需要时再扩展。
 
-> 下一阶段候选业务已补充[五子棋 WSS 两人房间实施计划](Gomoku.md#联机实施计划与当前实现2026-10-14)，包含显式创建、按房间号加入、准备和开局。当前仍是本地对局；计划不代表已实现房间，也不启用下述实时世界路线。
+> [五子棋 WSS 两人房间](Gomoku.md#联机实施计划与当前实现2026-10-14)已实现显式创建、按房间号加入、准备、开局和服务器裁决，本地练习保留。这不启用下述实时世界路线。
 
 ## 1. 目标与范围
 
@@ -42,8 +42,8 @@
 | MemoryPack | 已安装 1.21.4；Editor 和 StandaloneOSX Player 脚本编译通过 | 已有同源 DTO/生成检查/跨端向量；补齐 HybridCLR 实机测试 |
 | KCP | `Native/Kcp/third_party/kcp` 下已有 `ikcp.c`、`ikcp.h`、MIT LICENSE；已直接合入 #467 ACK 修复、分配失败处理及标准 offsetof 修正 | ABI2、UDP 集成与平台构建产物已落地；继续核对依赖锁，完成发布平台实跑验收 |
 | KCP 版本 | 上游基线为 `b1a7a2101dcbb96017681a500d6b82bbe5a88766`，包含 `IKCPOPS`/`ikcp_setcc`；本地修正与当前 c/h hash 已锁定 | 锁定基线与本地源码 hash；不得直接按旧版 C# KCP 包的内部结构接入 |
-| 生命周期 | `GameRuntime` 默认禁用网络；项目 Launch 启用，GameEntry 创建/注入 GameLoginSession，登录后进入本地五子棋 | 完整世界 GameNetworkSession 延后；入口不保存用户字段或实现认证 |
-| 服务端 | `DotNet` 已拆为 Core、Server、Game.Protocol、Game.Config、Game.Server 与离线 NetworkProtocol/ConfigGenerator 工程；WSS/KCP 共用强类型应用接口，PostgreSQL 注册登录与账号会话属于业务宿主 | 生产部署/跨进程会话/世界应用接入，完整诊断和平台容量验收 |
+| 生命周期 | `GameRuntime` 默认禁用网络；项目 Launch 启用，GameEntry 创建/注入 GameLoginSession、GomokuRoomSession 与 GameFlow；流程负责登录、Main 和五子棋导航 | 完整世界 GameNetworkSession 延后；入口不保存用户字段或实现认证 |
+| 服务端 | 六个运行时工程 Core、Server、Logging、Game.Protocol、Game.Config、Game.Server，加离线 NetworkProtocol/ConfigGenerator 共八工程；WSS/KCP 共用强类型应用接口，PostgreSQL 注册登录与账号会话属于业务宿主 | 生产部署/跨进程会话/世界应用接入，完整诊断和平台容量验收 |
 
 MemoryPack 安装与当前验证边界见 [客户端依赖维护](ClientNetworkUsage.md#7-协议与依赖维护)。启动、资源所有权与失败处理以 [Launch.md](Launch.md)、[Scope.md](Scope.md)、[ErrorContract.md](ErrorContract.md) 为基础；本文补充网络模块的固定策略。
 
@@ -70,7 +70,7 @@ MemoryPack 安装与当前验证边界见 [客户端依赖维护](ClientNetworkU
 | 事项 | 第一版决定 |
 | --- | --- |
 | 业务序列化 | MemoryPack 默认 Object 模式，显式成员顺序；不用 VersionTolerant |
-| 登录与授权 | 通过大厅 WSS 的强类型 RPC 完成；KCP ticket/PSK 由已登录 WSS 会话申请 |
+| 登录与授权 | 当前账号 RPC 走 WSS；未来 KCP 世界接入要求由已登录 WSS 申请 ticket/PSK，不能使用 local profile 的测试凭据投产 |
 | 可靠传输 | 大厅使用 WSS；世界业务显式选择复用 WSS 或新建 C KCP 连接，不自动切换 |
 | 不可靠传输 | 仅 KCP/UDP 会话支持，绕过 KCP，由同一个 DTLS 会话保护 |
 | UDP 安全 | DTLS 1.2 PSK；成熟原生库实现，不自造加密包、密钥交换和 nonce 协议 |
@@ -90,9 +90,11 @@ WSS 登录与游戏 RPC 共用帧格式、MemoryPack、取消和超时机制。�
 
 ```text
 Game.Hotfix/Network
-  GameNetworkSession              登录、选服、进入世界、恢复状态
   Generated/                      MemoryPack DTO、路由、验证器、哈希；禁止手改
-  Features/...                    AOI 实体、快照、插值、玩法事件
+Game.Hotfix/Login/GameLoginSession 当前账号登录、显式恢复和注销
+Game.Hotfix/Gomoku/GomokuRoomSession
+                                  当前五子棋状态与唯一 Push 订阅所有者
+Game.Hotfix/GameFlow               业务导航，借用账号/房间会话
              ↓
 GameFrame.Runtime / GameFrame.Network
   NetworkRuntime                  客户端集合、工作线程、主线程 Pump
@@ -115,6 +117,7 @@ DotNet/ConfigGenerator/          Luban 双端生成/产物检查工具与 IDE �
 DotNet/DotNet.sln                 已有服务端解决方案，与 Unity/ 同级
 DotNet/GameFrame.Network.Core/    共享 wire、路由/codec 契约、缓冲预算与 native ABI
 DotNet/GameFrame.Server/          通用 WSS/KCP 服务端与强类型应用接口
+DotNet/GameFrame.Logging/         标准 ILogger 的 NLog 输出与独立生命周期
 DotNet/Game.Protocol/             双端同源生成的 MemoryPack 游戏协议
 DotNet/Game.Config/               服务端 Luban 生成配置、二进制数据与固定版本运行库
 DotNet/Game.Server/               唯一业务可执行入口、local 配置、账号与处理器
@@ -122,7 +125,7 @@ DotNet/Game.Server/               唯一业务可执行入口、local 配置、�
 
 上述目录表达职责划分；实际文件落点与完成范围见四份规范和说明。WSS 核心、协议工具、local-wss、C KCP/DTLS bridge、C# worker 与 local-kcp-dtls 已实现；GameNetworkSession 与世界业务按当前范围延后，平台/容量发布验收仍待完成。不新建与已有模块重复的计时器、全局任务管理器或事件总线。`NetworkRuntime` 是必要的网络资源宿主，可由 `GameRuntime` 选配持有；业务只持有自己的 `NetworkClient`。
 
-服务端保留单进程、单业务入口，通过五个运行时程序集落实职责边界。Core 不引用游戏协议/Unity/业务，Server 只依赖 Core 与 ASP.NET Core；Game.Protocol 导入生成源码并引用 Core/MemoryPack，Game.Config 独立编译服务端配置，Game.Server 组合 Server、Protocol 与 Config。账号、恢复、顶号、登录期限和权限策略全部属于 Game.Server；网络框架仅通过 ServerSession 的头部准入、派发复查和期限 hook 接入应用策略。RPC/Notify 处理器只使用 DTO，框架负责关联、编码、队列与释放；Push 与连接关闭采用公开强类型接口，不暴露借用 native handle。具体契约见 [服务端框架 API](DotNetUsage.md#5-框架接入-api)。
+服务端保留单进程、单业务入口，通过六个运行时程序集落实职责边界。Core 不引用游戏协议/Unity/业务，Server 只依赖 Core 与 ASP.NET Core；Game.Protocol 导入生成源码并引用 Core/MemoryPack，Game.Config 独立编译服务端配置，Game.Server 组合 Server、Logging、Protocol 与 Config；Logging 独立维护输出，Server 不直接引用 NLog。账号、恢复、顶号、登录期限和权限策略全部属于 Game.Server；网络框架仅通过 ServerSession 的头部准入、派发复查和期限 hook 接入应用策略。RPC/Notify 处理器只使用 DTO，框架负责关联、编码、队列与释放；Push 与连接关闭采用公开强类型接口，不暴露借用 native handle。具体契约见 [服务端框架 API](DotNetUsage.md#5-框架接入-api)。
 
 Game.Server 使用 Web SDK/net10.0，local 功能需显式 profile；PostgreSQL 注册/密码认证已接入，生产 hosting（监听/部署与跨进程会话）未配置时拒绝启动，启动不校验玩家凭据。WssServer 通过 hosted lifecycle 的 StoppingAsync 阶段在 Kestrel 等 StopAsync 前 join 网络，不能仅依赖注册先后或 RunAsync 返回后的清理。不提前增加网关/账号/世界等可执行项目；第 14 节业务契约保留供后续实现。
 
@@ -457,7 +460,7 @@ MiB/KiB 均按 1024 换算。以下是客户端起始配置，服务端必须独
 | Pending RPC | 512 个，元数据最多 256 KiB | 新请求 admission 失败 |
 | 系统控制待处理 | 16 KiB、64 条 | 连接故障；不能挤占业务已预留额度 |
 | 网络模块自有内存合计 | 每连接 8 MiB | 当前 admission 失败或接收故障 |
-| 共享空闲缓冲池 | 宿主 8 MiB | 归还时超过上限直接释放引用 |
+| 共享空闲缓冲池 | 当前未启用，保留量 0；8 MiB 仅为未来候选上限 | 是否池化先测量；若实施，保留容量纳入宿主预算 |
 | 宿主自有内存合计 | 64 MiB，最多 4 客户端 | 拒绝新工作，禁止无限扩池 |
 
 所有阶段按**实际租用容量**记账，不只按有效长度。活跃缓冲、队列节点、in-flight、池内保留、native segment、DTLS 内存、取消与完成记录均有归属，资源转移不重复扣同一份额度，但不能在最终使用前先归还。扩容时新旧缓冲并存的峰值先预留后分配，不能检查后再绕过预算。
@@ -468,7 +471,7 @@ MiB/KiB 均按 1024 换算。以下是客户端起始配置，服务端必须独
 
 网络模块总额指模块实际拥有且可控制的分配，不是整个进程 RSS 的硬上限。平台 TLS/WebSocket 内部缓冲、内核 socket buffer、GC 尚未回收空间和业务保留的 DTO 单独测量；socket buffer 初值请求收/发各 256 KiB，报告系统返回的真实值，不声称请求值等于实际占用。每帧 DTO 节点上限防止单包放大；业务无限保留 DTO 的内存责任属于业务。
 
-完成通道在每个 pending admission 时预留一个槽位，终态通知最多一次；连接终止用独立单槽 mailbox，不因接收队列已满而无法结束等待。取消回调仅标记 pending 并唤醒，不为重复取消追加无界命令。诊断事件只使用有界环形缓冲，指标聚合不产生每包日志。
+完成通道在每个 pending admission 时预留一个槽位，终态通知最多一次；连接终止用独立单槽 mailbox，不因接收队列已满而无法结束等待。取消回调仅标记 pending 并唤醒，不为重复取消追加无界命令。当前使用固定空间指标快照，不保存逐包历史；若后续增加故障导出，诊断事件需使用有界环形缓冲，不能逐包同步写日志。
 
 容量上限是内存边界，不是允许排队到上限的承诺。KCP 发送 admission 在 correlation ID/pending 分配前估计等待：取未移交应用帧与新帧的 token 缺口、`max(0, waitsnd + ceil(newLength/1126) - 512) × 1126` 的窗口缺口两者最大值，除以配置业务速率。达到 250ms（或配置队龄）/RPC 剩余 deadline 即拒绝；已交给 native 的字节不重复消耗 token。估算不保证链路吞吐，也不将已移交 KCP 的消息视为可撤回。WSS 使用相同的容量与队龄限制，不根据历史吞吐预测带宽。真正移交 WS Send/KCP send 前再次检查队龄、取消与 RPC deadline：RPC 到 deadline 以超时结束，未超时但排队超限以背压失败；已成功 admission 的 SendAsync 后续发送失败通过连接故障报告。不可靠过期直接丢弃，不能把超时/取消的未移交请求继续交给传输。250ms 是本地应用排队上限，不是 KCP 重传或远端响应时限。
 
@@ -602,6 +605,8 @@ KCP output 副本先进入有界明文队列，再由 owner 的 DTLS 阶段加�
 
 ### 12.5 DTLS 依赖与授权
 
+依赖、加密与 ABI 已实现；本节的 RequestWorldGrant 和账号/世界授权链是未来业务契约，当前 catalog 不包含该路由。local-kcp-dtls 仅接受显式短时测试凭据。
+
 KCP 自身不加密。第一版安全适配锁定 **mbedTLS 4.2.0 stable + TF-PSA-Crypto 1.2.0**（上游 LTS 为 4.1，4.2 不标为 LTS），版本/commit/archive SHA-256 在 `Native/Kcp/third_party/mbedtls.lock.json`，最小 TLS／PSA 配置分别在 `Native/Kcp/config/mbedtls_config.h` 与 `crypto_config.h`。该版本发布说明及关联安全修复已核对，依赖独立静态编入插件；普通构建不下载、不浮动升级。升级时重新审查安全公告、配置、ABI 与跨平台验证。
 
 
@@ -610,6 +615,8 @@ KCP 自身不加密。第一版安全适配锁定 **mbedTLS 4.2.0 stable + TF-PS
 服务端同样通过本 native bridge 调用 DTLS/KCP；.NET 10 的标准网络 API 不能被当成内置 DTLS 实现。native 库静态链接 mbedTLS 依赖，导出只开放 gfnet ABI，保留许可证与依赖清单。
 
 ### 12.6 联调服务端的 DTLS listener
+
+listener 的注册/消费/撤销和单 owner 已实现；下文大厅注册目标世界授权的步骤尚未接入账号业务。
 
 第 12.3 节是已知凭据的单连接 ABI；服务端不能在收到陌生 UDP 后预先知道 PSK。P3 同时新增 server-listener ABI：create/destroy listener、register/revoke grant、feed UDP(peer,data,now)、poll UDP(peer,dst)、poll connection event、release connection。所有 peer 使用固定 addressFamily、16-byte 地址和 u16 port 结构，不把平台 sockaddr 布局暴露给 C#。
 
@@ -630,6 +637,8 @@ listener 拥有所有 server handle；.NET 仅借用。Closed 事件后禁止发
 本地测试服务默认最多 64 个已连接、16 个握手、256 个 grant、native 全局 256 MiB；任何一项达到上限明确拒绝，不照搬为生产容量。listener/source-IP 速率与全局 handshake CPU 预算在 native 调用前控制；服务端所有权线程按 listener 分片固定，不能并发调用同一实例。
 
 ## 13. 授权、心跳与业务会话
+
+当前实现账号 Login/ResumeLogin/Logout、authEpoch/BindingId 与 WSS 五子棋；世界 grant、独立世界会话和双连接恢复为后续契约。以下流程涉及这些能力时均为候选设计，不是现有公开 API。
 
 ### 13.1 WSS 登录与战斗接入
 
@@ -781,7 +790,7 @@ WSS 大厅网关 → 登录/账号会话 → RequestWorldGrant → KCP/DTLS 网�
 | --- | --- |
 | WSS 收发 | 每连接一个异步接收循环、一个异步发送循环；均使用有界队列，不为每连接创建专用线程 |
 | KCP/DTLS 网关 | 按连接固定分给有限数量的 owner 工作线程/listener；一个 native handle 只由其 owner 调用，包含销毁；跨线程仅通过有界消息队列交接 |
-| 账号状态 | 按账号归属串行处理提交，执行第 13.3 节的 token/epoch/授权规则；不以全局锁串行所有账号 |
+| 账号状态 | 按账号归属串行处理提交，执行第 13.3 节的 token/epoch/授权规则；生产扩展目标是不以全局锁串行所有账号；当前 AccountSessions 采用共享索引短锁与 Binding.CommitGate，不在锁内执行 IO，是否拆分由容量测量决定 |
 | 世界/房间状态 | 一个房间或世界分区由一个逻辑 owner 串行推进 tick、指令与 AOI；多个独立分区可分配到不同工作线程；网关与数据库回调不直接修改其实体 |
 | 数据库与外部 IO | 使用异步 API、有限并发与有限等待队列；完成结果回到账号/世界 owner，检查会话 epoch/操作有效性后提交；不持有状态锁等待 IO |
 
@@ -794,6 +803,8 @@ WSS 大厅网关 → 登录/账号会话 → RequestWorldGrant → KCP/DTLS 网�
 一个客户端只接收自己的 AOI；避免把全服在线玩家广播给每个用户。AOI 进入/离开和实体基础信息可靠传输；频繁的位置/朝向/表现状态走不可靠快照。进入世界的大型数据采用分块业务 RPC 或 HTTPS 快照：块带 snapshotId、index/count、内容 hash、总量/超时上限；Runtime 不自动分片聚合大消息。
 
 ### 14.2 路由建议
+
+本节世界 opcode/DTO 都是未来候选示意，尚未冻结或生成。当前正式路由仅账号、Echo 与五子棋，后续实施须从 Proto 重新确定编号和限制。
 
 | 数据 | 通道 | 必须具备的业务字段/行为 |
 | --- | --- | --- |
@@ -846,6 +857,8 @@ native 加载与 ABI 检查推迟到第一次显式建立 KCP 连接；NetworkRu
 运行中关闭顺序：Hotfix 停止接收游戏操作 → 取消/结束业务会话并 await 客户端 Dispose → `GameRuntime.ShutdownAsync` 等待网络宿主关闭 → 关闭依赖的 Timer/root → 释放 YooAsset。宿主 Shutdown 在客户端终态完成前仍保持必要 Pump，不因先销毁 Runner 导致 Close 永远无法完成。无需为网络新增 Launch 反射入口或从 Launch 访问 Hotfix。
 
 ### 15.2 Hotfix 会话所有权
+
+当前由 GameLoginSession 拥有账号 WSS，GomokuRoomSession 借用它并拥有五子棋订阅，GameEntry 负责创建/注入/停止，GameFlow 负责导航。下文 GameNetworkSession、Ready 与世界恢复仅用于未来世界接入。
 
 `GameNetworkSession` 是游戏业务对象，不是通用 Runtime 单例。它拥有大厅客户端、按需创建的 KCP 世界客户端、账号恢复凭据、角色信息、账号/世界 epoch、lastEventVersion、分别管理的 CTS 与状态机；账号切换、选服与场景离开由它协调。客户端不由临时面板创建和销毁。
 
@@ -936,7 +949,7 @@ KCP MIT、MemoryPack MIT 及 mbedTLS 对应版本许可证/第三方声明随安
 
 ## 17. 指标与诊断
 
-服务端日志统一在单一 `GameFrame.Logging` 工程中，包含选项、实例元数据、NLog Provider、布局、有界异步输出与释放，模块间契约沿用标准 `ILogger`；网络和业务各自拥有事件定义。`Game.Server` 负责部署配置、组合与实例所有权。日志工程直接引用 NLog，不引用网络/协议/业务；Core/Server 不直接引用 NLog。当前只有一种输出实现，不为未来替换额外拆适配程序集。两个 local profile 共用应用拥有的 factory，覆盖早期启动和最终清理；NLog Console 默认文本，可切换 JSON，满队列丢弃并计数，正常退出刷新后释放。框架事件关联、业务事件、完整脱敏及生产性能仍待完善；异步输出不能证明调用侧无成本。ETFramework 仅作参考，不要求对齐其静态入口或文件组织。依赖方向见 [框架日志边界](DotNetDevelopment.md#server-logging-architecture)，当前进度见 [执行计划](DotNetDevelopment.md#server-logging-plan)，配置与证据见 [服务端日志](DotNetUsage.md#server-logging)。
+服务端日志统一在单一 `GameFrame.Logging` 工程中，包含选项、实例元数据、NLog Provider、布局、有界异步输出与释放，模块间契约沿用标准 `ILogger`；网络和业务各自拥有事件定义。`Game.Server` 负责部署配置、组合与实例所有权。日志工程直接引用 NLog，不引用网络/协议/业务；Core/Server 不直接引用 NLog。当前只有一种输出实现，不为未来替换额外拆适配程序集。两个 local profile 共用应用拥有的 factory，覆盖早期启动和最终清理；NLog Console 默认文本，可切换 JSON，满队列丢弃并计数，正常退出刷新后释放。WSS/KCP 故障事件已补连接/请求关联和安全异常视图；业务事件、完整脱敏及生产性能仍待完善；异步输出不能证明调用侧无成本。ETFramework 仅作参考，不要求对齐其静态入口或文件组织。依赖方向见 [框架日志边界](DotNetDevelopment.md#server-logging-architecture)，当前进度见 [执行计划](DotNetDevelopment.md#server-logging-plan)，配置与证据见 [服务端日志](DotNetUsage.md#server-logging)。
 
 每连接的目标指标包括：状态/generation/sessionId、连接与 Hello 耗时、原始 UDP/WSS bytes、业务有效 bytes、RPC 端到端/到达/主线程排队耗时、Ping RTT、KCP srtt/rto/重传/waitsnd/待发与在途字节/窗口、队列条数与实际容量、native/池分配当前值与峰值、不可靠丢弃、迟到响应、协议故障与 deadline 数量。
 
@@ -965,6 +978,8 @@ KCP MIT、MemoryPack MIT 及 mbedTLS 对应版本许可证/第三方声明随安
 | 5：补齐平台与持续运行证据 | 验证生成一致性、HybridCLR 新 DTO、Player/native ABI、实际 IL2CPP 互通、弱网/后台/IPv6和长时运行 | 按实际设备、平台和版本记录结果；缺设备或环境的项目列待验收，不以编译、交叉构建或 Echo 测量替代真机与玩法容量 |
 
 第 2、3 项的具体实现范围由完整基线决定，表中契约检查不表示现有机制都需要重写。框架容量报告先覆盖连接、RPC/Push、队列和传输的受控负载；未来多人玩法另测房间/AOI/tick，不能据底层吞吐推断游戏承载人数。
+
+2026-10-14 本轮已完成仓库网络源码与关联边界的基线审查，修正文档现状，并补齐 WSS/KCP 首因、独立清理故障的请求关联与日志脱敏。复用现有状态仲裁、单 owner、有界队列与短锁；不增加 Fiber/Actor、世界消费者或缓冲池。单连接低负载样本不足以决定池化、锁拆分或期限调度；下一步先补多连接、空闲与故障负载的分配/GC、复制清零、锁和调度成本对照，再按证据选择优化。具体覆盖、测量口径与验证限制见 [服务端证据](DotNetUsage.md#验证与现有证据)。
 
 基础完成标准是：现有公开接口与错误语义清楚，状态/取消/关闭边界有证据，可控资源有界且可追踪，生成与构建可核验，目标平台缺口明确。为将来扩展保留现有强类型业务接入、独立会话所有权和程序集边界即可；未来出现新的共性需求时再调整框架接口。
 
@@ -1041,7 +1056,7 @@ Unity 测试按现有 `GameFrame.Tests.EditMode`/PlayMode 边界组织；若直�
 - TimeScale=0、主线程卡顿 500ms/2 秒、锁屏/恢复、Wi-Fi→蜂窝切换、DNS/IPv6、服务端重启与维护踢线。
 - 32 KiB 边界可靠消息、1150-byte 不可靠边界、WebSocket 小分片/缺尾分片，以及大量小 RPC 的 pending 峰值。
 
-性能门槛按真实业务负载定义：普通 AOI 示例负载下，目标 Android/iOS 最低支持设备每帧网络主线程总耗时 P95≤2ms；统计 Pump、Pump 外发送校验/编码、入站校验/解码、回调、任务完成引起的同步 continuation 和缓冲清零，同时报告 P99/峰值与超预算消息。不能剔除处理器后单凭 Pump 调度计时通过验收；此目标需实测，预算检查不能保证单条消息不会超时。业务异步延后执行的场景/表现工作另计帧预算。框架固定帧/控制包/池内传输路径预热后不产生逐包托管分配；MemoryPack DTO/字符串/数组按类型记录 bytes/s、GC 次数与停顿，不承诺整个消息系统零 GC。
+性能门槛按真实业务负载定义：普通 AOI 示例负载下，目标 Android/iOS 最低支持设备每帧网络主线程总耗时 P95≤2ms；统计 Pump、Pump 外发送校验/编码、入站校验/解码、回调、任务完成引起的同步 continuation 和缓冲清零，同时报告 P99/峰值与超预算消息。不能剔除处理器后单凭 Pump 调度计时通过验收；此目标需实测，预算检查不能保证单条消息不会超时。业务异步延后执行的场景/表现工作另计帧预算。降低固定帧/控制包路径逐包分配是待测优化目标；当前 OwnedFrame 按容量分配并清零，未启用空闲池，不能称为零逐包分配。MemoryPack DTO/字符串/数组按类型记录 bytes/s、GC 次数与停顿，不承诺整个消息系统零 GC。
 
 必须执行至少一次 **24 小时 soak**：稳定业务负载与周期连接/关闭、弱网切换，记录每分钟 current/peak、RSS、GC、native allocation、pending、线程/句柄。停止流量并关闭后，所有模块自有活跃计数归零、池内存不超上限；RSS 因 GC/平台缓存不归零不直接判泄漏，但需有解释与稳定趋势。49.7 天时钟回绕由模拟测试覆盖，不要求真实等待。
 
@@ -1049,7 +1064,9 @@ Unity 测试按现有 `GameFrame.Tests.EditMode`/PlayMode 边界组织；若直�
 
 ### 19.3 发布门禁
 
-上线必须同时满足：
+发布门禁按实际启用能力执行。当前账号和五子棋验证 WSS、房间并发/未知结果与显式恢复；KCP 单独验证已启用的底层。未实现的世界 grant、AOI/tick 和双连接恢复，等业务启用后增加对应门禁，不能算作当前已通过项。
+
+适用能力上线必须同时满足：
 
 1. Editor 编译与相关 EditMode/PlayMode 通过；所有发布平台 Player 脚本编译通过。
 2. Windows/macOS/Android/iOS 对应原生库、ABI、签名/链接检查通过；第一版不包含 WebGL WSS 功能验收，保留平台拒绝与代码条件隔离。
@@ -1105,7 +1122,7 @@ ET 将网络接到 Entity/Fiber、Actor、Mailbox、Location 和 Gate/Map 业务
 | 共享状态提交的一致性（Fiber/Mailbox） | 同一连接 handler 串行；不同连接仍可同时进入共享业务 | 在实际房间/世界接入时落实统一提交边界；所有玩家指令、tick 和状态提交进入同一所有者 |
 | 业务生命周期与物理连接分离（Session/玩家/Map） | AccountSessions 已把账号会话与大厅绑定分开；世界未实现 | 沿用账号实现，按玩法需要补充世界成员、连接绑定和保留策略 |
 | 连接接入与权威玩法职责清晰（Gate/Map） | 传输框架与业务程序集已分离；尚无世界处理器 | 首先在单个 Game.Server 内分清连接适配与权威玩法职责，无须先拆进程 |
-| 稳定身份与运行位置分离（Location） | 有 accountId、authEpoch 和预留 worldSessionId/epoch；无运行位置服务 | 单进程先用房间内部的成员索引；真实跨分区/进程迁移时再实现版本化位置路由 |
+| 稳定身份与运行位置分离（Location） | 已有 accountId、authEpoch；worldSessionId/epoch 仅为候选设计，无运行位置服务 | 单进程先用房间内部的成员索引；真实跨分区/进程迁移时再实现版本化位置路由 |
 | 部署变化时保持业务操作语义（本地/远程 Actor 消息） | 当前只需本进程业务调用 | 保持房间操作具有明确的命令/结果；出现远程部署时再抽取必要接口 |
 | 按玩家可见范围控制同步成本（Map/AOI） | 只有候选快照与可靠成员事件设计；没有生成协议或权威世界/AOI | 世界接入时按玩法落实可见集合、可靠成员事件与独立快照，复用第 14 节契约 |
 | 降低空闲连接调度成本（KCP Check/期限驱动） | 当前单调时钟、固定 10ms tick、有界 owner 轮转 | 仅在测得空闲扫描或调度成本后优化；不是当前业务接入的前置任务 |
@@ -1229,7 +1246,7 @@ ET Router 主要转发 KCP 包和维护路由，不终止 KCP；已阅读路径�
 | --- | --- | --- |
 | 1：确定首个玩法 | 确定回合房间或实时小世界、服务端角色归属来源、人数/实体上限、tick 与保留策略；选择短锁或命令消费者 | 数据、状态所有者、身份与生命周期可画出完整流程；配置来源与默认值明确，不以客户端自报角色证明归属 |
 | 2：单进程 WSS 世界 | 实际注册 Enter/Leave/Restore/MoveReliable；实现房间提交、绑定、基线与可靠状态输出，继续拒绝未实现授权 | 两玩家同房间状态一致；基线/事件顺序、越权、跨连接竞态、过载、取消和关闭测试通过 |
-| 3：显式恢复与 Hotfix 接入 | 现有账号会话接入显式 Resume，独立世界状态/订阅/作用域；复用注入和既有导航生命周期 | 旧 BindingId/epoch 不能影响新绑定；恢复期间禁止输入；基线版本复核、响应丢失、到期与退出路径有证据 |
+| 3：显式恢复与 Hotfix 接入 | 复用已实现的账号显式 Resume，新增独立世界状态/订阅/作用域；复用注入和既有导航生命周期 | 旧 BindingId/epoch 不能影响新绑定；恢复期间禁止输入；基线版本复核、响应丢失、到期与退出路径有证据 |
 | 4：KCP 世界授权闭环 | WSS 取 grant、listener 注册/消费/撤销、世界 session factory、双连接隔离与不可靠快照 | 取票/注销交错、晚到注册、票据复用/过期、独立断线和账号撤销均不会复活旧权限；真实 WSS+UDP 互通通过 |
 | 5：按证据扩展 | 热点房间/多房间/AOI 压测；达到部署需求后才设计跨进程位置与内部消息 | 提供容量、队龄、tick、CPU/内存与故障域证据；新增跨进程功能单独验收，不以 Echo 吞吐替代 |
 
@@ -1237,7 +1254,7 @@ ET Router 主要转发 KCP 包和维护路由，不终止 KCP；已阅读路径�
 
 验证分层进行：房间纯逻辑使用可控单调时钟和外部 IO 完成顺序，覆盖 A/B 同时操作、DB 晚于退出/恢复、旧连接晚到解绑、控制容量、在途/完成记录满额和 StopAsync 无死锁；服务端集成放入现有 NetworkServer.Tests，验证真实强类型派发、基线/Push 顺序、WSS/KCP 权限与撤销；Hotfix 接入按相关 Unity EditMode/PlayMode、Player 编译和场景导航验证。原生 ABI 未变不重复改造底层，但新 KCP 世界链仍需实际 socket/DTLS 集成和目标平台验收。
 
-本次只新增设计文字：未修改协议、生成 DTO、C# 或原生实现，未运行上述待实施功能的测试。历史底层验证见双方使用说明；后续每一步将实际结果更新到原有五份网络文档对应章节。
+本节最初交付为设计提案；此后五子棋和部分底层诊断已实施，当前结果见双方使用说明。第 22.3～22.8 节的实时世界候选尚未实施，不能沿用底层测试作为其验收证据。
 
 ### 22.9 源码定位
 

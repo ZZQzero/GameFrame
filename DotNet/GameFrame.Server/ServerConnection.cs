@@ -112,7 +112,9 @@ namespace GameFrame.Network
                     Interlocked.Exchange(ref fullTrafficOnce, 1);
                     promoted();
                 });
-            Context.ReportSecondaryFailure = error => logger.LogError(error, "Application response cleanup failed.");
+            Context.ReportSecondaryFailure = (error, opcode, correlation) => NetworkLog.Failure(logger, LogLevel.Error,
+                NetworkLog.ConnectionCleanupFailure, error, Context.Transport, Context.Id, Context.Generation,
+                "ReleaseResponse", opcode, correlation);
             delay = testDelay ?? Task.Delay;
         }
 
@@ -120,9 +122,11 @@ namespace GameFrame.Network
         {
             socket = accepted;
             var tasks = new List<Task>();
+            string stage = "Initialize";
             try
             {
                 application.Initialize(Context);
+                stage = "Hello";
                 using (var helloTimeout = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token))
                 {
                     helloTimeout.CancelAfter(settings.HelloTimeout);
@@ -156,6 +160,7 @@ namespace GameFrame.Network
                 }
 
                 lastPing = getMilliseconds();
+                stage = "Connection";
                 Task sending = SendLoopAsync();
                 Task receiving = ReceiveLoopAsync();
                 Task heartbeat = HeartbeatLoopAsync();
@@ -189,15 +194,9 @@ namespace GameFrame.Network
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
             {
             }
-            catch (Exception error) when (error is NetworkException || error is WebSocketException || error is OperationCanceledException)
-            {
-                RecordFailure(error);
-                logger.LogInformation("WSS connection ended: {ErrorType}", error.GetType().Name);
-            }
             catch (Exception error)
             {
-                RecordFailure(error);
-                logger.LogError(error, "WSS connection failed.");
+                RecordFailure(error, stage);
             }
             finally
             {
@@ -213,11 +212,20 @@ namespace GameFrame.Network
                 }
                 catch (Exception error)
                 {
-                    RecordFailure(error);
+                    Exception? primary = Volatile.Read(ref failure);
+                    if (primary == null)
+                    {
+                        RecordFailure(error, "Join");
+                    }
+                    else if (!ReferenceEquals(primary, error))
+                    {
+                        NetworkLog.Failure(logger, LogLevel.Error, NetworkLog.ConnectionCleanupFailure, error,
+                            Context.Transport, Context.Id, Context.Generation, "Join");
+                    }
                 }
                 finally
                 {
-                    Cleanup(Drain);
+                    Cleanup(Drain, "Drain");
                     try
                     {
                         if (Context.Session != null)
@@ -227,8 +235,7 @@ namespace GameFrame.Network
                     }
                     catch (Exception error)
                     {
-                        Interlocked.CompareExchange(ref cleanupFailure, error, null);
-                        RecordFailure(error);
+                        LogCleanupFailure(error, "Closed");
                     }
                 }
             }
@@ -482,6 +489,15 @@ namespace GameFrame.Network
                 // Let the close owner send the selected reason before cancelling initialization.
                 await Task.Delay(Timeout.Infinite, lifetime.Token);
             }
+            catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception error)
+            {
+                RecordFailure(error, "Connected");
+                throw;
+            }
 
             lifetime.Token.ThrowIfCancellationRequested();
             applicationReady = true;
@@ -506,11 +522,18 @@ namespace GameFrame.Network
                             // must finish sending the selected reason before stopping this task.
                             await Task.Delay(Timeout.Infinite, lifetime.Token);
                         }
-                        catch (Exception error) when (error is not NetworkException && error is not OperationCanceledException &&
-                            error is not WebSocketException)
+                        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
                         {
-                            RecordFailure(error);
-                            logger.LogError(error, "WSS handler failed for opcode {Opcode}.", frame.Header.Opcode);
+                            throw;
+                        }
+                        catch (Exception error)
+                        {
+                            RecordFailure(error, "Dispatch", frame.Header.Opcode, frame.Header.CorrelationId);
+                            if (error is NetworkException or OperationCanceledException or WebSocketException)
+                            {
+                                throw;
+                            }
+
                             if (Context.RequestedCloseReason != 0)
                             {
                                 await Task.Delay(Timeout.Infinite, lifetime.Token);
@@ -822,20 +845,31 @@ namespace GameFrame.Network
                 }
             }
 
-            Cleanup(() => lifetime.Cancel());
-            Cleanup(() => socket?.Abort());
+            Cleanup(() => lifetime.Cancel(), "Cancel");
+            Cleanup(() => socket?.Abort(), "Abort");
         }
 
-        private void RecordFailure(Exception error)
+        private void RecordFailure(Exception error, string stage, uint opcode = 0, ulong correlationId = 0)
         {
             Exception? previous = Interlocked.CompareExchange(ref failure, error, null);
-            if (previous != null && !ReferenceEquals(previous, error))
+            if (previous == null)
             {
-                logger.LogError(error, "Additional WSS cleanup failure.");
+                LogLevel level = error is NetworkException or WebSocketException or OperationCanceledException
+                    ? LogLevel.Warning : LogLevel.Error;
+                NetworkLog.Failure(logger, level, NetworkLog.ConnectionFailure, error, Context.Transport,
+                    Context.Id, Context.Generation, stage, opcode, correlationId, (ushort)Volatile.Read(ref closeReason));
             }
         }
 
-        private void Cleanup(Action action)
+        private void LogCleanupFailure(Exception error, string stage)
+        {
+            Interlocked.CompareExchange(ref cleanupFailure, error, null);
+            Interlocked.CompareExchange(ref failure, error, null);
+            NetworkLog.Failure(logger, LogLevel.Error, NetworkLog.ConnectionCleanupFailure, error, Context.Transport,
+                Context.Id, Context.Generation, stage, closeReason: (ushort)Volatile.Read(ref closeReason));
+        }
+
+        private void Cleanup(Action action, string stage)
         {
             try
             {
@@ -843,8 +877,7 @@ namespace GameFrame.Network
             }
             catch (Exception error)
             {
-                Interlocked.CompareExchange(ref cleanupFailure, error, null);
-                RecordFailure(error);
+                LogCleanupFailure(error, stage);
             }
         }
 
@@ -874,9 +907,9 @@ namespace GameFrame.Network
                     return;
                 }
 
-                Cleanup(lifetime.Dispose);
-                Cleanup(sendingLifetime.Dispose);
-                Cleanup(sendSignal.Dispose);
+                Cleanup(lifetime.Dispose, "DisposeLifetime");
+                Cleanup(sendingLifetime.Dispose, "DisposeSendingLifetime");
+                Cleanup(sendSignal.Dispose, "DisposeSendSignal");
                 Context.Complete(new ServerCloseInfo((ushort)Volatile.Read(ref closeReason), failure));
                 finished.TrySetResult();
             }

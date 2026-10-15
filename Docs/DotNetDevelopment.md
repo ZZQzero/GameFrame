@@ -461,6 +461,8 @@ LocalWssService 创建 / 释放 GomokuRooms，ApplicationStopping 停止准入�
 
 日志实例显式初始化、可被测试替换，所有权由应用保留；不通过全局静态 Current/ServiceLocator 查找 logger，不在取得 logger 时隐式读取配置或启动线程，不让网络模块初始化/关闭全局日志。事件测试可注入标准捕获 Provider；独立 `Tools/Logging.Tests` 验证真实 NLog 适配，无需数据库和网络监听。不新增统一 Write 转发器、自研调度器或业务感知的日志管理器。
 
+<a id="server-network-fault-events"></a>
+
 ### 10.3 字段、事件与级别
 
 下表规定目标逻辑字段；当前已实现公共/实例字段与宿主事件，其余按 L2/L3 推进。文本和 JSON 的实际映射见使用说明。消息模板、EventId 和字段含义保持一致，不能把插值后的文本当作结构化参数。
@@ -487,6 +489,17 @@ LocalWssService 创建 / 释放 GomokuRooms，ApplicationStopping 停止准入�
 
 凭据错误、非法落子、房间已满、正常 EOF 和已请求的协作取消不写 Error 堆栈。凭据拒绝、限流和协议拒绝次数以指标聚合，必要日志只携带原因和计数；不为每个攻击来源创建无限限频状态。具体事件级别依据现有错误语义确定，不能仅按异常类型决定严重程度。
 
+2026-10-14 已实施网络故障事件，声明位于 `GameFrame.Server/NetworkLog.cs`，复用现有连接首因与终态，不增加日志管理器、异常去重表或逐包 Scope。字段为 Transport、ConnectionId、Generation、Stage、Opcode、CorrelationId、CloseReason、ExceptionType、ExceptionStack；没有对应请求时 Opcode/CorrelationId 为 0，共享 listener 的连接标识为 0，均表示不适用。
+
+| EventId / EventName | 责任边界与级别 |
+| --- | --- |
+| 1000 / NetworkConnectionFailure | WSS/KCP 首个连接故障；协议/背压/传输/非协作超时为 Warning，未预期应用故障为 Error |
+| 1001 / NetworkConnectionCleanupFailure | 独立的响应释放、取消、Closed、资源收尾或 join 故障，Error；清理是首因时仍记录，并保留原错误传播 |
+| 1002 / NetworkListenerFailure | KCP 共享 socket/native owner 失败，Critical；不对每个受影响 child 重复记录主故障 |
+| 1003 / NetworkListenerCleanupFailure | KCP listener 独立清理失败，Error，包含首个清理故障 |
+
+请求失败在帧仍归派发者所有时固定 Opcode/CorrelationId；关闭传播不重复打印主故障，独立清理仍单独记录。Provider 仅收到异常类型与直接从异常堆栈帧生成的字符串（不含源文件信息）；不接收原 Exception、Message、InnerException、Data、可重写 StackTrace 或 ToString。`Completion.Error` 和关闭/释放失败仍保留原异常对象与既有语义。过滤关闭时不创建堆栈字符串。此规则只覆盖这些网络故障出口，业务/第三方事件与故障洪峰成本仍按后续门禁验收。
+
 ### 10.4 异常记录、Scope 与所有权
 
 1. 为启动、请求、连接、listener 和最终清理分别指定记录责任方。Repository/Service 传播原异常；已经在请求边界处理并记录的主异常，连接关闭和宿主层不再打印同一堆栈。为此优先使用已有首因/终态所有权，不新增全局异常去重表。
@@ -498,7 +511,7 @@ LocalWssService 创建 / 释放 GomokuRooms，ApplicationStopping 停止准入�
 
 ### 10.5 实施步骤与退出条件
 
-以下保留完整完善路线。本次按用户要求先交付 L1 与 NLog 输出基础，L0 全量基线及 L2/L3 尚未完成；继续治理网络/业务事件时按 L0→L2→L3 推进。每步形成可评审差异并更新进度，不能通过新增日志掩盖状态与资源问题。
+以下保留完整完善路线。L1 与 NLog 输出基础已完成；本轮完成仓库网络实现及关联调用边界的源码基线并实施首批 L2 故障事件，L3 业务事件仍未实施。外部库实现内部审计与生产洪峰测量尚未完成。每步形成可评审差异并更新进度，不能通过新增日志掩盖状态与资源问题。
 
 | 步骤 | 修改范围与具体动作 | 退出条件 |
 | --- | --- | --- |
@@ -556,9 +569,9 @@ L3 的“状态提交”与“响应送达”严格区分：登录绑定完成�
 
 | 交付项 | 当前状态 | 完成时补充的证据 |
 | --- | --- | --- |
-| L0 完整源码/调用关系基线 | 待执行全量基线；本次只核对接入涉及的实现 | 覆盖清单、故障记录边界和具体事件表 |
+| L0 完整源码/调用关系基线 | 已完整阅读仓库网络清单及关联接入/测试/构建边界；外部依赖仅核对锁与接入，不声明内部完整安全审计 | 本轮覆盖与限制见服务端使用说明；保留现有状态/资源流程，修正故障出口与文档现状 |
 | L1 框架模块、统一配置与应用所有权 | 已合并为单一 GameFrame.Logging 工程并接入两个 profile | 独立日志测试、真实 WSS host 释放后写入、早期失败进程和 KCP 启停验证；真实 PG 启动故障尚未验 |
-| L2 框架事件与上下文 | 待实施 | WSS/KCP 故障、并发和清理行为测试 |
+| L2 框架事件与上下文 | 已实施上述四类故障事件与脱敏，正常生命周期/性能事件和洪峰治理仍待完善 | 真实 WSS/KCP 故障关联、首因与独立清理、原异常传播、NLog 文本/JSON 测试；本轮结果见使用说明 |
 | L3 业务事件 | 待实施 | 认证/撤销/房间事件及脱敏验证 |
 | L4 有界输出与排空 | 基础已实现并验证；端到端压测待执行 | 文本/JSON、过滤、并行 Scope、满队列、写入错误、刷新失败/超时；生产容量/洪峰待验 |
 | L5 首轮交付 | NLog 接入阶段已验证，不代表全路线完成 | 具体构建/测试/进程证据见使用说明；其他平台、PG 和生产压测待验 |
@@ -566,7 +579,7 @@ L3 的“状态提交”与“响应送达”严格区分：登录绑定完成�
 | NLog Provider 接入 | 已接入 NLog/NLog.Extensions.Logging 6.2.1，更新依赖锁和 CI 入口 | 字段/过滤/所有权、输出故障与刷新验证；未声明比原 Console 更快 |
 | 应用直接落盘 | 可选，待部署需求明确 | 适配支持显式 Target；文件轮转、容量、磁盘故障尚未配置/验收 |
 
-本轮修改日志框架、适配、应用组合和相关测试，没有实施网络/业务事件的大范围改造。环境变量、事件及验证限制见 [服务端日志使用说明](DotNetUsage.md#server-logging)。
+当前在既有日志工程与应用组合基础上补充网络故障事件，业务事件和完整性能治理仍属后续范围。环境变量、事件及验证限制见 [服务端日志使用说明](DotNetUsage.md#server-logging)。
 
 <a id="server-logging-performance"></a>
 

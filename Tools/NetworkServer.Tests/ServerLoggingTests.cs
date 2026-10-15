@@ -17,6 +17,66 @@ namespace GameFrame.Tests
     [TestFixture]
     public sealed class ServerLoggingTests
     {
+        private sealed class SensitiveException : Exception
+        {
+            internal const string Secret = "password-ticket-psk-connection-string-must-not-escape";
+            internal int FormattingCalls;
+
+            internal SensitiveException() : base(Secret, new Exception(Secret))
+            {
+                Data["secret"] = Secret;
+            }
+
+            public override string StackTrace
+            {
+                get
+                {
+                    FormattingCalls++;
+                    return Secret;
+                }
+            }
+
+            public override string ToString()
+            {
+                FormattingCalls++;
+                return Secret;
+            }
+        }
+
+        [TestCase(NLogOutputFormat.Text)]
+        [TestCase(NLogOutputFormat.Json)]
+        public async Task NetworkFaultsNeverPassExceptionPayloadOrCustomFormattingToNLog(NLogOutputFormat format)
+        {
+            var target = new MemoryTarget("capture");
+            await using var output = NLogLogging.Create(new LoggingOptions
+            {
+                Service = "test", Environment = "test", InstanceId = "redaction", Version = "1"
+            }, new NLogOutputOptions { Format = format }, target);
+            var error = new SensitiveException();
+            try
+            {
+                throw error;
+            }
+            catch (SensitiveException failure)
+            {
+                NetworkLog.Failure(output.Factory.CreateLogger<WssServer>(), LogLevel.Error,
+                    NetworkLog.ConnectionFailure, failure, NetworkTransportKind.WebSocket, 7, 2, "Dispatch", 101, 42);
+            }
+
+            await output.DisposeAsync();
+            Assert.That(error.FormattingCalls, Is.Zero);
+            Assert.That(target.Logs, Has.Count.EqualTo(1));
+            Assert.That(target.Logs[0], Does.Not.Contain(SensitiveException.Secret));
+            Assert.That(target.Logs[0], Does.Contain(nameof(SensitiveException)));
+            Assert.That(target.Logs[0], Does.Contain(nameof(NetworkFaultsNeverPassExceptionPayloadOrCustomFormattingToNLog)));
+            if (format == NLogOutputFormat.Json)
+            {
+                using var json = System.Text.Json.JsonDocument.Parse(target.Logs[0]);
+                Assert.That(json.RootElement.GetProperty("ConnectionId").GetUInt64(), Is.EqualTo(7UL));
+                Assert.That(json.RootElement.GetProperty("CorrelationId").GetUInt64(), Is.EqualTo(42UL));
+            }
+        }
+
         [Test]
         public async Task NLogRemainsUsableAfterTheWssHostReleasesItsResources()
         {

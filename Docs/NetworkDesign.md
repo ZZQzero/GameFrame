@@ -1,12 +1,14 @@
 # GameFrame 商业网络模块设计
 
-> 状态：分阶段实施中，2026-10-14。本文区分当前实现、未来业务候选与发布验收目标；已完成项与验证范围见双方使用说明，不代表完整模块已经通过正式包验证。
+> 状态：分阶段实施中，2026-10-16。本文区分当前实现、未来业务候选与发布验收目标；已完成项与验证范围见双方使用说明，不代表完整模块已经通过正式包验证。
 > 技术基线：WebSocket/WSS、MemoryPack 1.21.4、原版 C KCP；服务端已确定为 C#/.NET 10。
 > 当前会话入口：WSS 建连与协议握手 → 登录或显式恢复 RPC → 大厅 → 两人五子棋房间。未来实时玩法可选择 WSS 或 KCP/DTLS；账号到世界的 KCP 授权链尚未实现。
 
 > 文档入口：[服务端 .NET 全局开发规范](DotNetDevelopment.md)、[服务端使用说明](DotNetUsage.md)、[客户端网络开发规范](ClientNetworkDevelopment.md)、[客户端网络使用说明](ClientNetworkUsage.md)。本文定义总体架构、目标与业务接入契约；四份文档说明开发规则、实现细节和操作步骤。设计变化同步修改相关文档，未实现或未验收项不能据设计描述认定完成。
 
 > GameFrame 完善方向：[第 22 节](#22-etframework-可借鉴设计与-gameframe-实施提案)以本框架的实际需求为依据，借鉴 ET 的有效经验，列出候选改进、接入点和验收条件。目标是提高 GameFrame 的正确性、完整性和可维护性，不以复刻 ET 或达到架构一致为目标；该节不代表世界业务或分布式路由已经实现。
+
+> 协议组织改进（2026-10-16）：[第 23 节](#network-protocol-modules)确定按业务目录生成独立 Messages 文件、统一汇总 catalog 的目标，说明生成顺序、文件稳定性、共用业务执行流程及分阶段迁移与验收条件。本节提案尚未实施，第 8 节及双方开发规范/使用说明仍描述当前实现。
 
 > 当前实施方向（2026-10-14）：已有 WSS 联网五子棋，继续完善通用网络底层；近期顺序与验收见[第 18.1 节](#181-当前优先路线底层框架完善)。实时世界、AOI、预测与跨进程路由在实际玩法需要时再扩展。
 
@@ -315,6 +317,8 @@ Hello 完成前仅允许当前握手所需控制包。Hello 完成后，WSS 进�
 ```
 
 ## 8. MemoryPack 协议工程
+
+本节记录当前协议工程及基础契约。按业务独立生成文件、拆分 DTO 和自动计算正文预算的后续改进见[第 23 节](#network-protocol-modules)；以下文件布局、命名与手写预算在改进实施前继续有效。
 
 ### 8.1 唯一协议源
 
@@ -1302,3 +1306,270 @@ ET 以下路径相对相邻 `ETFramework` 仓库根目录；其 DotNet 工程链
 GameFrame 接入点：[强类型 ServerApplication/ServerSession API](../DotNet/GameFrame.Server/ServerApplication.cs)、[现有连接派发](../DotNet/GameFrame.Server/ServerConnection.cs)、[五子棋应用](../DotNet/Game.Server/Gomoku/GomokuModule.cs)、[应用组合](../DotNet/Game.Server/LobbyApplication.cs)、[大厅身份与解绑](../DotNet/Game.Server/Sessions/LobbySession.cs)、[账号会话所有权](../DotNet/Game.Server/Login/AccountSessions.cs)、[Hotfix 账号会话](../Unity/Assets/Scripts/Hotfix/Login/GameLoginSession.cs)。
 
 2026-10-14 五子棋房间已落地：业务位于 Game.Server/Gomoku 与 Hotfix/Gomoku，复用认证 WSS、同源纯规则与 UI 栈。同步提交采用房间集合 → Binding.CommitGate，撤销与提交互斥；有界完整快照可以合并中间版本，客户端按成员 / 版本统一应用 RPC 和 Push，取消后显式 Query。不启用实时世界路由，验证与发布平台待验收项见 [五子棋](Gomoku.md#10-已实施与验证边界)。
+
+<a id="network-protocol-modules"></a>
+
+## 23. 按业务独立生成消息的改进提案
+
+### 23.1 决定、范围与当前差异
+
+2026-10-16 更新的组织方向：以业务模块为协议所有者，每个业务目录生成一个完整的 `<Module>Messages.g.cs`，统一入口沿用 `GameNetProtocol.cs`，自动汇总各模块路由和全局协议指纹。五子棋生成 `GomokuMessages.g.cs`，以后实际开发聊天时生成 `ChatMessages.g.cs`。模块扩大后可以按职责拆成多个子模块，各自生成文件。生成器负责协议定义与机械校验，业务代码负责状态、权限和生命周期。
+
+本节交付为改进文档，尚未修改生成器、协议、业务调用或运行时 API。聊天只用于说明扩展方式，不在本提案阶段新增生产路由或业务占位。基础继续采用 Proto IDL、MemoryPack 1.21.4、现有 GFNP 帧与 WSS/KCP，客户端与服务端继续编译同源生成源码。
+
+| 方面 | 当前实际实现 | 目标 |
+| --- | --- | --- |
+| 协议输入 | Common、Session、Gomoku、Diagnostics 已分目录，消息与 service 分文件 | 保留业务目录边界；一个目录可有一个或多个 Proto |
+| 正式输出 | 全部 DTO 在 `GameNetMessages.cs`；路由、codec、校验器和 catalog 在 `GameNetProtocol.cs` | 每个业务一个 Messages 文件；沿用 `GameNetProtocol.cs` 汇总路由和指纹 |
+| 类型与路由命名 | 生成类型统一在 `Game.Protocol`；简单类型名与路由名要求全目录唯一 | 业务类型进入 `Game.Protocol.<Module>`；路由名在所属模块内唯一，opcode 仍全局唯一 |
+| 消息建模 | 六条五子棋命令 RPC 共用 `GomokuCommand` | 按用例定义请求；含义相同的响应与快照可共享 |
+| 正文预算 | 字段约束与路由 `max_body/response_max_body` 分别手写；生成器已有 `MaxBytes` 检查 | 经验证的最大编码长度保守上界生成路由预算 |
+| 注册与监听 | 服务端显式强类型注册，Freeze 检查完整性；客户端 Push 单拥有者和句柄释放 | 沿用现有机制，改用业务路由分组，注册与订阅继续归业务模块 |
+
+当前依据：[Proto 入口与生成流程](../DotNet/NetworkProtocol/ProtoProtocolGenerator.cs)、[MemoryPack 分析与输出](../DotNet/NetworkProtocol/MemoryPackProtocolGenerator.cs)、[产物写入与检查](../DotNet/NetworkProtocol/Program.cs)、[双端同源引用](../Protocol/GameFrame.Protocol.projitems)、[服务端注册](../DotNet/GameFrame.Server/ServerApplication.cs)、[客户端调用与订阅](../Unity/Assets/Scripts/Runtime/Network/NetworkClient.cs)。
+
+### 23.2 业务目录、生成文件与依赖
+
+目标布局如下。输入文件名仅作示例；现有 `GomokuProto.proto` 与 `GomokuService.proto` 可以继续分开维护，均归 Gomoku 模块，不要求为了生成分组先合并或重命名输入。
+
+```text
+Protocol/
+  Common/
+    net_options.proto
+    Common.proto
+  Session/
+    Session.proto
+  Gomoku/
+    Gomoku.proto
+  Diagnostics/
+    Diagnostics.proto
+  Chat/                           以后实际开发聊天时新增
+    Chat.proto
+
+Unity/Assets/Scripts/Hotfix/Network/Generated/
+  CommonMessages.g.cs
+  SessionMessages.g.cs
+  GomokuMessages.g.cs
+  DiagnosticsMessages.g.cs
+  ChatMessages.g.cs                与实际聊天协议同时新增
+  GameNetProtocol.cs
+```
+
+生成规则以 `Protocol/` 下的一级业务目录确定模块 ID，目录内所有业务 Proto 合并输出到 `<Module>Messages.g.cs`。目录必须是有效、无歧义的模块名，模块名、输出文件名在大小写不敏感的文件系统上也不得冲突。工具排除 `Protocol/Generated` 开发产物和 `Common/net_options.proto` 等选项定义；根目录业务 Proto 或其他无法归属模块的输入明确报错。
+
+每个模块的业务 Proto 显式声明一致的 package（例如 `game.protocol.gomoku`）与 `csharp_namespace = "Game.Protocol.<Module>"`，跨模块 package 区分类型作用域，并检查 C# 命名空间与目录归属一致。模块内可以声明多个 service，但生成的路由字段名在模块内必须唯一；不同模块可以分别拥有 `ResultCode`、`QueryRequest` 或 `Send`。跨模块生成引用使用 `global::` 限定的完整 C# 类型名，解除当前 codec/校验器按简单类名全局唯一的限制。这是阶段 2 完成后的目标命名规则；阶段 1 仅拆文件，保留现有完整类型名与路由 API，见 23.9。
+
+路由分别保存完整 Proto 标识与 C# 调用符号。例如 `game.protocol.gomoku.GomokuService.PlaceMove` 标识源 service method，`Game.Protocol.Gomoku.GomokuRoutes.PlaceMove` 是生成调用符号，opcode 是线上帧使用的全局唯一编号。阶段 2 起 manifest 的路由名称记录完整 Proto 标识，路由按 opcode 排序；诊断同时给出模块、完整标识与源位置。同名 method 不再依赖简单名称区分，opcode 继续显式分配，不根据遍历顺序或生成编号推导。
+
+`CommonMessages.g.cs` 只拥有真正共享的枚举、DTO 和对应 codec/校验器；`net_options.proto` 本身不生成业务消息。共享要求语义和演进需求一致，不能仅因字段相似就把登录载荷、聊天成员资料或业务结果码合并成一个公共类型。各业务只引用实际需要的 Common 类型，业务类型只在所属模块生成一次，不把 import 的 Common 类型复制进每个业务文件。生成器根据字段、请求和响应的真实类型引用检查依赖，模块依赖保持无环；五子棋和聊天各自维护自身协议。
+
+输出继续集中在现有 `Network/Generated`，便于 Unity 资产管理和 `.NET Game.Protocol` 链接同源源码。现有 projitems 的 `*.cs` 引用可以覆盖这些平铺输出，不为每个新增业务维护一份项目文件列表。全局入口保留原文件名及 `.meta` GUID，生成标记继续写在文件头；业务文件使用 `.g.cs` 后缀。业务会话和处理器仍分别位于 Hotfix 与 Game.Server 对应业务目录，不放入生成目录。
+
+一个业务文件内包含该业务的枚举、DTO、`<Module>Routes`、codec、出站对象校验器和入站字节校验器。MemoryPack 自身的序列化代码仍由其编译期 generator 生成；“一个 Messages 文件”指 NetworkProtocol 输出的正式协议源码，不限制编译器内部生成文件数量。
+
+### 23.3 数据结构按用例表达
+
+五子棋请求拟拆为 `CreateRoomRequest`、`JoinRoomRequest`、`SetReadyRequest`、`StartGameRequest`、`PlaceMoveRequest`、`LeaveRoomRequest` 与 `QueryRoomRequest`，均位于 `Game.Protocol.Gomoku`。例如：
+
+```proto
+syntax = "proto3";
+package game.protocol.gomoku;
+option csharp_namespace = "Game.Protocol.Gomoku";
+import "Common/net_options.proto";
+
+message CreateRoomRequest {
+  uint64 command_id = 1;
+}
+
+message JoinRoomRequest {
+  uint64 command_id = 1;
+  string room_code = 2 [(game.net.max_utf16) = 8, (game.net.max_utf8) = 8];
+}
+
+message PlaceMoveRequest {
+  uint64 command_id = 1;
+  string room_id = 2 [(game.net.max_utf16) = 32, (game.net.max_utf8) = 32];
+  uint64 expected_version = 3;
+  int32 column = 4;
+  int32 row = 5;
+}
+```
+
+这样创建请求不会携带落子坐标，加入请求不会携带准备状态。请求/响应配对仍由 `NetRpc<TRequest,TResponse>` 保证，字段误用尽早表现为编译错误。坐标范围、账号权限、当前轮次、版本和命令是否已提交继续由业务检查，结构合法不等于业务合法。
+
+少量 command ID、房间 ID、版本标量允许重复声明。只有确实构成独立语义结构时才抽取嵌套 DTO，避免仅为消除几个重复字段增加对象节点与分配。协议 DTO 与数据库实体、服务端运行状态及客户端 UI 模型分别维护，限制对外载荷和修改影响范围。
+
+响应按实际含义共享：多个房间命令可以使用相同的命令响应，查询可以有独立响应；`RoomSnapshot` 继续作为公共业务状态载荷，RPC 和 Push 在含义一致时复用。拆响应前必须核对现有 `Execute/Query`、回执缓存和客户端未知结果处理：当前命令响应也可能用 `command_known=false` 表达尚未记录，不能仅因查询拆分就删除该语义。幂等指纹根据实际操作和有效字段计算，保持原 command ID 单调、高水位和显式查询契约。
+
+请求拆分后，服务端在业务处理器边界把专用 DTO 转成所属业务的内部命令或操作参数，继续进入共用的鉴权、锁、命令高水位、回执与状态提交流程。内部命令放在 Game.Server，不要求与对外 DTO 同形，也不生成通用命令基类。客户端在业务会话内共用命令编号分配、在途操作仲裁、超时/取消后的不确定结果处理、认证代际检查与状态提交。六条请求分别拥有清晰入口，共用流程集中维护；转换代码只映射有效字段，不复制六套执行逻辑。
+
+字符串、数组、引用可空性和固定标量宽度继续明确声明。固定长度约束可作为后续选项评估；例如 LoginResponse 失败时 token 可为空数组，成功时才要求精确长度，因此不能直接新增一个无条件 `exact_count` 破坏失败响应。成功条件与字段关联校验仍归业务处理器。
+
+### 23.4 按模块生成、全局验证与统一入口
+
+解析到输出使用同一套规范化模型，MemoryPack 分析结果补充到对应类型，模块归属始终保留；不在后续阶段通过简单类名或遍历序号重新推导归属。生成器内部至少保留下列信息，不为此引入运行时模块框架：
+
+| 模型 | 保留的信息 | 用途 |
+| --- | --- | --- |
+| 模块 | 模块 ID、Proto package、C# namespace、输出路径、依赖 | 确定输出归属和模块边界 |
+| DTO/枚举 | 完整 Proto/C# 类型名、所属模块、源位置 | 解析引用，支持跨模块同名类型并准确诊断 |
+| 字段 | 字段号、类型引用、长度与可空约束、源位置、实际序列化布局 | 生成校验器并核对编码上界 |
+| 路由 | 完整 Proto 标识、所属模块/service、调用符号、opcode、方向、通道、请求/响应、预算 | 全局校验、生成强类型路由和规范化 manifest |
+
+目标生成流程：
+
+1. 使用现有入口扫描所有 Proto，解析 import，建立规范化模型。
+2. 全局检查 opcode 唯一、引用可解析、模块无环、字段连续编号、长度约束、通道和类型白名单；名称冲突按实际命名空间和所属模块检查。
+3. 在内存按模块生成 DTO，使用 MemoryPack 自带 generator 编译，分析真实布局并核对 serialization-info。生成器继续独立于 Game.Protocol 和已有产物运行。
+4. 根据已分析布局和字段约束确定路由预算，再生成规范化 manifest 并计算全局 hash。阶段 4 前继续核对显式 `max_body/response_max_body`；自动预算验证完成后才改为计算值。manifest/hash 始终在内存计算，不依赖 `--artifacts`。
+5. 生成各业务的路由、codec/校验器，以及嵌入上述 hash 的全局入口。嵌套公共类型调用其所属模块的生成校验方法，深度和节点预算跨调用累计。
+6. 将所有模块源码与入口作为一个完整编译单元验证，确认跨模块引用和实际序列化布局一致。启用 `--artifacts` 时在内存生成 manifest/hash 文件和 golden vectors；跨端编码验收按 23.10 执行。
+7. 全部生成与编译验证成功后逐文件比较，generate 只写变化内容；`check` 只读报告缺失、差异和多余产物。模块移除后的过时 C# 与对应 `.meta` 明确列出，由迁移步骤处理，不自动删除。
+
+`GameNetProtocol.cs` 中的 `Game.Protocol.GameNetProtocol.Catalog` 汇总所有业务路由并嵌入全局指纹。它只组合生成的路由单例，不复制 DTO、validator 或另一份手写 opcode 表；各模块路由与 catalog 持有相同对象，满足当前 `RequireRegistered` 的引用一致性检查。模块 codec/路由初始化不反向访问全局 catalog，避免静态初始化循环。
+
+所有入口继续调用 `DotNet/NetworkProtocol`：IDE Generate/Check、Unity Generate Messages/Check Messages 和命令行一致。默认全量扫描和验证、按模块输出并只写变化文件；暂不增加 `--module`、运行时扫描或构建时自动改写产物。日常只改五子棋时，聊天文件的内容和修改时间均应不变；全局 catalog 内的 hash、manifest/hash 和相关向量仍可能变化，公共类型变化也会影响真实依赖它的模块。
+
+模块文件只包含本模块定义与必要的完整类型引用，不嵌入全局 hash、生成时间、全目录文件清单或全局递增编号。类型按完整名称、字段按字段号、路由按 opcode 使用固定顺序输出；codec/校验方法名在所属模块内由稳定类型名生成，不依赖其他模块的数量与排序。输出统一使用 UTF-8 无 BOM 和 LF。全局入口单独组合排序后的路由并保存 hash；物理路径、注释、空白和生成时间不进入协议指纹。模块文件稳定性通过新增、删除及重排其他模块的夹具验证。
+
+解析、布局和源码编译在写入前完成，不承诺写文件期间的跨文件事务或失败回滚。写入失败必须报告，修复后重新生成并执行 check；CI 只做 check 和相关测试，不自动 generate 掩盖漂移。
+
+### 23.5 自动计算正文预算与 Proto 书写
+
+字段约束作为正文最大长度的事实来源，生成器从 MemoryPack Object/Explicit 实际格式计算各路由请求、响应或推送的最大编码长度保守上界，再检查可靠/不可靠通道硬上限。该上界允许保守，必须保证所有合法载荷都能编码；不能把现有 `maximum` 单一样本的字节数直接当作最大值。
+
+计算包含对象头、定宽值、字符串头及 UTF-8 正文、数组头和元素、可空引用及嵌套对象，使用 checked 运算。节点和深度限制仍独立执行。上线前需通过公式核对和多种边界样本验证 `实际编码长度 ≤ 计算上界`，覆盖 ASCII、中文、代理对、空值/空集合、最大数组和跨模块嵌套。超出通道预算的协议在生成时失败，不能截断字段或自动换通道。
+
+自动预算验证完成后移除手写 `max_body/response_max_body`，避免字段扩容和路由预算分别维护。连接和发送队列仍保留独立的条数/字节总预算。较紧的路由上界有机会降低发送预约和可接受正文范围，实际分配收益以缓冲实现和测量为准，不能据此宣称吞吐或生产容量提升。
+
+路由的结构化 option 属于后续书写改进，示例为拟新增语法，当前 `net_options.proto` 尚不支持：
+
+```proto
+rpc PlaceMove(PlaceMoveRequest) returns (CommandResponse) {
+  option (game.net.route) = {
+    opcode: 3005
+    kind: ROUTE_KIND_RPC
+    delivery: DELIVERY_RELIABLE
+  };
+}
+```
+
+该写法将配置放在一起，主要改善阅读与选项维护；按业务生成本身不依赖它。采用时修改选项定义、解析、全部源协议及校验测试，再同步规则；不保留两套默认优先级或静默推断。opcode、方向和通道继续显式声明，Push/Notify 的 Empty 占位规则沿用现有契约。复合字符串限额也仅在确有书写收益时评估，UTF-16 与 UTF-8 两种限制仍需可见。
+
+### 23.6 服务端注册、发送与权限
+
+生成器负责业务协议定义与统一 catalog，业务模块继续显式注册处理器。下面使用拟生成的路由名称演示调用形态，变量来自所属业务方法，不表示这些新类型或路由已经实现：
+
+```csharp
+application.Rpc(GomokuRoutes.PlaceMove, gomokuHandlers.PlaceMoveAsync);
+application.Rpc(ChatRoutes.SendMessage, chatHandlers.SendMessageAsync);
+
+await connection.PushAsync(GomokuRoutes.RoomSnapshot, snapshot);
+await connection.PushAsync(ChatRoutes.MessageReceived, message);
+```
+
+GomokuModule、LoginModule 等继续拥有自己的处理器绑定，LobbyApplication 只显式组合模块。处理器手写，负责把专用请求接入 23.3 的共用业务执行流程，生成器不生成鉴权、事务或状态提交代码。Request/Response 配对在编译期检查，遗漏处理器或重复注册沿用应用 Freeze/Register 的失败检查；敏感响应的 `releaseResponse` 清理参数继续支持。业务未启用时显式 Reject，不能把生成了路由等同于自动开放权限。
+
+如果 local profile 的逐条拒绝明显重复，可以后续在生成文件提供入站路由分组，由宿主遍历调用现有 Reject；共享协议文件不得引用 GameFrame.Server、Unity、业务 Handler 或创建服务端资源。服务级 Complete、自动 handler 接口、特性扫描和反射注册均不作为本轮前置条件。
+
+授权仍通过服务端绑定、Admit/CheckDispatch 与具体处理器执行；DTO 自报的账号或角色 ID 不作为权限凭据。网络通用层继续管理帧、关联、编解码、背压、取消与连接关闭，业务层管理 command ID、幂等、状态提交和不确定结果查询。
+
+### 23.7 客户端发送、监听与生命周期
+
+客户端直接使用生成的模块路由和专用 DTO，复用现有 NetworkClient API：
+
+```csharp
+using Game.Protocol.Gomoku;
+
+CommandResponse response = await client.RequestAsync(
+    GomokuRoutes.PlaceMove,
+    new PlaceMoveRequest
+    {
+        CommandId = commandId,
+        RoomId = roomId,
+        ExpectedVersion = version,
+        Column = column,
+        Row = row
+    },
+    timeout,
+    cancellationToken);
+
+snapshotSubscription = client.Subscribe(GomokuRoutes.RoomSnapshot, OnRoomSnapshot);
+```
+
+上述片段位于 Hotfix 主线程业务方法中；变量与句柄由业务会话提供。业务会话可以向 UI 提供 `PlaceMoveAsync(column, row, token)` 等手写业务方法，在内部取得房间、版本和 command ID，并共用结果处理流程。无需为每条消息生成一层只转发 RequestAsync 的 Client 类，也不将超时和业务恢复策略藏在生成代码中。
+
+| 消息用途 | 客户端/服务端形态 | 完成语义 |
+| --- | --- | --- |
+| 需要明确响应的查询或操作 | RequestAsync + 服务端 Rpc | 收到并验证匹配响应；业务是否成功仍检查响应结果 |
+| 可靠的单向客户端通知 | SendAsync + 服务端 Notify | 客户端完成表示进入发送队列，不表示业务提交 |
+| 可丢弃的最新输入 | TrySendUnreliable + 服务端 Notify | 返回值只表示本地准入，按玩法允许丢弃；要求 KCP 不可靠通道 |
+| 服务端可靠状态/聊天投递 | PushAsync + 客户端 Subscribe | PushAsync 完成表示本地入队，不表示对方已读取或展示 |
+| 可丢弃的服务端快照 | TryPushUnreliable + 客户端 Subscribe | 显式不可靠路由；可靠/不可靠通道之间没有顺序承诺 |
+
+每个 Push opcode 在同一个 NetworkClient 上保持一个订阅拥有者。GomokuRoomSession 接收五子棋快照、验证并更新模型，然后向 UI 发布 Changed；聊天由自己的会话接收、维护消息状态并通知界面。多个界面可以观察业务状态，面板不各自订阅同一原始 Push。
+
+订阅句柄归业务会话，注销、认证失效或销毁时释放；UI 的业务状态监听按 [Scope](Scope.md) 放入 OpenScope/LifetimeScope。需要多个网络订阅时可以继续保存多个句柄，只有重复清理确实增多才增加就近的订阅集合。部分注册失败必须清理已取得的句柄，最终释放尝试所有所属资源并遵循 [ErrorContract](ErrorContract.md)；这属于资源获取失败清理，不增加业务回滚或自动重试。
+
+当前公开调用、订阅、释放和 Push 派发均在 Unity 主线程，Push 回调保持同步；较长异步业务工作需要明确任务所有者、取消和结果提交条件，不能直接用 async void 订阅逃离错误边界。合法未订阅 Push 仍执行字节校验且不创建 DTO；回调异常仍按当前连接故障契约处理。
+
+### 23.8 收益汇总与大型游戏扩展边界
+
+| 改进 | 具体收益 | 适用边界 |
+| --- | --- | --- |
+| 按业务生成独立文件 | 五子棋与聊天差异分开，降低多人协作合并冲突，便于定位和审查 | 共享入口和公共依赖变化仍可能联动 |
+| 业务命名空间和路由分组 | 归属清楚，释放不同业务的同名类型/方法限制，IDE 补全按业务查找 | opcode 继续全局唯一 |
+| 专用请求与适当共享响应 | 无关字段组合难以表达，幂等指纹只依赖有效字段，变更影响更明确 | 权限、范围、状态与提交语义仍需业务验证 |
+| 共用业务执行流程 | 请求入口清晰，鉴权、幂等和状态处理集中维护，减少行为漂移 | 需要少量 DTO 到内部命令/参数的转换；不强制跨业务复用 |
+| 单一字段约束与自动预算 | 减少魔法数字和双重维护，收紧字节入口，可能减少预约浪费 | 必须验证上界；性能收益单独实测 |
+| 结构化路由选项 | 一条路由的配置聚合，阅读和选项维护更集中 | 可选，收益主要是书写体验 |
+| 强类型路由与显式注册 | 请求响应配对由编译器检查，依赖可追溯，漏注册在启动时失败 | 继续复用 Runtime/Core/Server，不增加扫描框架 |
+| 业务会话拥有订阅 | 状态提交顺序与释放责任明确，多个 UI 共享业务模型，减少重复订阅和泄漏 | 不把单个连接自动拆成多个故障域 |
+| 全量确定性生成与按需写入 | 新业务自动加入汇总，无需手写表；无关文件字节与修改时间稳定 | 仍需全局语义和编译检查 |
+| 分阶段迁移与沿用全局入口 | 分别判断文件重组、命名和布局变化的影响，减少资产迁移 | 增加中间状态与验证轮次；业务文件与入口的后缀约定不同 |
+| 双端同源与全局 hash | 减少两套 DTO/路由漂移，连接前识别布局和约束不一致 | 同源仍需 Unity/.NET 字节向量与 Player 验证 |
+| 按职责拆子模块 | 从小型玩法平滑扩展到聊天、背包、任务、社交和战斗 | 不规定所有规模都必须只用一个大文件 |
+
+大型游戏中，生成边界跟随清楚的业务职责。初期 Chat、Inventory 各一个文件；战斗变大后，可以将输入与快照拆成 `CombatInput/`、`CombatSnapshot/` 两个模块目录，分别生成对应文件；跨模块类型单向归属，避免相互 import。拆分依据是类型归属、依赖和维护成本，不以任意固定行数为门槛。
+
+文件拆分改善维护和协作，不自动提供独立程序集、独立热更、独立部署、CPU 调度或故障隔离。当前仍用 Game.Hotfix 和 Game.Protocol 原有程序集、同一个连接 catalog 与全局 hash；新增聊天或修改任何已纳入指纹的协议都要求双端同步生成、编译和发布。需要滚动升级、服务间独立协议或分连接故障域时，再单独设计对应版本、认证和生命周期。
+
+MemoryPack 格式、帧头和传输本身不因生成文件数量改变。消息带宽、GC、序列化、派发预算、AOI、房间容量和服务器扩展仍按实际玩法与测量验证，不将本提案视为大型网游容量验收。
+
+### 23.9 实施顺序与修改落点
+
+| 阶段 | 内容与主要落点 | 完成条件 |
+| --- | --- | --- |
+| 1：仅拆生成文件 | ProtoProtocolGenerator 保留模块归属；MemoryPackProtocolGenerator 分模块输出；Program 更新产物清单检查；沿用全局入口文件名、现有完整类型名、路由 API、manifest 名称与显式预算 | 现有四个模块分别输出；完整编译通过；manifest/hash 与 golden vectors 的键和值保持一致，业务调用无需改名 |
+| 2：迁移模块命名与路由 | 原有 Proto 设置业务命名空间；生成 `<Module>Routes` 与模块内 codec/校验器；manifest 采用完整 Proto 路由标识；更新全部调用方、夹具和相关登记 | 跨模块同名类型与路由可编译、编解码；统一 catalog 复用同一路由实例；预期 hash 变化，双端生成与验证通过 |
+| 3：五子棋用例建模 | Protocol/Gomoku、Game.Server/Gomoku、Hotfix/Gomoku 及对应测试；处理器与会话保留共用执行流程 | 专用请求贯穿双方，command ID/幂等/查询/快照与认证代际语义保持正确，联机主流程通过 |
+| 4：自动正文预算 | MemoryPackProtocolGenerator、ProtocolSamples、字段/路由解析和网络协议测试 | 保守上界及边界编码验证通过后删除手写正文预算，通道硬上限和运行时资源预算仍有效 |
+| 5：按需要改善书写 | Common/net_options.proto、解析器和全部相关 Proto；必要的入站分组或就近订阅辅助 | 复合选项严格校验、错误清晰；辅助代码确实减少重复且不引入新的生命周期或程序集依赖 |
+
+阶段 1 和阶段 2 分开评审与验证。阶段 1 可将现有 `GameNetRoutes` 和 `GameNetProtocol` 声明改为 partial 后按模块分布，保留同一套完整类型名和成员，不生成另一套转发接口；全局入口仍在原文件中。阶段 2 再把模块声明迁入目标命名空间与 `<Module>Routes`，同时更新调用，删除阶段 1 不再需要的聚合声明，不保留旧 API 兼容层。中间状态只服务于逐步核对，需要额外的生成、编译与验证轮次，不据此承诺总工时更少。
+
+阶段 1 的物理文件重组不改变协议内容，manifest/hash 和 golden vectors 应与基线一致。阶段 2 的完整 C# 类型名及 manifest 路由名称变化会改变 hash；DTO 字段布局未变时编码字节应保持一致，但 golden vectors 的类型键需要更新。阶段 3 修改字段布局可能改变对应向量，阶段 4 改变路由预算也会改变 hash；涉及指纹变化时双方同步生成、编译和发布。各阶段同步第 8 节及双方规范/使用说明，使“目标”和“当前实现”的描述一致。
+
+首次文件拆分按以下顺序处理已有产物，不把正常 generate 扩展成自动删除工具：
+
+1. 核对旧 `GameNetMessages.cs` 中类型、调用和资产引用，确认所有 DTO/枚举已分配到模块；记录 manifest/hash、向量及原 `.meta` GUID，确认新生成器可在没有旧产物时独立生成。
+2. 关闭 Unity 后完成一次性迁移，人工移除不再输出的 `GameNetMessages.cs` 及对应 `.meta`，保留 `GameNetProtocol.cs` 的原路径与 `.meta`。先处理确实引用旧资产 GUID 的位置，不把同一个 GUID 复制给多个新文件。
+3. 使用统一命令行入口生成模块产物并运行 `check --artifacts`。旧聚合文件必须退出预期产物与编译集合后才检查成功；生成失败时修复原因并重新生成、check，不忽略多余文件错误或承诺失败回滚。
+4. 确认基线比较和服务端编译通过后重新打开 Unity，统一导入新模块文件，纳入 Unity 生成的 `.meta` 并检查编译。普通后续生成继续使用已有菜单的刷新/域重载控制；本次迁移不让新旧 DTO 同时进入资产导入。
+
+阶段 2 迁移时检查所有生成类型与 GameNetRoutes 的引用，包括服务端 profile、认证白名单、Unity EditMode/PlayMode/Player 验证组件和测试夹具。按仓库规则检查序列化类型引用、asmdef/asmref、HybridCLR 泛型与裁剪登记、DLL 清单和资源地址，重新编译热更 DLL；不复制旧 DLL 改名。阶段 3 的专用请求也按同样的类型与泛型影响检查，并逐条覆盖有效字段映射和共用业务执行路径。
+
+### 23.10 验收条件与本次记录
+
+实施验收至少覆盖以下项目，按阶段启用，不把本节中的要求当作已完成证据：
+
+1. **输出归属与稳定性**：现有 Common、Session、Gomoku、Diagnostics 独立生成，无路由的 Common 等纯数据模块也正常输出；测试夹具中新增或移除 Chat 只改变聊天文件的预期归属和必要的全局产物，不生成生产聊天占位；修改/重排 Gomoku 输入不无故改变其他模块文件与时间戳。模块文件不含全局 hash、时间戳或依赖其他模块排序的编号，输出编码和换行固定。
+2. **名称与依赖**：不同模块的同名 DTO/enum/路由能生成、编译、编解码；同模块冲突、大小写文件冲突、重复 opcode、错误 namespace、漏 import 和循环模块依赖均有明确失败；完整路由标识在 manifest 与诊断中可区分且排序稳定，错误能定位到模块和源位置；公共类型只生成一次，深度和节点跨模块累计。
+3. **生成可靠性**：缺少旧生成文件仍可 generate；注释、空白、输入遍历和声明顺序不影响输出；重复 generate 不重写相同字节；解析、布局、生成源码编译失败时不写正式产物；check 不写文件，能报告缺失、漂移和移除模块留下的过时文件。
+4. **预算与编码**：所有合法边界样本编码长度不超过计算上界；非法长度、非法 UTF-8、溢出、尾随数据、可空性、枚举和通道越界检查保留；同步核对 golden vectors，不用单个 maximum 样本代替边界证明。
+5. **注册与监听**：路由与 catalog 引用同一实例；重复或缺少入站处理器在注册/冻结时失败；未启用业务明确 Reject；敏感响应清理、重复订阅拒绝、部分订阅失败清理及会话结束释放均有覆盖。
+6. **业务与运行时回归**：五子棋登录、建房/加入、准备、开局、落子、查询不确定结果和离房通过；逐条检查专用请求到内部命令/参数的有效字段映射，鉴权、幂等和状态提交仍经共用流程；请求取消/超时不自动重发；迟到响应/Push 与认证代际不能污染新状态；记录网络资源最终释放情况。
+7. **迁移与指纹**：阶段 1 保持 manifest/hash 和向量基线；阶段 2 更新完整路由标识、类型键和预期 hash，并比较未变布局的编码字节；后续布局与预算变化分别核对。旧 DTO 聚合文件及 `.meta` 按步骤退出，沿用全局入口的 GUID，新模块 GUID 各自唯一，新旧类型不同时导入。
+8. **双端与构建**：运行对应 .NET 协议/服务端测试、`check --artifacts` 和服务端构建；按影响执行 Unity 网络 EditMode/PlayMode、Editor 与 Player 脚本编译。命名空间/DTO/泛型形态改变后按客户端发布门禁验证实际 IL2CPP/HybridCLR 互通，新增 DTO 包后热更单独验收；逐项记录平台和未验范围。
+
+当前记录（2026-10-16）：已核对现有生成、写入、Unity 菜单和五子棋共用调用路径，补充规范化模型、生成依赖顺序、文件稳定性、完整路由标识及分阶段迁移/验收规则；所有实施阶段尚未开始。本次仅更新文档，验证范围为差异、路径、Markdown 与提案/现状边界检查，不执行或宣称生成一致性、Unity 编译、服务端测试或 Player 运行验收。实施环境按现有 global.json 使用 SDK 10.0.401，命令和依赖准备见[服务端使用说明](DotNetUsage.md#协议生成与验证)。

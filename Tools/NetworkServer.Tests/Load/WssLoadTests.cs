@@ -8,6 +8,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using Game.Protocol;
+using Game.Protocol.Diagnostics;
 using GameFrame.Network;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -883,7 +884,7 @@ namespace GameFrame.Tests
                     try
                     {
                         long started = Stopwatch.GetTimestamp();
-                        Task<EchoResponse> task = client.Context.Request(GameNetRoutes.Echo,
+                        Task<EchoResponse> task = client.Context.Request(DiagnosticsRoutes.Echo,
                             new EchoRequest { Text = client.Payload }, TimeSpan.FromSeconds(options.RequestTimeoutSeconds),
                             CancellationToken.None);
                         client.Pending.Add(new Pending(task, started));
@@ -1252,7 +1253,7 @@ namespace GameFrame.Tests
             long started = Stopwatch.GetTimestamp();
             try
             {
-                Task<EchoResponse> task = client.Context.Request(GameNetRoutes.Echo,
+                Task<EchoResponse> task = client.Context.Request(DiagnosticsRoutes.Echo,
                     new EchoRequest { Text = client.Payload, DelayMs = client.DelayMs },
                     TimeSpan.FromSeconds(options.RequestTimeoutSeconds), CancellationToken.None);
                 client.Pending.Add(new Pending(task, started));

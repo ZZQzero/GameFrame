@@ -4,6 +4,8 @@ using System.Net.WebSockets;
 using System.Reflection;
 using System.Threading.Channels;
 using Game.Protocol;
+using Game.Protocol.Diagnostics;
+using Game.Protocol.Gomoku;
 using GameFrame.Network;
 using NUnit.Framework;
 
@@ -173,7 +175,7 @@ namespace GameFrame.Tests
         [Test]
         public async Task RpcMetricsSeparateEncodingArrivalPumpAndDecodeBeforeContinuation()
         {
-            Task<EchoResponse> previous = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
+            Task<EchoResponse> previous = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
             Respond(Header(await socket.NextSend(guard.Token)).CorrelationId);
             await PumpUntil(previous);
             Assert.That(client.Metrics().Rpc.SuccessfulResponses, Is.EqualTo(1));
@@ -183,18 +185,18 @@ namespace GameFrame.Tests
             long decodingTicks = Stopwatch.Frequency / 200;
             var requestCodec = new NetMessageCodec<EchoRequest>((writer, value) =>
             {
-                GameNetRoutes.Echo.RequestCodec.Encode(writer, value);
+                DiagnosticsRoutes.Echo.RequestCodec.Encode(writer, value);
                 Interlocked.Add(ref timestamp, encodingTicks);
-            }, GameNetRoutes.Echo.RequestCodec.Decode, value => Assert.That(value, Is.Not.Null),
+            }, DiagnosticsRoutes.Echo.RequestCodec.Decode, value => Assert.That(value, Is.Not.Null),
                 bytes => Assert.That(bytes.Length, Is.Positive));
-            var responseCodec = new NetMessageCodec<EchoResponse>(GameNetRoutes.Echo.ResponseCodec.Encode, bytes =>
+            var responseCodec = new NetMessageCodec<EchoResponse>(DiagnosticsRoutes.Echo.ResponseCodec.Encode, bytes =>
             {
-                EchoResponse result = GameNetRoutes.Echo.ResponseCodec.Decode(bytes);
+                EchoResponse result = DiagnosticsRoutes.Echo.ResponseCodec.Decode(bytes);
                 Interlocked.Add(ref timestamp, decodingTicks);
                 return result;
             }, value => Assert.That(value, Is.Not.Null), bytes => Assert.That(bytes.Length, Is.Positive));
-            var route = new NetRpc<EchoRequest, EchoResponse>(GameNetRoutes.Echo.Opcode,
-                GameNetRoutes.Echo.MaxBodyBytes, GameNetRoutes.Echo.ResponseMaxBodyBytes, requestCodec, responseCodec);
+            var route = new NetRpc<EchoRequest, EchoResponse>(DiagnosticsRoutes.Echo.Opcode,
+                DiagnosticsRoutes.Echo.MaxBodyBytes, DiagnosticsRoutes.Echo.ResponseMaxBodyBytes, requestCodec, responseCodec);
             var catalog = new NetProtocolCatalog(GameNetProtocol.Catalog.Hash.ToArray(), route);
             await ConnectWithCatalog(catalog, () => Interlocked.Read(ref timestamp));
             Assert.That(client.Metrics().Rpc.SuccessfulResponses, Is.Zero, "A new context starts with fresh samples.");
@@ -234,11 +236,11 @@ namespace GameFrame.Tests
         {
             socket.HoldBusiness = true;
             using var cancellation = new CancellationTokenSource();
-            Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), cancellation.Token);
+            Task<EchoResponse> request = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), cancellation.Token);
             FrameHeader sent = Header(await socket.NextSend(guard.Token));
             NetworkMemorySnapshot sending = client.Metrics().Memory;
             Assert.That(sending.ReliableSendReservedBytes,
-                Is.EqualTo(32 + GameNetRoutes.Echo.MaxBodyBytes + FrameMemoryBudget.FrameRecordReservation));
+                Is.EqualTo(32 + DiagnosticsRoutes.Echo.MaxBodyBytes + FrameMemoryBudget.FrameRecordReservation));
             Assert.That(sending.PendingReservedBytes, Is.EqualTo(512));
             socket.ReleaseSend();
             await WaitFor(() => client.Metrics().Memory.ReliableSendReservedBytes == 0);
@@ -319,10 +321,10 @@ namespace GameFrame.Tests
         private void Respond(ulong correlation, bool malformed = false, int statusCode = 0)
         {
             var writer = new ArrayBufferWriter<byte>();
-            GameNetRoutes.Echo.ResponseCodec.Encode(writer, new EchoResponse { Text = "result" });
+            DiagnosticsRoutes.Echo.ResponseCodec.Encode(writer, new EchoResponse { Text = "result" });
             byte[] body = statusCode != 0 ? Array.Empty<byte>() : malformed ? new byte[] { 255 } : writer.WrittenSpan.ToArray();
             byte[] frame = new byte[32 + body.Length];
-            FrameCodec.WriteHeader(frame, new FrameHeader(FrameKind.Response, GameNetRoutes.Echo.Opcode, correlation, body.Length, statusCode));
+            FrameCodec.WriteHeader(frame, new FrameHeader(FrameKind.Response, DiagnosticsRoutes.Echo.Opcode, correlation, body.Length, statusCode));
             body.CopyTo(frame, 32);
             socket.Enqueue(frame);
         }
@@ -330,7 +332,7 @@ namespace GameFrame.Tests
         [Test]
         public async Task RemoteErrorDoesNotAddSuccessfulRpcTimingOrDecodeEmptyBody()
         {
-            Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
+            Task<EchoResponse> request = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
             FrameHeader sent = Header(await socket.NextSend(guard.Token));
             Respond(sent.CorrelationId, statusCode: 7);
             await WaitFor(() => client.Metrics().ReliableReceiveCount == 1);
@@ -351,7 +353,7 @@ namespace GameFrame.Tests
         private void EnqueuePush(byte[] body)
         {
             byte[] frame = new byte[32 + body.Length];
-            FrameCodec.WriteHeader(frame, new FrameHeader(FrameKind.Push, GameNetRoutes.GomokuRoomSnapshot.Opcode, 0, body.Length));
+            FrameCodec.WriteHeader(frame, new FrameHeader(FrameKind.Push, GomokuRoutes.GomokuRoomSnapshot.Opcode, 0, body.Length));
             body.CopyTo(frame, 32);
             socket.Enqueue(frame);
         }
@@ -379,7 +381,7 @@ namespace GameFrame.Tests
             if (oversizedArray)
             {
                 var writer = new ArrayBufferWriter<byte>();
-                GameNetRoutes.GomokuRoomSnapshot.Codec.Encode(writer, new GomokuSnapshot());
+                GomokuRoutes.GomokuRoomSnapshot.Codec.Encode(writer, new GomokuSnapshot());
                 body = writer.WrittenSpan.ToArray();
                 // Empty Moves count precedes the four recipient/admission uint64 fields.
                 System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(body.AsSpan(body.Length - 36), int.MaxValue);
@@ -392,7 +394,7 @@ namespace GameFrame.Tests
             client.PumpOne();
             Assert.That(client.State, Is.EqualTo(NetworkClientState.Faulted));
             Assert.That(observed, Is.TypeOf<NetworkProtocolException>());
-            Assert.That(observedOpcode, Is.EqualTo(GameNetRoutes.GomokuRoomSnapshot.Opcode));
+            Assert.That(observedOpcode, Is.EqualTo(GomokuRoutes.GomokuRoomSnapshot.Opcode));
             Assert.That(calls, Is.Zero);
         }
 
@@ -400,7 +402,7 @@ namespace GameFrame.Tests
         public async Task UnsubscribedValidPushRemainsConnected()
         {
             var writer = new ArrayBufferWriter<byte>();
-            GameNetRoutes.GomokuRoomSnapshot.Codec.Encode(writer, new GomokuSnapshot());
+            GomokuRoutes.GomokuRoomSnapshot.Codec.Encode(writer, new GomokuSnapshot());
             EnqueuePush(writer.WrittenSpan.ToArray());
             await WaitFor(() => client.Metrics().ReliableReceiveCount == 1);
             client.PumpOne();
@@ -429,7 +431,7 @@ namespace GameFrame.Tests
         [Test]
         public async Task RemoteTransportCloseAcknowledgesOnceAndPreservesEarlierResponse()
         {
-            Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
+            Task<EchoResponse> request = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
             FrameHeader sent = Header(await socket.NextSend(guard.Token));
             Respond(sent.CorrelationId);
             EnqueueClose();
@@ -446,14 +448,14 @@ namespace GameFrame.Tests
         {
             socket.HoldBusiness = true;
             socket.FailClosedSends = failInFlight;
-            Task<EchoResponse> first = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
+            Task<EchoResponse> first = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
             FrameHeader sent = Header(await socket.NextSend(guard.Token));
-            Task<EchoResponse> queued = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
+            Task<EchoResponse> queued = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
             Respond(sent.CorrelationId);
             socket.EnqueueTransportClose();
             await WaitFor(() => socket.State == WebSocketState.CloseReceived);
             await WaitFor(() => (bool)typeof(ConnectionContext).GetField("stopped", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(client)!);
-            Assert.Throws<InvalidOperationException>(() => client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default));
+            Assert.Throws<InvalidOperationException>(() => client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default));
             socket.ReleaseSend();
             await WaitFor(() => client.IoTask.IsCompleted);
             await PumpUntil(first);
@@ -488,7 +490,7 @@ namespace GameFrame.Tests
             for (int i = 0; i < 2; i++)
             {
                 var writer = new ArrayBufferWriter<byte>();
-                GameNetRoutes.GomokuRoomSnapshot.Codec.Encode(writer, new GomokuSnapshot());
+                GomokuRoutes.GomokuRoomSnapshot.Codec.Encode(writer, new GomokuSnapshot());
                 EnqueuePush(writer.WrittenSpan.ToArray());
             }
 
@@ -506,9 +508,9 @@ namespace GameFrame.Tests
         [Test]
         public async Task ResponseDecodeFaultFailsLaterReservedResponseBeforeOrderlyClose()
         {
-            Task<EchoResponse> first = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
+            Task<EchoResponse> first = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
             FrameHeader firstHeader = Header(await socket.NextSend(guard.Token));
-            Task<EchoResponse> second = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
+            Task<EchoResponse> second = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
             FrameHeader secondHeader = Header(await socket.NextSend(guard.Token));
             Respond(firstHeader.CorrelationId, malformed: true);
             Respond(secondHeader.CorrelationId);
@@ -529,7 +531,7 @@ namespace GameFrame.Tests
         [TestCase(2001, false)]
         public async Task ResponseArrivalUsesStrictDeadlineBoundary(long arrival, bool success)
         {
-            Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
+            Task<EchoResponse> request = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
             FrameHeader sent = Header(await socket.NextSend(guard.Token));
             Advance(arrival);
             Respond(sent.CorrelationId, malformed: !success);
@@ -559,9 +561,9 @@ namespace GameFrame.Tests
         {
             socket.HoldBusiness = true;
             using var cancellation = new CancellationTokenSource();
-            Task<EchoResponse> first = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromMinutes(1), cancellation.Token);
+            Task<EchoResponse> first = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromMinutes(1), cancellation.Token);
             await socket.NextSend(guard.Token);
-            Task<EchoResponse> queued = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromMilliseconds(100), default);
+            Task<EchoResponse> queued = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromMilliseconds(100), default);
             Advance(1100);
             if (runClock)
             {
@@ -580,7 +582,7 @@ namespace GameFrame.Tests
         public async Task SlowBusinessSendCannotPostponeQueuedControlDeadline()
         {
             socket.HoldBusiness = true;
-            Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromMinutes(1), default);
+            Task<EchoResponse> request = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromMinutes(1), default);
             await socket.NextSend(guard.Token);
             Advance(6000);
             Assert.That(Tick(), Is.Null);
@@ -630,14 +632,14 @@ namespace GameFrame.Tests
         {
             socket.HoldBusiness = true;
             using var cancellation = new CancellationTokenSource();
-            Task<EchoResponse> first = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromMinutes(1), cancellation.Token);
+            Task<EchoResponse> first = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromMinutes(1), cancellation.Token);
             await socket.NextSend(guard.Token);
             Advance(6000);
-            Task<EchoResponse> second = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromMinutes(1), cancellation.Token);
+            Task<EchoResponse> second = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromMinutes(1), cancellation.Token);
             Assert.That(Tick(), Is.Null);
             socket.ReleaseSend();
             Assert.That(Header(await socket.NextSend(guard.Token)).Opcode, Is.EqualTo((uint)ControlOpcode.Ping));
-            Assert.That(Header(await socket.NextSend(guard.Token)).Opcode, Is.EqualTo(GameNetRoutes.Echo.Opcode));
+            Assert.That(Header(await socket.NextSend(guard.Token)).Opcode, Is.EqualTo(DiagnosticsRoutes.Echo.Opcode));
             cancellation.Cancel();
             Assert.ThrowsAsync<TaskCanceledException>(async () => await PumpUntil(first));
             Assert.ThrowsAsync<TaskCanceledException>(async () => await PumpUntil(second));
@@ -682,7 +684,7 @@ namespace GameFrame.Tests
         public async Task DisposeFailureStillCompletesCloseAndReleasesFramesWithoutRetry()
         {
             socket.HoldBusiness = true;
-            Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(2), default);
+            Task<EchoResponse> request = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(2), default);
             await socket.NextSend(guard.Token);
             socket.DisposeFailure = new InvalidOperationException("Injected transport disposal failure.");
             client.BeginClose();

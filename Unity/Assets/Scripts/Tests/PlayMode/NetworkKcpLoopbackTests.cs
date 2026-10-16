@@ -3,6 +3,7 @@ using System.Collections;
 using System.IO;
 using Cysharp.Threading.Tasks;
 using Game.Protocol;
+using Game.Protocol.Diagnostics;
 using GameFrame.Network;
 using NUnit.Framework;
 using UnityEngine;
@@ -75,7 +76,7 @@ namespace GameFrame.Tests
                     identity, psk, NetworkClock.GetMilliseconds() + 10000));
                 Assert.AreEqual(NetworkClientState.Connected, client.State);
                 Assert.IsTrue(client.GetMetrics().Kcp.Available);
-                EchoResponse echo = await client.RequestAsync(GameNetRoutes.Echo, new EchoRequest { Text = "Unity native UDP" }, TimeSpan.FromSeconds(2));
+                EchoResponse echo = await client.RequestAsync(DiagnosticsRoutes.Echo, new EchoRequest { Text = "Unity native UDP" }, TimeSpan.FromSeconds(2));
                 Assert.AreEqual("Unity native UDP", echo.Text);
                 RpcMetricsSnapshot rpc = client.GetMetrics().Rpc;
                 Assert.AreEqual(1, rpc.SuccessfulResponses);

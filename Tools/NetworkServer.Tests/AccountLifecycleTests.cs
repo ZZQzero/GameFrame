@@ -1,5 +1,8 @@
 using System.Net;
 using Game.Protocol;
+using Game.Protocol.Common;
+using Game.Protocol.Diagnostics;
+using Game.Protocol.Session;
 using Game.Server;
 using Game.Server.Login;
 using Game.Server.Sessions;
@@ -196,9 +199,9 @@ namespace GameFrame.Tests
             {
                 var context = Context(application, memory);
                 await context.Session.ConnectedAsync(context);
-                using OwnedFrame request = register ? Request(memory, GameNetRoutes.Register,
+                using OwnedFrame request = register ? Request(memory, SessionRoutes.Register,
                     new RegisterRequest { Account = "player", Password = "valid-password" }) :
-                    Request(memory, GameNetRoutes.Login, new LoginRequest { Account = "player", Password = "valid-password" });
+                    Request(memory, SessionRoutes.Login, new LoginRequest { Account = "player", Password = "valid-password" });
                 Assert.That(context.Session.Admit(ServerApplication.Header(request)).Allowed, Is.True);
                 using (OwnedFrame response = (await application.DispatchAsync(context, request, memory))!)
                 {
@@ -219,7 +222,7 @@ namespace GameFrame.Tests
 
                     using OwnedFrame retried = (await application.DispatchAsync(context, request, memory))!;
                     Assert.That(retried.Header.StatusCode, Is.Zero);
-                    Assert.That(GameNetRoutes.Register.ResponseCodec.Decode(retried.Body).ResultCode, Is.EqualTo(ResultCode.Success));
+                    Assert.That(SessionRoutes.Register.ResponseCodec.Decode(retried.Body).ResultCode, Is.EqualTo(ResultCode.Success));
                 }
             }
             finally
@@ -254,7 +257,7 @@ namespace GameFrame.Tests
             var session = (LobbySession)context.Session;
             session.Bind(login.Binding);
             sessions.Logout(login.Binding!.Id);
-            var header = new ServerMessageHeader(GameNetRoutes.Echo.Opcode, 1, 0, NetDelivery.Reliable);
+            var header = new ServerMessageHeader(DiagnosticsRoutes.Echo.Opcode, 1, 0, NetDelivery.Reliable);
             Assert.That(session.CheckDeadline(AccountSessions.Now), Is.EqualTo(7));
             Assert.That(session.Admit(header).CloseReason, Is.EqualTo(7));
             Assert.That(session.CheckDispatch(header).CloseReason, Is.EqualTo(7));
@@ -291,7 +294,7 @@ namespace GameFrame.Tests
             bool admitted = false;
             var session = new LobbySession(context, sessions, new LoginOptions(), _ => admitted);
             await session.ConnectedAsync(context);
-            var header = new ServerMessageHeader(GameNetRoutes.Login.Opcode, 1, 100, NetDelivery.Reliable);
+            var header = new ServerMessageHeader(SessionRoutes.Login.Opcode, 1, 100, NetDelivery.Reliable);
             Assert.That(session.Admit(header), Is.EqualTo(ServerAdmission.Deny(1, 1)));
             admitted = true;
             Assert.That(session.Admit(header).Allowed, Is.True);
@@ -350,7 +353,7 @@ namespace GameFrame.Tests
             await context.Session.ConnectedAsync(context);
             using AuthenticationResult first = await Login(sessions, 1);
             ((LobbySession)context.Session).Bind(first.Binding);
-            using (OwnedFrame request = Request(memory, GameNetRoutes.Echo, new EchoRequest { DelayMs = 100 }))
+            using (OwnedFrame request = Request(memory, DiagnosticsRoutes.Echo, new EchoRequest { DelayMs = 100 }))
             {
                 Task<OwnedFrame?> pending = application.DispatchAsync(context, request, memory);
                 Assert.That(pending.IsCompleted, Is.False);

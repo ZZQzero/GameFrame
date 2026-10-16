@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using Game.Protocol;
+using Game.Protocol.Diagnostics;
 using GameFrame;
 using GameFrame.Network;
 using UnityEngine;
@@ -134,7 +135,7 @@ namespace Game.Hotfix.Validation
 
             private static async UniTask EchoAsync(NetworkClient client, string text)
             {
-                EchoResponse response = await client.RequestAsync(GameNetRoutes.Echo, new EchoRequest { Text = text },
+                EchoResponse response = await client.RequestAsync(DiagnosticsRoutes.Echo, new EchoRequest { Text = text },
                     TimeSpan.FromSeconds(3));
                 Check(response.Text == text && PlayerLoopHelper.IsMainThread, "Echo serialization or delivery failed.");
             }
@@ -207,7 +208,7 @@ namespace Game.Hotfix.Validation
 
                     using (var cancellation = new CancellationTokenSource())
                     {
-                        Task<EchoResponse> request = client.RequestAsync(GameNetRoutes.Echo,
+                        Task<EchoResponse> request = client.RequestAsync(DiagnosticsRoutes.Echo,
                             new EchoRequest { Text = "cancel", DelayMs = 800 }, TimeSpan.FromSeconds(3), cancellation.Token).AsTask();
                         await HandlerReachedAsync(2);
                         cancellation.Cancel();
@@ -228,7 +229,7 @@ namespace Game.Hotfix.Validation
 
                     try
                     {
-                        await client.RequestAsync(GameNetRoutes.Echo, new EchoRequest { Text = "deadline", DelayMs = 800 },
+                        await client.RequestAsync(DiagnosticsRoutes.Echo, new EchoRequest { Text = "deadline", DelayMs = 800 },
                             TimeSpan.FromMilliseconds(200));
                         throw new InvalidOperationException("Request deadline unexpectedly succeeded.");
                     }
@@ -241,7 +242,7 @@ namespace Game.Hotfix.Validation
                     await EchoAsync(client, "after-deadline");
                     checks.Add("RPC deadline + late response isolation + subsequent Echo");
 
-                    Task<EchoResponse> pending = client.RequestAsync(GameNetRoutes.Echo,
+                    Task<EchoResponse> pending = client.RequestAsync(DiagnosticsRoutes.Echo,
                         new EchoRequest { Text = "close-pending", DelayMs = 5000 }, TimeSpan.FromSeconds(10)).AsTask();
                     await HandlerReachedAsync(6);
                     await client.CloseAsync();

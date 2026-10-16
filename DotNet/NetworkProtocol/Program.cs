@@ -58,7 +58,7 @@ namespace GameFrame.ProtocolTools
             string generated = Path.Combine(root, "Unity/Assets/Scripts/Hotfix/Network/Generated");
             if (Directory.Exists(generated))
             {
-                foreach (string path in Directory.EnumerateFiles(generated, "*.cs"))
+                foreach (string path in Directory.EnumerateFiles(generated, "*.cs", SearchOption.AllDirectories))
                 {
                     string relative = Path.GetRelativePath(root, path).Replace('\\', '/');
                     if (!outputs.ContainsKey(relative))

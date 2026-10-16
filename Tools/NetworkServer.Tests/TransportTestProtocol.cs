@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Game.Protocol;
+using Game.Protocol.Diagnostics;
 using GameFrame.Network;
 
 namespace GameFrame.Tests
@@ -9,13 +10,13 @@ namespace GameFrame.Tests
     internal static class TransportTestProtocol
     {
         internal static readonly NetPush<EchoRequest> ReliablePush =
-            new NetPush<EchoRequest>(9000, NetDelivery.Reliable, 2048, GameNetRoutes.Echo.RequestCodec);
+            new NetPush<EchoRequest>(9000, NetDelivery.Reliable, 2048, DiagnosticsRoutes.Echo.RequestCodec);
         internal static readonly NetPush<EchoRequest> UnreliablePush =
-            new NetPush<EchoRequest>(9001, NetDelivery.Unreliable, 1118, GameNetRoutes.Echo.RequestCodec);
+            new NetPush<EchoRequest>(9001, NetDelivery.Unreliable, 1118, DiagnosticsRoutes.Echo.RequestCodec);
         internal static readonly NetSend<EchoRequest> ReliableSend =
-            new NetSend<EchoRequest>(9002, 2048, GameNetRoutes.Echo.RequestCodec);
+            new NetSend<EchoRequest>(9002, 2048, DiagnosticsRoutes.Echo.RequestCodec);
         internal static readonly NetUnreliable<EchoRequest> UnreliableSend =
-            new NetUnreliable<EchoRequest>(9003, 1118, GameNetRoutes.Echo.RequestCodec);
+            new NetUnreliable<EchoRequest>(9003, 1118, DiagnosticsRoutes.Echo.RequestCodec);
         internal static readonly NetProtocolCatalog Catalog = CreateCatalog();
 
         private static NetProtocolCatalog CreateCatalog()

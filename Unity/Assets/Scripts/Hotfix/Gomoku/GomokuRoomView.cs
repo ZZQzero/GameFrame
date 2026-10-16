@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using Game.Protocol;
+using Game.Protocol.Gomoku;
 
 namespace Game.Hotfix
 {

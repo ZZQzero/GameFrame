@@ -1,6 +1,6 @@
 # 客户端网络使用说明
 
-客户端 API 在 `GameFrame.Network`，游戏消息、枚举和生成路由统一在 `Game.Protocol`。开发/线程/错误与所有权规则见 [客户端网络开发规范](ClientNetworkDevelopment.md)；本地服务、PostgreSQL、证书与测试凭据准备见 [服务端使用说明](DotNetUsage.md)。本文示例位于已有 Hotfix 主线程异步业务方法内，变量由业务提供，不表示当前已实现 GameNetworkSession 或世界服务。
+客户端 API 在 `GameFrame.Network`，游戏消息、枚举和生成路由按模块位于 `Game.Protocol.<Module>`，统一 catalog 为 `Game.Protocol.GameNetProtocol`。开发/线程/错误与所有权规则见 [客户端网络开发规范](ClientNetworkDevelopment.md)；本地服务、PostgreSQL、证书与测试凭据准备见 [服务端使用说明](DotNetUsage.md)。本文示例位于已有 Hotfix 主线程异步业务方法内，变量由业务提供，不表示当前已实现 GameNetworkSession 或世界服务。
 
 ## 1. 启用网络并创建客户端
 
@@ -72,7 +72,7 @@ GameUser 只包含账号 ID、输入账号名、认证 epoch 和单调到期时�
 
 ```csharp
 OperationResponse registered = await client.RequestAsync(
-    GameNetRoutes.Register,
+    SessionRoutes.Register,
     new RegisterRequest { Account = account, Password = password },
     TimeSpan.FromSeconds(5),
     cancellationToken);
@@ -89,7 +89,7 @@ Register 成功仍未登录，不延长服务器 10 秒登录期限。账号/密
 ```csharp
 long admission = NetworkClock.GetMilliseconds();
 LoginResponse login = await client.RequestAsync(
-    GameNetRoutes.Login,
+    SessionRoutes.Login,
     new LoginRequest { Account = account, Password = password },
     TimeSpan.FromSeconds(5),
     cancellationToken);
@@ -125,7 +125,7 @@ if (NetworkClock.GetMilliseconds() >= resumeDeadline)
 
 ```csharp
 EchoResponse echo = await client.RequestAsync(
-    GameNetRoutes.Echo,
+    DiagnosticsRoutes.Echo,
     new EchoRequest { Text = "hello", DelayMs = 0 },
     TimeSpan.FromSeconds(5),
     cancellationToken);
@@ -141,7 +141,7 @@ EchoResponse echo = await client.RequestAsync(
 
 ```csharp
 OperationResponse result = await client.RequestAsync(
-    GameNetRoutes.Logout,
+    SessionRoutes.Logout,
     new LogoutRequest(),
     TimeSpan.FromSeconds(5),
     cancellationToken);
@@ -166,7 +166,7 @@ RPC 期限从本地 admission 起算，后台 deadline 不会因主线程卡帧�
 
 ```csharp
 using IDisposable subscription = client.Subscribe(
-    GameNetRoutes.GomokuRoomSnapshot,
+    GomokuRoutes.GomokuRoomSnapshot,
     snapshot =>
     {
         // 先按epoch/version更新业务模型，再通知UI。
@@ -215,7 +215,7 @@ await client.ConnectAsync(
     NetworkConnectOptions.Kcp(endpoint, ticket, conv, identity, psk, grantDeadlineMilliseconds),
     cancellationToken);
 EchoResponse echo = await client.RequestAsync(
-    GameNetRoutes.Echo,
+    DiagnosticsRoutes.Echo,
     new EchoRequest { Text = "udp", DelayMs = 0 },
     TimeSpan.FromSeconds(5),
     cancellationToken);
@@ -268,13 +268,31 @@ OwnedBytes 不是 RSS、所有 CLR 对象或 TLS/内核内存；每帧/每 pendi
 
 ## 7. 协议与依赖维护
 
-修改协议直接编辑仓库根 Protocol/**/*.proto，按 [统一生成步骤](DotNetUsage.md#协议生成与验证) 重新生成两个正式 C#文件；生成目录不放手写代码。客户端.NET 不能只更新一端。manifest/hash/vector 在 Protocol/Generated 仅用于开发验证，不进入 Unity 资源，运行时只用 catalog 内嵌指纹。
+修改协议直接编辑仓库根 Protocol/**/*.proto，按 [统一生成步骤](DotNetUsage.md#协议生成与验证) 重新生成各业务的 `<Module>Messages.g.cs` 与全局 `GameNetProtocol.cs`；生成目录不放手写代码。客户端.NET 不能只更新一端。DTO/枚举与路由分别导入 `Game.Protocol.Common/Session/Gomoku/Diagnostics`，使用 SessionRoutes/GomokuRoutes/DiagnosticsRoutes；Game.Protocol.GameNetProtocol 继续提供全局 Catalog，无旧聚合路由兼容层。manifest/hash/vector 在 Protocol/Generated 仅用于开发验证，不进入 Unity 资源，运行时只用 catalog 内嵌指纹。
 
 Unity 编辑模式下使用 `Tools/GameFrame/Network/Generate Messages` 生成，使用 `Check Messages` 只读检查。这两个菜单异步启动 `DotNet/NetworkProtocol`，包含 `--artifacts`，同步处理正式 C# 与开发辅助产物；Console 显示成功结果或完整退出码/stdout/stderr。执行期间禁止重复启动，暂缓自动刷新和域重载；进程退出后恢复，生成成功才显式刷新资产。字节未变化的生成文件不重写，已有 `.meta`/GUID 保留。
 
 工具需要 `DotNet/global.json` 锁定的 .NET SDK 10.0.401，与 Luban 的 .NET 8 分开。自动从 `DOTNET_ROOT`、Unity 进程的 PATH、平台常见安装目录及用户 `.dotnet` 目录定位 dotnet。Unity Hub/Finder 未继承终端 PATH 时，可通过 `Tools/GameFrame/Network/Set .NET Executable` 选择 dotnet 可执行文件；路径保存在本机 EditorPrefs，不写入项目。显式配置无效或 SDK 缺失时报告失败，不自动切换版本或重试。无需向 Unity 拷贝生成器 DLL 或 Roslyn 依赖。
 
 Unity 依赖固定 MemoryPack1.21.4，NuGetForUnity4.5.0 与 MemoryPack.Unity Git tag 在 Packages/manifest.json，包和 meta 在 Assets/Packages，packages.config/NuGet.config 及 UPM 锁同步维护。查看用 NuGet > Manage NuGet Packages，恢复用 NuGet > Restore Packages；保留 Generator 的 RoslynAnalyzer 标签和导入排除设置，不将.NET10 运行时 DLL 换入 Unity。
+
+2026-10-16 协议文件拆分验收：Unity 6000.3.19f1 Editor 编译通过；NetworkProtocolTests、NetworkMemoryPackTests、NetworkProtocolToolTests 合计 EditMode 132/132，NetworkLifecycleTests、GomokuLifecycleTests 合计 PlayMode 18/18，均 0 跳过。普通 StandaloneOSX Release Player 脚本编译通过（43 个程序集），Game.Hotfix DLL 已重新编译并拷贝；正式 AOT 元数据、Launch 场景与 ProjectSettings 保持基线，收尾 Console 无 Error/Warning。旧 GameNetMessages.cs 及其 .meta 已移除，全局入口 GUID 保留，四个模块 GUID 各自唯一。本次未执行原生 IL2CPP 完整构建或设备运行；.NET 测试与协议字节/API 基线证据见[服务端协议生成与验证](DotNetUsage.md#协议生成与验证)，与 Unity 共享用例不重复累计。
+
+2026-10-16 模块命名与路由迁移（阶段 2）：Unity 6000.3.19f1 Editor 编译通过；上述三组 EditMode 132/132、两组 PlayMode 18/18，均 0 跳过。首次 PlayMode 的 18 项均在 Unity Test Framework 的清理协程状态恢复处失败：直接返回的 UniTask 枚举器没有编译器协程状态字段。两个夹具的 UnityTearDown 改为标准 yield 协程后复验通过，业务关闭顺序和断言不变。生成器递归检查多余 C#，重复 generate 验证八个文件内容与时间戳不变。类型、路由与协议指纹已同步更新，42 条消息正文编码不变；详细 .NET 与指纹证据见服务端说明。
+
+本轮实际 Player 证据：macOS ARM64、Unity 6000.3.19f1、Release IL2CPP/HybridCLR、Minimal 裁剪完整构建成功，0 警告/0 错误。复用专用 performance 入口运行 KCP 单连接 Unicode Echo + 含 225 步的 GomokuSnapshot Push（rate=20、预热 1 秒、测量 2 秒）：测量请求 39/39 成功，无超时/取消/背压，窗口内交付 Push 38 条；伴随服务含预热共处理 59 次 Echo 并发送 59 次 Push，双方 Passed=true、退出码 0、关闭后 OwnedBytes=0。此处 Push 计数只含测量窗口，不能与含预热的服务端总量直接比较。该短轮验证命名迁移后的编解码、RPC/Push、catalog 指纹与资源释放，不作为容量或性能结论。专用 Player 使用本次最终裁剪清单的 11 个元数据文件，未扩大正式 GlobalConfig 的三项配置。
+
+验证后普通 StandaloneOSX Release Player 脚本重新编译通过（43 个程序集），Hotfix DLL 已重编译并拷贝；程序集检查确认新模块 DTO 存在、旧全名 DTO 已退出，Game.AOT/Game.Hotfix 均不含专用 Validation 类型。Launch、EditorSettings、ProjectSettings、正式 AOT 元数据及验证生成的 HybridCLR 文件恢复基线。此次未重验正式 Launch/YooAsset 发布流程、新 DTO 包后热更、移动端或真机；专用 Player 互通不能替代这些验收。
+
+2026-10-16 五子棋专用请求（阶段 3）：Editor 编译通过；NetworkProtocolTests/NetworkMemoryPackTests 合计 EditMode 144/144，NetworkLifecycleTests/GomokuLifecycleTests/GameLoginSessionTests 合计 PlayMode 22/22，均 0 跳过。四项 GameLoginSessionTests 连接隔离的真实 WSS/PostgreSQL，覆盖双人完整对局、UI 建房/加入/准备/开局/落子/离房、取消后显式查询、顶号和迟到状态隔离。该夹具的 SetUp/TearDown 同样改为标准 yield 协程外壳，修复 Unity Test Framework 恢复枚举器状态的要求，原清理与断言保留。新请求未加入 Runtime 分支，公开业务会话方法和共用状态流程保持；.NET 与协议指纹证据见服务端说明。
+
+阶段 3 原生实跑：macOS ARM64、Unity 6000.3.19f1、Release IL2CPP/HybridCLR、Minimal 裁剪构建成功，0 警告/0 错误。复用现有专用 Player 构建入口，临时探针只调用 GameLoginSession/GomokuRoomSession 公开方法，连接真实 local-wss 与独立临时 PostgreSQL，使用系统已有可信 localhost 证书并执行正常 TLS 校验。七种请求均实际调用：建房、加入、准备 true→false→true、双方准备、开局、非法坐标拒绝、九步黑胜、Push 版本与历史一致、双方离房；再次创建请求取消后显式查询并清理房间。Player Passed=true、退出 0、关闭后 OwnedBytes=0。专用包使用最终构建的 11 项裁剪元数据，不扩大正式 GlobalConfig 的三项清单。
+
+验证后临时探针及入口改动已移除；普通 StandaloneOSX Release Player 脚本编译通过（43 个程序集），正式 Hotfix DLL 已重新编译并拷贝。程序集检查确认七种新请求存在，旧 GomokuCommand/GomokuQuery 已退出，Game.AOT/Game.Hotfix 无 Validation 类型。Launch、ProjectSettings、EditorSettings、正式 AOT 元数据及 HybridCLR 生成文件恢复基线；隔离服务与数据库停止，临时文件清理。重复 generate 的八个文件内容与时间戳均保持，收尾 Console 无 Error/Warning。本轮未重验正式 Launch/YooAsset 发布、新 DTO 在已发布旧包上的热更、Windows/Android/iOS 或真机，不将本机专用 Player 结果代替这些发布验收。
+
+2026-10-16 自动正文预算与结构化路由（阶段 4、5）：Editor 编译通过；NetworkProtocolTests/NetworkMemoryPackTests 合计 EditMode 144/144，NetworkLifecycleTests/GomokuLifecycleTests/GameLoginSessionTests 合计 PlayMode 30/30，均 0 跳过。此次运行 GameLoginSessionTests 全部 12 项；其中真实 WSS/PostgreSQL 验证登录/注销、双人完整对局、UI 房间流程、未知结果查询与认证失效，另含输入取消及失败界面流程。golden vector 的每个入口 DTO 样本还通过其所有实际路由的精确大小 BoundedFrameWriter 编码，核对编码字节与预算并检查释放；不只使用可增长的 ArrayBufferWriter。57 条 Unity/.NET 正文向量保持不变，所有新预算参与实际 WSS 调用。
+
+普通 StandaloneOSX Release Player 脚本编译通过（43 个程序集），Hotfix DLL 已重新编译并拷贝；当前 catalog 最大可靠正文预算 3094，不可靠正文 0。指纹、逐路由预算、生成稳定性及 .NET 证据见服务端说明。本轮没有更改 DTO/枚举布局、命名空间、泛型调用形态或 Runtime 缓冲流程；未重复执行原生 IL2CPP 构建实跑、正式 Launch/YooAsset 发布、旧包新增 DTO 热更或其他平台验证，不沿用上轮结果宣称本轮原生验收。验证后恢复 EditorSettings/场景与临时环境变量，停止隔离 WSS/PostgreSQL 并清理临时文件。
 
 <a id="验证与现有证据"></a>
 

@@ -1,70 +1,36 @@
 syntax = "proto3";
 package game.protocol.gomoku;
-option csharp_namespace = "Game.Protocol";
+option csharp_namespace = "Game.Protocol.Gomoku";
 import "Common/net_options.proto";
 import "Gomoku/GomokuProto.proto";
 import "google/protobuf/empty.proto";
 
 service GomokuService {
-  rpc CreateGomokuRoom(GomokuCommand) returns (GomokuResponse) {
-    option (game.net.opcode) = 3000;
-    option (game.net.route_kind) = ROUTE_KIND_RPC;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 128;
-    option (game.net.response_max_body) = 4096;
+  rpc CreateGomokuRoom(CreateRoomRequest) returns (GomokuResponse) {
+    option (game.net.route) = { opcode: 3000 kind: ROUTE_KIND_RPC delivery: DELIVERY_RELIABLE };
   }
-  rpc JoinGomokuRoom(GomokuCommand) returns (GomokuResponse) {
-    option (game.net.opcode) = 3001;
-    option (game.net.route_kind) = ROUTE_KIND_RPC;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 128;
-    option (game.net.response_max_body) = 4096;
+  rpc JoinGomokuRoom(JoinRoomRequest) returns (GomokuResponse) {
+    option (game.net.route) = { opcode: 3001 kind: ROUTE_KIND_RPC delivery: DELIVERY_RELIABLE };
   }
-  rpc QueryMyGomokuRoom(GomokuQuery) returns (GomokuResponse) {
-    option (game.net.opcode) = 3002;
-    option (game.net.route_kind) = ROUTE_KIND_RPC;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 128;
-    option (game.net.response_max_body) = 4096;
+  rpc QueryMyGomokuRoom(QueryRoomRequest) returns (GomokuResponse) {
+    option (game.net.route) = { opcode: 3002 kind: ROUTE_KIND_RPC delivery: DELIVERY_RELIABLE };
   }
-  rpc SetGomokuReady(GomokuCommand) returns (GomokuResponse) {
-    option (game.net.opcode) = 3003;
-    option (game.net.route_kind) = ROUTE_KIND_RPC;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 128;
-    option (game.net.response_max_body) = 4096;
+  rpc SetGomokuReady(SetReadyRequest) returns (GomokuResponse) {
+    option (game.net.route) = { opcode: 3003 kind: ROUTE_KIND_RPC delivery: DELIVERY_RELIABLE };
   }
-  rpc StartGomokuGame(GomokuCommand) returns (GomokuResponse) {
-    option (game.net.opcode) = 3004;
-    option (game.net.route_kind) = ROUTE_KIND_RPC;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 128;
-    option (game.net.response_max_body) = 4096;
+  rpc StartGomokuGame(StartGameRequest) returns (GomokuResponse) {
+    option (game.net.route) = { opcode: 3004 kind: ROUTE_KIND_RPC delivery: DELIVERY_RELIABLE };
   }
-  rpc PlaceGomokuMove(GomokuCommand) returns (GomokuResponse) {
-    option (game.net.opcode) = 3005;
-    option (game.net.route_kind) = ROUTE_KIND_RPC;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 128;
-    option (game.net.response_max_body) = 4096;
+  rpc PlaceGomokuMove(PlaceMoveRequest) returns (GomokuResponse) {
+    option (game.net.route) = { opcode: 3005 kind: ROUTE_KIND_RPC delivery: DELIVERY_RELIABLE };
   }
-  rpc LeaveGomokuRoom(GomokuCommand) returns (GomokuResponse) {
-    option (game.net.opcode) = 3006;
-    option (game.net.route_kind) = ROUTE_KIND_RPC;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 128;
-    option (game.net.response_max_body) = 4096;
+  rpc LeaveGomokuRoom(LeaveRoomRequest) returns (GomokuResponse) {
+    option (game.net.route) = { opcode: 3006 kind: ROUTE_KIND_RPC delivery: DELIVERY_RELIABLE };
   }
   rpc GomokuRoomSnapshot(GomokuSnapshot) returns (google.protobuf.Empty) {
-    option (game.net.opcode) = 3010;
-    option (game.net.route_kind) = ROUTE_KIND_SERVER_PUSH;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 4096;
+    option (game.net.route) = { opcode: 3010 kind: ROUTE_KIND_SERVER_PUSH delivery: DELIVERY_RELIABLE };
   }
   rpc GomokuRoomClosed(GomokuSnapshot) returns (google.protobuf.Empty) {
-    option (game.net.opcode) = 3011;
-    option (game.net.route_kind) = ROUTE_KIND_SERVER_PUSH;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 4096;
+    option (game.net.route) = { opcode: 3011 kind: ROUTE_KIND_SERVER_PUSH delivery: DELIVERY_RELIABLE };
   }
 }

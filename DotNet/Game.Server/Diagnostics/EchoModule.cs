@@ -1,4 +1,4 @@
-using Game.Protocol;
+using Game.Protocol.Diagnostics;
 using Game.Server.Sessions;
 using GameFrame.Network;
 
@@ -8,7 +8,7 @@ namespace Game.Server.Diagnostics
     {
         internal static void Register(ServerApplication application)
         {
-            application.Rpc(GameNetRoutes.Echo, EchoAsync);
+            application.Rpc(DiagnosticsRoutes.Echo, EchoAsync);
         }
 
         private static async Task<EchoResponse> EchoAsync(ServerConnectionContext connection, EchoRequest request, CancellationToken token)

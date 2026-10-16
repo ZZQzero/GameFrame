@@ -14,7 +14,9 @@ using GameFrame.Audio;
 using GameFrame.Scene;
 using UnityEngine.SceneManagement;
 using YooAsset;
-using Game.Protocol;
+using Game.Protocol.Common;
+using Game.Protocol.Diagnostics;
+using Game.Protocol.Gomoku;
 using GameFrame.Network;
 using GameFrame.UI;
 using NUnit.Framework;
@@ -38,69 +40,75 @@ namespace GameFrame.Tests
 #endif
 
         [UnitySetUp]
-        public IEnumerator Initialize() => UniTask.ToCoroutine(async () =>
+        public IEnumerator Initialize()
         {
+            yield return UniTask.ToCoroutine(async () =>
+            {
 #if UNITY_EDITOR
-            // Unity TLS does not inherit dotnet dev-certs trust on every Editor platform.
-            // An explicitly supplied public certificate is a test-only trust anchor;
-            // chain, expiry and hostname validation remain enabled.
-            string certificatePath = Environment.GetEnvironmentVariable("GF_LOGIN_TEST_CERTIFICATE");
-            if (!string.IsNullOrEmpty(certificatePath))
-            {
-                Type settingsType = Type.GetType("Mono.Security.Interface.MonoTlsSettings, Mono.Security", true);
-                tlsSettings = settingsType.GetProperty("DefaultSettings").GetValue(null);
-                trustAnchors = settingsType.GetProperty("TrustAnchors");
-                previousAnchors = trustAnchors.GetValue(tlsSettings);
-                testCertificate = new System.Security.Cryptography.X509Certificates.X509Certificate2(certificatePath);
-                var anchors = new System.Security.Cryptography.X509Certificates.X509CertificateCollection { testCertificate };
-                trustAnchors.SetValue(tlsSettings, anchors);
-            }
+                // Unity TLS does not inherit dotnet dev-certs trust on every Editor platform.
+                // An explicitly supplied public certificate is a test-only trust anchor;
+                // chain, expiry and hostname validation remain enabled.
+                string certificatePath = Environment.GetEnvironmentVariable("GF_LOGIN_TEST_CERTIFICATE");
+                if (!string.IsNullOrEmpty(certificatePath))
+                {
+                    Type settingsType = Type.GetType("Mono.Security.Interface.MonoTlsSettings, Mono.Security", true);
+                    tlsSettings = settingsType.GetProperty("DefaultSettings").GetValue(null);
+                    trustAnchors = settingsType.GetProperty("TrustAnchors");
+                    previousAnchors = trustAnchors.GetValue(tlsSettings);
+                    testCertificate = new System.Security.Cryptography.X509Certificates.X509Certificate2(certificatePath);
+                    var anchors = new System.Security.Cryptography.X509Certificates.X509CertificateCollection { testCertificate };
+                    trustAnchors.SetValue(tlsSettings, anchors);
+                }
 #endif
-            await GameRuntime.InitAsync(new GameRuntimeConfig
-            {
-                EnableTimer = false,
-                EnableUI = false,
-                NetworkOptions = new NetworkRuntimeOptions()
+                await GameRuntime.InitAsync(new GameRuntimeConfig
+                {
+                    EnableTimer = false,
+                    EnableUI = false,
+                    NetworkOptions = new NetworkRuntimeOptions()
+                });
+                if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GF_LOGIN_TEST_ENDPOINT")))
+                {
+                    // One shared local server enforces 5 authentications/s per IP.
+                    // Fixtures isolate their admission windows instead of retrying rejected login.
+                    await UniTask.Delay(1100, ignoreTimeScale: true);
+                }
             });
-            if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GF_LOGIN_TEST_ENDPOINT")))
-            {
-                // One shared local server enforces 5 authentications/s per IP.
-                // Fixtures isolate their admission windows instead of retrying rejected login.
-                await UniTask.Delay(1100, ignoreTimeScale: true);
-            }
-        });
+        }
 
         [UnityTearDown]
-        public IEnumerator Shutdown() => UniTask.ToCoroutine(async () =>
+        public IEnumerator Shutdown()
         {
-            if (panel != null)
+            yield return UniTask.ToCoroutine(async () =>
             {
-                panel.DispatchDestroy();
-                UnityEngine.Object.Destroy(panel.gameObject);
-            }
+                if (panel != null)
+                {
+                    panel.DispatchDestroy();
+                    UnityEngine.Object.Destroy(panel.gameObject);
+                }
 
-            foreach (GomokuRoomSession room in gomokuRooms)
-            {
-                await room.DisposeAsync();
-            }
+                foreach (GomokuRoomSession room in gomokuRooms)
+                {
+                    await room.DisposeAsync();
+                }
 
-            gomokuRooms.Clear();
-            foreach (GameLoginSession session in sessions)
-            {
-                await session.DisposeAsync();
-            }
+                gomokuRooms.Clear();
+                foreach (GameLoginSession session in sessions)
+                {
+                    await session.DisposeAsync();
+                }
 
-            sessions.Clear();
-            await GameRuntime.ShutdownAsync();
+                sessions.Clear();
+                await GameRuntime.ShutdownAsync();
 #if UNITY_EDITOR
-            if (tlsSettings != null)
-            {
-                trustAnchors.SetValue(tlsSettings, previousAnchors);
-                testCertificate.Dispose();
-                tlsSettings = null;
-            }
+                if (tlsSettings != null)
+                {
+                    trustAnchors.SetValue(tlsSettings, previousAnchors);
+                    testCertificate.Dispose();
+                    tlsSettings = null;
+                }
 #endif
-        });
+            });
+        }
 
         private GameLoginSession CreateSession(bool requireServer = true)
         {
@@ -344,7 +352,7 @@ namespace GameFrame.Tests
             Assert.Greater(user.AuthEpoch, 0UL);
             Assert.Greater(user.AccountDeadlineMilliseconds, NetworkClock.GetMilliseconds());
             NetworkClient client = session.LobbyClient;
-            EchoResponse echo = await client.RequestAsync(GameNetRoutes.Echo, new EchoRequest { Text = "login-integration" },
+            EchoResponse echo = await client.RequestAsync(DiagnosticsRoutes.Echo, new EchoRequest { Text = "login-integration" },
                 TimeSpan.FromSeconds(5));
             Assert.AreEqual("login-integration", echo.Text);
             int lost = 0;

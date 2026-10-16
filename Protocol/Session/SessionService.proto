@@ -1,40 +1,24 @@
 syntax = "proto3";
 package game.protocol.session;
-option csharp_namespace = "Game.Protocol";
+option csharp_namespace = "Game.Protocol.Session";
 import "Common/net_options.proto";
 import "Common/ResultProto.proto";
 import "Session/SessionProto.proto";
 
 service SessionService {
   rpc Register(RegisterRequest) returns (game.protocol.common.OperationResponse) {
-    option (game.net.opcode) = 1004;
-    option (game.net.route_kind) = ROUTE_KIND_RPC;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 2048;
-    option (game.net.response_max_body) = 64;
+    option (game.net.route) = { opcode: 1004 kind: ROUTE_KIND_RPC delivery: DELIVERY_RELIABLE };
   }
 
   rpc Login(LoginRequest) returns (LoginResponse) {
-    option (game.net.opcode) = 1000;
-    option (game.net.route_kind) = ROUTE_KIND_RPC;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 2048;
-    option (game.net.response_max_body) = 256;
+    option (game.net.route) = { opcode: 1000 kind: ROUTE_KIND_RPC delivery: DELIVERY_RELIABLE };
   }
 
   rpc ResumeLogin(ResumeLoginRequest) returns (LoginResponse) {
-    option (game.net.opcode) = 1001;
-    option (game.net.route_kind) = ROUTE_KIND_RPC;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 128;
-    option (game.net.response_max_body) = 256;
+    option (game.net.route) = { opcode: 1001 kind: ROUTE_KIND_RPC delivery: DELIVERY_RELIABLE };
   }
 
   rpc Logout(LogoutRequest) returns (game.protocol.common.OperationResponse) {
-    option (game.net.opcode) = 1003;
-    option (game.net.route_kind) = ROUTE_KIND_RPC;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 64;
-    option (game.net.response_max_body) = 64;
+    option (game.net.route) = { opcode: 1003 kind: ROUTE_KIND_RPC delivery: DELIVERY_RELIABLE };
   }
 }

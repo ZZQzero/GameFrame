@@ -6,6 +6,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using Game.Protocol;
+using Game.Protocol.Diagnostics;
+using Game.Protocol.Gomoku;
 using GameFrame;
 using GameFrame.Network;
 using Unity.Profiling;
@@ -423,7 +425,7 @@ namespace Game.Hotfix.Validation
                 try
                 {
                     cancellation?.CancelAfter(20);
-                    EchoResponse response = await client.RequestAsync(GameNetRoutes.Echo, request,
+                    EchoResponse response = await client.RequestAsync(DiagnosticsRoutes.Echo, request,
                         TimeSpan.FromMilliseconds(settings.Scenario == "timeout" ? 30 : 5000), cancellation?.Token ?? default);
                     Check(response.Text == request.Text && PlayerLoopHelper.IsMainThread, "Echo data/thread mismatch.");
                     if (measure)
@@ -624,7 +626,7 @@ namespace Game.Hotfix.Validation
                             TrustedWebSocketEndpoints = settings.Transport == "wss" ? new[] { endpoint } : Array.Empty<Uri>(),
                             PendingCount = settings.PendingLimit
                         }, GameNetProtocol.Catalog);
-                        subscriptions.Add(clients[i].Subscribe(GameNetRoutes.GomokuRoomSnapshot, message =>
+                        subscriptions.Add(clients[i].Subscribe(GomokuRoutes.GomokuRoomSnapshot, message =>
                         {
                             Check(PlayerLoopHelper.IsMainThread && message.Version == ++versions[index] &&
                                 message.Moves.Length == settings.PushMoves, "Push sequence, shape or thread mismatch.");
@@ -693,7 +695,7 @@ namespace Game.Hotfix.Validation
                     {
                         late += client.GetMetrics().LateResponses;
                         // A window-outside Echo proves idle/failure workloads can still make progress.
-                        EchoResponse echo = await client.RequestAsync(GameNetRoutes.Echo, new EchoRequest { Text = "probe" }, TimeSpan.FromSeconds(5));
+                        EchoResponse echo = await client.RequestAsync(DiagnosticsRoutes.Echo, new EchoRequest { Text = "probe" }, TimeSpan.FromSeconds(5));
                         Check(echo.Text == "probe", "Post-window probe failed.");
                         await client.CloseAsync();
                         var closed = client.GetMetrics();

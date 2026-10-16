@@ -4,6 +4,8 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Game.Protocol;
+using Game.Protocol.Diagnostics;
+using Game.Protocol.Gomoku;
 using GameFrame.Network;
 using NUnit.Framework;
 
@@ -95,7 +97,7 @@ namespace GameFrame.Tests
 
                 return new Session(info => closed[index] = info);
             });
-            application.Rpc(GameNetRoutes.Echo, async (connection, request, cancellation) =>
+            application.Rpc(DiagnosticsRoutes.Echo, async (connection, request, cancellation) =>
             {
                 int index = indices[connection.GrantId];
                 calls.AddOrUpdate(index, 1, (_, count) => count + 1);
@@ -104,7 +106,7 @@ namespace GameFrame.Tests
             });
             foreach (NetRoute route in GameNetProtocol.Catalog.Routes)
             {
-                if (route.Kind != NetRouteKind.Push && route != GameNetRoutes.Echo)
+                if (route.Kind != NetRouteKind.Push && route != DiagnosticsRoutes.Echo)
                 {
                     application.Reject(route);
                 }
@@ -168,7 +170,7 @@ namespace GameFrame.Tests
                             break;
                         }
                         case "push":
-                            await sessions[command.Index].PushAsync(GameNetRoutes.GomokuRoomSnapshot, new GomokuSnapshot());
+                            await sessions[command.Index].PushAsync(GomokuRoutes.GomokuRoomSnapshot, new GomokuSnapshot());
                             response = new { Ok = true };
                             break;
                         case "cut":

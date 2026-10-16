@@ -1,5 +1,5 @@
 using System;
-using Game.Protocol;
+using Game.Protocol.Common;
 
 namespace Game.Hotfix
 {

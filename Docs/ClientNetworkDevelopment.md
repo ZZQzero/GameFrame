@@ -16,7 +16,7 @@
 
 Runtime 不引用 Hotfix/Editor；Hotfix 通过冻结 NetProtocolCatalog 提供 codec，系统控制包固定编码不依赖业务 DTO。不要复制第二套 RPC、计时器或事件总线，不让 Runtime 修改 Transform 或维护账号、背包、房间和世界状态。
 
-客户端、共享 Core 与服务端网络框架统一使用 `GameFrame.Network`。Connection、Protocol、Transport、Kcp 等目录只用于组织源码，不再各建子命名空间；程序集及依赖边界保持独立。双端生成的 DTO、枚举、路由与 catalog 统一使用 `Game.Protocol`，客户端仍在 Game.Hotfix 程序集中编译，服务端由 Game.Protocol 工程链接同源文件。游戏会话与玩法继续使用各自的业务命名空间。
+客户端、共享 Core 与服务端网络框架统一使用 `GameFrame.Network`。Connection、Protocol、Transport、Kcp 等目录只用于组织源码，不再各建子命名空间；程序集及依赖边界保持独立。双端生成 DTO、枚举与 `<Module>Routes` 使用 `Game.Protocol.<Module>`，统一 catalog 保持 `Game.Protocol.GameNetProtocol`，客户端仍在 Game.Hotfix 程序集中编译，服务端由 Game.Protocol 工程链接同源文件。游戏会话与玩法继续使用各自的业务命名空间。
 
 GameRuntime 可选拥有 NetworkRuntime，GameEntry 只初始化热更业务；默认 NetworkOptions=null，保持离线，不自动建客户端/连服。驱动使用已有持久根，DLL 装载后由 GameEntry prefab Awake 进入业务，不加反射入口或 Launch→Hotfix 调用。遵循 [启动](Launch.md)、[作用域](Scope.md)、[错误契约](ErrorContract.md) 和 [全局规则](../AGENTS.md)。
 
@@ -172,7 +172,9 @@ KCP ABI2 的 Peer/Grant 使用共享 `Sequential` 声明和 `fixed byte` 缓冲�
 
 已进一步核对该版本 IL2CPP 生成器：`ObjectFactoryComponent` 为 ByValArray 选择 `FixedArrayMarshalInfoWriter`，其 `WriteFieldDeclaration` 使用定长信息生成正确的 C++ 数组，但它及数组基类均未重写 `GetNativeSizeWithoutPointers`，沿用 `DefaultMarshalInfoWriter` 返回0的默认实现。`MetadataCollector.MarshaledSizeFromFields` 将这个返回值写入字段封送大小表；运行时 `Marshal.OffsetOf` 经 `Class.GetFieldMarshaledSize` 使用该值累加偏移。因此0来自生成器默认值，不是 SizeConst 丢失或实际数组长度为0。项目使用的与 Unity 安装目录同版本的 `Unity.IL2CPP.dll` SHA256一致，不能将此问题归因于 HybridCLR 修改了生成器；结论仅针对已核对的6000.3.19f1工具链，不推断其他版本。
 
-共享消息只能改.proto，再运行工具同步双端；字段/枚举/类型/上限/hash 规则见 [共享协议规范](DotNetDevelopment.md#6-共享-protomemorypack-编写规则)，命令见 [生成说明](DotNetUsage.md#协议生成与验证)。不要手工写网络 MemoryPack DTO、UnityEngine 字段、Nullable 数值、自定义 formatter/回调或启用 VersionTolerant 兼容。
+共享消息只能改.proto，再运行工具同步双端；当前按业务输出 `<Module>Messages.g.cs`，全局 `GameNetProtocol.cs` 汇总 catalog/指纹，生成类型与 `<Module>Routes` 使用 `Game.Protocol.<Module>`；全局入口保持 `Game.Protocol.GameNetProtocol`，无 GameNetRoutes 兼容层。旧 DTO 聚合产物已移除，不维护兼容生成分支；字段/枚举/类型/上限/hash 规则见 [共享协议规范](DotNetDevelopment.md#6-共享-protomemorypack-编写规则)，命令见 [生成说明](DotNetUsage.md#协议生成与验证)。不要手工写网络 MemoryPack DTO、UnityEngine 字段、Nullable 数值、自定义 formatter/回调或启用 VersionTolerant 兼容。
+
+路由在 Proto method 的 `game.net.route` 中集中声明 opcode/kind/delivery，正文预算由同一生成器自动推导，不在客户端另填 max_body。预算覆盖 UTF-8 编码过程的连续空间申请，沿用精确发送缓冲、发送预约与出站对象校验；不因预算收紧改变超时、取消或重试语义。字段约束变化须重新生成，两端同步更新指纹，不能只替换客户端 DLL。
 
 Editor 的 Generate Messages/Check Messages 菜单调用 `DotNet/NetworkProtocol` 外部进程，异步排空 stdout/stderr，并以退出码判定成功。工具执行时禁止重复启动，保持域重载与资产刷新锁的成对释放；具体 SDK 定位与本机设置见客户端使用说明。生成器 DLL 及 Roslyn 依赖不导入 Unity 程序集。
 
@@ -204,6 +206,8 @@ IL2CPP 分配接口和 ProfilerRecorder 必须经已知分配/GC探针校验，�
 
 
 ### 五子棋客户端接入（2026-10-14）
+
+GomokuRoomSession 的建房、加入、准备、开局、落子、离房和查询各使用专用请求；对 UI 的业务方法不变。命令编号、在途操作仲裁、认证代际、快照提交及取消/超时后的 NeedsQuery 仍由同一会话流程维护，不复制六套 RPC 状态逻辑。Ready/Start/Move 取得当前房间与版本，Leave 只传房间 ID；查询继续使用共享响应与 CommandKnown，不自动重试或重发。
 
 GameEntry 持有 GomokuRoomSession，借用同一个 GameLoginSession.LobbyClient；GameFlow 为 MainPanelArgs 注入入口回调。入口 / 等待共用 GomokuLobbyPanel，棋盘用 GomokuOnlinePanel；面板只拥有 OpenScope 订阅 / 取消，不关闭 WSS。
 

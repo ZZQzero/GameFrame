@@ -1,6 +1,6 @@
 syntax = "proto3";
 package game.protocol.session;
-option csharp_namespace = "Game.Protocol";
+option csharp_namespace = "Game.Protocol.Session";
 import "Common/net_options.proto";
 import "Common/ResultProto.proto";
 

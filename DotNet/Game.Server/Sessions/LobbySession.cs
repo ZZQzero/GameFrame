@@ -1,5 +1,5 @@
 using System.Net;
-using Game.Protocol;
+using Game.Protocol.Session;
 using Game.Server.Login;
 using GameFrame.Network;
 
@@ -153,8 +153,8 @@ namespace Game.Server.Sessions
             _ => throw new ArgumentOutOfRangeException(nameof(reason))
         };
 
-        private static bool IsAuthentication(uint opcode) => opcode == GameNetRoutes.Login.Opcode ||
-            opcode == GameNetRoutes.ResumeLogin.Opcode || opcode == GameNetRoutes.Register.Opcode;
+        private static bool IsAuthentication(uint opcode) => opcode == SessionRoutes.Login.Opcode ||
+            opcode == SessionRoutes.ResumeLogin.Opcode || opcode == SessionRoutes.Register.Opcode;
 
         internal void FinishAuthentication() => Interlocked.Exchange(ref loginInFlight, 0);
 

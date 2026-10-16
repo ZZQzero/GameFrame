@@ -1,6 +1,8 @@
 using System.Buffers;
 using System.Net;
 using Game.Protocol;
+using Game.Protocol.Diagnostics;
+using Game.Protocol.Gomoku;
 using GameFrame.Network;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
@@ -91,10 +93,10 @@ namespace GameFrame.Tests
             Func<ServerConnectionContext, ServerSession>? session = null)
         {
             var application = new ServerApplication(GameNetProtocol.Catalog, session);
-            application.Rpc(GameNetRoutes.Echo, echo);
+            application.Rpc(DiagnosticsRoutes.Echo, echo);
             foreach (var route in GameNetProtocol.Catalog.Routes)
             {
-                if (route.Kind != NetRouteKind.Push && route.Opcode != GameNetRoutes.Echo.Opcode)
+                if (route.Kind != NetRouteKind.Push && route.Opcode != DiagnosticsRoutes.Echo.Opcode)
                 {
                     application.Reject(route);
                 }
@@ -106,9 +108,9 @@ namespace GameFrame.Tests
         private static byte[] Request(ulong correlation)
         {
             var body = new ArrayBufferWriter<byte>();
-            GameNetRoutes.Echo.RequestCodec.Encode(body, new EchoRequest());
+            DiagnosticsRoutes.Echo.RequestCodec.Encode(body, new EchoRequest());
             byte[] bytes = new byte[32 + body.WrittenCount];
-            FrameCodec.WriteHeader(bytes, new FrameHeader(FrameKind.Request, GameNetRoutes.Echo.Opcode, correlation, body.WrittenCount));
+            FrameCodec.WriteHeader(bytes, new FrameHeader(FrameKind.Request, DiagnosticsRoutes.Echo.Opcode, correlation, body.WrittenCount));
             body.WrittenSpan.CopyTo(bytes.AsSpan(32));
             return bytes;
         }
@@ -127,7 +129,7 @@ namespace GameFrame.Tests
                 await release.Task.WaitAsync(token);
                 if (pushAfterClose)
                 {
-                    await connection.PushAsync(GameNetRoutes.GomokuRoomSnapshot, new GomokuSnapshot());
+                    await connection.PushAsync(GomokuRoutes.GomokuRoomSnapshot, new GomokuSnapshot());
                 }
                 else
                 {
@@ -157,7 +159,7 @@ namespace GameFrame.Tests
                 server.Context.RequestClose(2);
                 server.Context.RequestClose(7);
                 Assert.Catch<NetworkException>(server.Context.EnableFullTraffic);
-                Assert.Catch<NetworkException>(() => server.Context.PushAsync(GameNetRoutes.GomokuRoomSnapshot, new GomokuSnapshot()));
+                Assert.Catch<NetworkException>(() => server.Context.PushAsync(GomokuRoutes.GomokuRoomSnapshot, new GomokuSnapshot()));
                 if (pushAfterClose)
                 {
                     release.SetResult();

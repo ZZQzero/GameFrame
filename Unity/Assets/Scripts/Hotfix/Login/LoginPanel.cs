@@ -1,7 +1,7 @@
 using System;
 using System.Threading;
 using Cysharp.Threading.Tasks;
-using Game.Protocol;
+using Game.Protocol.Common;
 using GameFrame.Network;
 using GameFrame.UI;
 using UnityEngine;

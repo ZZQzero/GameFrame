@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
-using Game.Protocol;
+using Game.Protocol.Common;
+using Game.Protocol.Session;
 using Game.Server.Sessions;
 using GameFrame.Network;
 

@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using Game.Protocol;
+using Game.Protocol.Gomoku;
 using GameFrame.Network;
 using NUnit.Framework;
 using UnityEngine;
@@ -15,7 +16,10 @@ namespace GameFrame.Tests
     public sealed class NetworkLifecycleTests
     {
         [UnityTearDown]
-        public IEnumerator Shutdown() => UniTask.ToCoroutine(async () => await GameRuntime.ShutdownAsync());
+        public IEnumerator Shutdown()
+        {
+            yield return UniTask.ToCoroutine(async () => await GameRuntime.ShutdownAsync());
+        }
 
         private static UniTask Initialize(NetworkRuntimeOptions options = null)
         {
@@ -97,12 +101,12 @@ namespace GameFrame.Tests
         {
             await Initialize(new NetworkRuntimeOptions());
             NetworkClient client = GameRuntime.Network.CreateClient(new NetworkClientOptions(), GameNetProtocol.Catalog);
-            IDisposable first = client.Subscribe(GameNetRoutes.GomokuRoomSnapshot, _ => { });
-            Assert.Throws<InvalidOperationException>(() => client.Subscribe(GameNetRoutes.GomokuRoomSnapshot, _ => { }));
+            IDisposable first = client.Subscribe(GomokuRoutes.GomokuRoomSnapshot, _ => { });
+            Assert.Throws<InvalidOperationException>(() => client.Subscribe(GomokuRoutes.GomokuRoomSnapshot, _ => { }));
             first.Dispose();
-            using IDisposable second = client.Subscribe(GameNetRoutes.GomokuRoomSnapshot, _ => { });
+            using IDisposable second = client.Subscribe(GomokuRoutes.GomokuRoomSnapshot, _ => { });
             first.Dispose();
-            Assert.Throws<InvalidOperationException>(() => client.Subscribe(GameNetRoutes.GomokuRoomSnapshot, _ => { }));
+            Assert.Throws<InvalidOperationException>(() => client.Subscribe(GomokuRoutes.GomokuRoomSnapshot, _ => { }));
             await client.DisposeAsync();
         });
 

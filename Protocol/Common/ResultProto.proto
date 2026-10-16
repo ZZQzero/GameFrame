@@ -1,6 +1,6 @@
 syntax = "proto3";
 package game.protocol.common;
-option csharp_namespace = "Game.Protocol";
+option csharp_namespace = "Game.Protocol.Common";
 // Business results only. Frame StatusCode carries transport/dispatch failures.
 // Success is zero. New results change the protocol hash; unknown values are rejected.
 enum ResultCode {

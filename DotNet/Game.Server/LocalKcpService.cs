@@ -2,6 +2,9 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Game.Protocol;
+using Game.Protocol.Diagnostics;
+using Game.Protocol.Gomoku;
+using Game.Protocol.Session;
 using Game.Server.Diagnostics;
 using GameFrame.Network;
 
@@ -74,7 +77,7 @@ namespace Game.Server
         internal static ServerApplication CreateApplication()
         {
             var application = new ServerApplication(GameNetProtocol.Catalog);
-            application.Rpc(GameNetRoutes.Echo, async (_, request, token) =>
+            application.Rpc(DiagnosticsRoutes.Echo, async (_, request, token) =>
             {
                 if (request.DelayMs > 5000)
                 {
@@ -84,17 +87,17 @@ namespace Game.Server
                 await Task.Delay((int)request.DelayMs, token);
                 return new EchoResponse { Text = request.Text };
             });
-            application.Reject(GameNetRoutes.Login);
-            application.Reject(GameNetRoutes.Register);
-            application.Reject(GameNetRoutes.ResumeLogin);
-            application.Reject(GameNetRoutes.Logout);
-            application.Reject(GameNetRoutes.CreateGomokuRoom);
-            application.Reject(GameNetRoutes.JoinGomokuRoom);
-            application.Reject(GameNetRoutes.SetGomokuReady);
-            application.Reject(GameNetRoutes.StartGomokuGame);
-            application.Reject(GameNetRoutes.PlaceGomokuMove);
-            application.Reject(GameNetRoutes.LeaveGomokuRoom);
-            application.Reject(GameNetRoutes.QueryMyGomokuRoom);
+            application.Reject(SessionRoutes.Login);
+            application.Reject(SessionRoutes.Register);
+            application.Reject(SessionRoutes.ResumeLogin);
+            application.Reject(SessionRoutes.Logout);
+            application.Reject(GomokuRoutes.CreateGomokuRoom);
+            application.Reject(GomokuRoutes.JoinGomokuRoom);
+            application.Reject(GomokuRoutes.SetGomokuReady);
+            application.Reject(GomokuRoutes.StartGomokuGame);
+            application.Reject(GomokuRoutes.PlaceGomokuMove);
+            application.Reject(GomokuRoutes.LeaveGomokuRoom);
+            application.Reject(GomokuRoutes.QueryMyGomokuRoom);
             return application;
         }
     }

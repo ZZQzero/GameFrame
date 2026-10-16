@@ -1,10 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
 using Game.Hotfix;
-using Game.Protocol;
+using Game.Protocol.Gomoku;
 using Game.Server.Login;
 using GameFrame.Network;
-using WireMove = Game.Protocol.GomokuMoveData;
+using WireMove = Game.Protocol.Gomoku.GomokuMoveData;
 
 namespace Game.Server.Gomoku
 {
@@ -12,6 +12,10 @@ namespace Game.Server.Gomoku
     {
         Create, Join, Ready, Start, Move, Leave
     }
+
+    // Transport DTOs map here once; execution and receipts remain owned by the room service.
+    internal readonly record struct GomokuRoomCommand(ulong CommandId, string RoomId = "", ulong ExpectedVersion = 0,
+        string RoomCode = "", bool Ready = false, int Column = 0, int Row = 0);
 
     // One bounded, short commit gate owns rooms, account membership and command receipts.
     // No IO, encoding, await or external continuation runs while this gate is held.
@@ -86,7 +90,7 @@ namespace Game.Server.Gomoku
         }
 
         internal GomokuResponse Execute(AccountSessions.Binding binding, ServerConnectionContext connection,
-            GomokuOperation operation, GomokuCommand command)
+            GomokuOperation operation, GomokuRoomCommand command)
         {
             lock (gate)
             {
@@ -185,7 +189,7 @@ namespace Game.Server.Gomoku
             }
         }
 
-        private GomokuResult Apply(Peer peer, GomokuOperation operation, GomokuCommand command, long now)
+        private GomokuResult Apply(Peer peer, GomokuOperation operation, GomokuRoomCommand command, long now)
         {
             membership.TryGetValue(peer.Binding.Identity.AccountId, out Room? target);
             if (operation == GomokuOperation.Join)
@@ -212,7 +216,7 @@ namespace Game.Server.Gomoku
             }
         }
 
-        private GomokuResult ApplyCore(Peer peer, GomokuOperation operation, GomokuCommand command, long now)
+        private GomokuResult ApplyCore(Peer peer, GomokuOperation operation, GomokuRoomCommand command, long now)
         {
             RequireAuthorized(peer.Binding, peer.Connection);
             ulong account = peer.Binding.Identity.AccountId;
@@ -522,9 +526,21 @@ namespace Game.Server.Gomoku
             }
         }
 
-        private static string Fingerprint(GomokuOperation operation, GomokuCommand command) =>
-            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-                $"{(int)operation}|{command.RoomId.Length}:{command.RoomId}|{command.ExpectedVersion}|{command.RoomCode.Length}:{command.RoomCode}|{command.Ready}|{command.Column}|{command.Row}")));
+        private static string Fingerprint(GomokuOperation operation, GomokuRoomCommand command)
+        {
+            // Only fields consumed by this operation participate in replay identity.
+            FormattableString fields = operation switch
+            {
+                GomokuOperation.Create => $"{(int)operation}",
+                GomokuOperation.Join => $"{(int)operation}|{command.RoomCode.Length}:{command.RoomCode}",
+                GomokuOperation.Ready => $"{(int)operation}|{command.RoomId.Length}:{command.RoomId}|{command.ExpectedVersion}|{command.Ready}",
+                GomokuOperation.Start => $"{(int)operation}|{command.RoomId.Length}:{command.RoomId}|{command.ExpectedVersion}",
+                GomokuOperation.Move => $"{(int)operation}|{command.RoomId.Length}:{command.RoomId}|{command.ExpectedVersion}|{command.Column}|{command.Row}",
+                GomokuOperation.Leave => $"{(int)operation}|{command.RoomId.Length}:{command.RoomId}",
+                _ => throw new ArgumentOutOfRangeException(nameof(operation))
+            };
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(FormattableString.Invariant(fields))));
+        }
 
         private static bool Admit(Peer peer, long now)
         {
@@ -605,8 +621,8 @@ namespace Game.Server.Gomoku
                         try
                         {
                             await output.Connection.PushAsync(output.Snapshot.State == GomokuRoomState.Closed
-                                ? Game.Protocol.GameNetRoutes.GomokuRoomClosed
-                                : Game.Protocol.GameNetRoutes.GomokuRoomSnapshot, output.Snapshot).ConfigureAwait(false);
+                                ? Game.Protocol.Gomoku.GomokuRoutes.GomokuRoomClosed
+                                : Game.Protocol.Gomoku.GomokuRoutes.GomokuRoomSnapshot, output.Snapshot).ConfigureAwait(false);
                         }
                         catch (Exception error) when (error is NetworkException || error is OperationCanceledException)
                         {

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using GameFrame.Network;
 using MemoryPack;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace GameFrame.ProtocolTools
 {
@@ -17,16 +18,53 @@ namespace GameFrame.ProtocolTools
         private readonly Dictionary<Type, Schema> byType = new Dictionary<Type, Schema>();
         private readonly HashSet<Type> visiting = new HashSet<Type>();
         private readonly List<Route> routes = new List<Route>();
+        private readonly Dictionary<Type, ProtocolModuleDefinition> typeModules = new Dictionary<Type, ProtocolModuleDefinition>();
 
-        public IReadOnlyDictionary<string, byte[]> Generate(IEnumerable<Type> input,
-            IEnumerable<ProtocolRouteDefinition> definitions, bool includeArtifacts = false)
+        public IReadOnlyDictionary<string, byte[]> Generate(IEnumerable<ProtocolModuleDefinition> input, bool includeArtifacts = false)
         {
             schemas.Clear();
             enums.Clear();
             byType.Clear();
             visiting.Clear();
             routes.Clear();
-            foreach (Type type in input.OrderBy(type => type.FullName, StringComparer.Ordinal))
+            ProtocolModuleDefinition[] modules = input.OrderBy(module => module.Name, StringComparer.Ordinal).ToArray();
+            typeModules.Clear();
+            var moduleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (ProtocolModuleDefinition module in modules)
+            {
+                if (!moduleNames.Add(module.Name))
+                {
+                    throw new InvalidOperationException($"Duplicate module name: {module.Name}.");
+                }
+
+                RequireIdentifier(module.Name);
+                foreach (string part in module.Namespace.Split('.'))
+                {
+                    RequireIdentifier(part);
+                }
+
+                foreach (Type type in module.Types)
+                {
+                    if (!typeModules.TryAdd(type, module))
+                    {
+                        throw new InvalidOperationException($"Duplicate type ownership: {type.FullName}.");
+                    }
+                }
+
+                var memberNames = new Dictionary<string, ProtocolRouteDefinition>(StringComparer.Ordinal);
+                foreach (ProtocolRouteDefinition route in module.Routes)
+                {
+                    RequireIdentifier(route.MemberName);
+                    if (!memberNames.TryAdd(route.MemberName, route))
+                    {
+                        ProtocolRouteDefinition previous = memberNames[route.MemberName];
+                        throw new InvalidOperationException($"{route.Source}: module {module.Name}, {route.Name}: duplicate route member {route.MemberName}; " +
+                            $"conflicts with {previous.Name} ({previous.Source}).");
+                    }
+                }
+            }
+
+            foreach (Type type in typeModules.Keys.OrderBy(type => type.FullName, StringComparer.Ordinal))
             {
                 if (type.IsEnum)
                 {
@@ -38,33 +76,37 @@ namespace GameFrame.ProtocolTools
                 }
             }
 
-            foreach (ProtocolRouteDefinition definition in definitions)
+            foreach (ProtocolModuleDefinition module in modules)
             {
-                NetContractLimits.ValidateRoute(definition.Opcode, definition.Delivery, definition.MaxBody);
-                if (definition.Kind == "Rpc")
+                foreach (ProtocolRouteDefinition definition in module.Routes)
                 {
-                    if (definition.Delivery != NetDelivery.Reliable || definition.Response == null)
+                    if (definition.Kind == "Rpc")
                     {
-                        throw new InvalidOperationException("RPC requires a reliable channel and a response DTO.");
+                        if (definition.Delivery != NetDelivery.Reliable || definition.Response == null)
+                        {
+                            throw new InvalidOperationException("RPC requires a reliable channel and a response DTO.");
+                        }
+                    }
+                    else if ((definition.Kind != "Push" && definition.Kind != "Notify") ||
+                        definition.Response != null)
+                    {
+                        throw new InvalidOperationException("Push/Notify requires no response DTO.");
                     }
 
-                    NetContractLimits.ValidateRoute(definition.Opcode, definition.Delivery, definition.ResponseMaxBody);
-                }
-                else if ((definition.Kind != "Push" && definition.Kind != "Notify") ||
-                    definition.Response != null || definition.ResponseMaxBody != 0)
-                {
-                    throw new InvalidOperationException("Push/Notify requires no response DTO or response budget.");
-                }
+                    Schema request = Analyze(definition.Request);
+                    Schema? response = definition.Response == null ? null : Analyze(definition.Response);
+                    var route = new Route(module, definition.Name, definition.MemberName, definition.Source, definition.Opcode, definition.Kind, definition.Delivery,
+                        request, response, RouteBudget(module, definition, request),
+                        response == null ? 0 : RouteBudget(module, definition, response));
+                    if (routes.Any(existing => existing.Opcode == route.Opcode || existing.Name == route.Name))
+                    {
+                        Route duplicate = routes.First(existing => existing.Opcode == route.Opcode || existing.Name == route.Name);
+                        throw new InvalidOperationException($"{route.Source}: module {module.Name}, {route.Name}: Duplicate opcode or route name " +
+                            $"{route.Opcode}; conflicts with {duplicate.Name} ({duplicate.Source}, module {duplicate.Module.Name}).");
+                    }
 
-                var route = new Route(definition.Name, definition.Opcode, definition.Kind, definition.Delivery,
-                    Analyze(definition.Request), definition.Response == null ? null : Analyze(definition.Response),
-                    definition.MaxBody, definition.ResponseMaxBody);
-                if (routes.Any(existing => existing.Opcode == route.Opcode || existing.Name == route.Name))
-                {
-                    throw new InvalidOperationException($"Duplicate opcode or route name: {route.Opcode}/{route.Name}.");
+                    routes.Add(route);
                 }
-
-                routes.Add(route);
             }
 
             if (routes.Count == 0)
@@ -73,27 +115,28 @@ namespace GameFrame.ProtocolTools
             }
 
             routes.Sort((a, b) => a.Opcode.CompareTo(b.Opcode));
-            foreach (Route route in routes)
+            foreach (Type type in byType.Keys.Concat(enums.Values))
             {
-                if (MaxBytes(route.Request) > route.MaxBody ||
-                    (route.Response != null && MaxBytes(route.Response) > route.ResponseMaxBody))
+                if (!typeModules.ContainsKey(type))
                 {
-                    throw new InvalidOperationException($"Declared DTO field limits exceed route {route.Opcode}'s body limit.");
+                    throw new InvalidOperationException($"Missing module ownership for {type.FullName}.");
                 }
-            }
-
-            if (schemas.Values.Select(schema => schema.Type.Name).Concat(enums.Values.Select(type => type.Name))
-                .Distinct(StringComparer.Ordinal).Count() != schemas.Count + enums.Count)
-            {
-                throw new InvalidOperationException("DTO simple names must be unique in the generated protocol namespace.");
             }
 
             byte[] manifest = Manifest();
             byte[] hash = SHA256.HashData(manifest);
             var outputs = new SortedDictionary<string, byte[]>(StringComparer.Ordinal)
             {
-                [GeneratedDirectory + "GameNetProtocol.cs"] = Encoding.UTF8.GetBytes(Code(hash))
+                [GeneratedDirectory + "GameNetProtocol.cs"] = Encoding.UTF8.GetBytes(CatalogCode(hash))
             };
+
+            foreach (ProtocolModuleDefinition module in modules)
+            {
+                outputs.Add(GeneratedDirectory + module.Name + "Messages.g.cs", Encoding.UTF8.GetBytes(ModuleCode(module,
+                    schemas.Values.Where(schema => typeModules[schema.Type] == module).ToArray(),
+                    enums.Values.Where(type => typeModules[type] == module).ToArray(),
+                    routes.Where(route => route.Module == module).ToArray())));
+            }
 
             if (includeArtifacts)
             {
@@ -218,6 +261,15 @@ namespace GameFrame.ProtocolTools
                 throw new InvalidOperationException($"{type.FullName} exceeds the DTO depth budget.");
             }
 
+            try
+            {
+                schema.Bounds = CalculateBounds(schema);
+            }
+            catch (OverflowException error)
+            {
+                throw new InvalidOperationException($"{type.FullName}: calculated MemoryPack size overflows Int64.", error);
+            }
+
             return schema;
         }
 
@@ -293,19 +345,66 @@ namespace GameFrame.ProtocolTools
             return 1 + schema.Fields.Select(field => field.Child == null ? 0 : Depth(field.Child)).DefaultIfEmpty(0).Max();
         }
 
-        private static long MaxBytes(Schema schema)
+        private static int RouteBudget(ProtocolModuleDefinition module, ProtocolRouteDefinition route, Schema schema)
         {
-            long length = 1;
-            foreach (Field field in schema.Fields)
+            long capacity = schema.Bounds.Capacity;
+            try
             {
-                Type type = field.Type.IsArray ? field.Type.GetElementType()! : field.Type;
-                int stringBytes = field.StringUtf8.HasValue ? Math.Min(field.StringUtf8.Value, field.StringUtf16!.Value * 3) : 0;
-                long valueBytes = type == typeof(string) ? (stringBytes == 0 ? 4 : 8 + stringBytes)
-                    : type.IsEnum ? 4 : PrimitiveBytes.TryGetValue(type, out int bytes) ? bytes : MaxBytes(field.Child!);
-                length = checked(length + (field.ArrayLimit.HasValue ? 4 + field.ArrayLimit.Value * valueBytes : valueBytes));
+                int result = checked((int)capacity);
+                NetContractLimits.ValidateRoute(route.Opcode, route.Delivery, result);
+                return result;
             }
+            catch (Exception error) when (error is OverflowException || error is ArgumentOutOfRangeException)
+            {
+                throw new InvalidOperationException($"{route.Source}: module {module.Name}, {route.Name}, opcode {route.Opcode}: " +
+                    $"calculated body budget {capacity} for {schema.Type.FullName} violates the {route.Delivery} channel contract.", error);
+            }
+        }
 
-            return length;
+        private static EncodingBounds CalculateBounds(Schema schema)
+        {
+            // Object/Explicit: one member-count byte, then fields in serialization order.
+            // Capacity also covers transient contiguous requests made by MemoryPack's writer.
+            checked
+            {
+                long length = 1;
+                long capacity = 1;
+                foreach (Field field in schema.Fields)
+                {
+                    Type type = field.Type.IsArray ? field.Type.GetElementType()! : field.Type;
+                    EncodingBounds value;
+                    if (type == typeof(string))
+                    {
+                        long units = Math.Min(field.StringUtf16!.Value, field.StringUtf8!.Value);
+                        long bytes = Math.Min(field.StringUtf8.Value, 3L * field.StringUtf16.Value);
+                        // Null/empty strings use four bytes. Nonempty UTF-8 has two Int32 headers.
+                        // WriteUtf8 requests (actual UTF-16 length + 1) * 3 + 8 before encoding.
+                        value = bytes == 0 ? new EncodingBounds(4, 4)
+                            : new EncodingBounds(8 + bytes, 8 + (units + 1) * 3);
+                    }
+                    else if (type.IsEnum || PrimitiveBytes.ContainsKey(type))
+                    {
+                        int bytes = type.IsEnum ? 4 : PrimitiveBytes[type];
+                        value = new EncodingBounds(bytes, bytes);
+                    }
+                    else
+                    {
+                        value = field.Child!.Bounds;
+                    }
+
+                    if (field.ArrayLimit.HasValue)
+                    {
+                        int count = field.ArrayLimit.Value;
+                        value = new EncodingBounds(4 + count * value.Length,
+                            count == 0 ? 4 : 4 + (count - 1) * value.Length + value.Capacity);
+                    }
+
+                    capacity = Math.Max(capacity, length + value.Capacity);
+                    length += value.Length;
+                }
+
+                return new EncodingBounds(length, Math.Max(length, capacity));
+            }
         }
 
         private byte[] GoldenVectors()
@@ -424,83 +523,90 @@ namespace GameFrame.ProtocolTools
             return Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(buffer.ToArray()).Replace("\r\n", "\n") + "\n");
         }
 
-        private string Code(byte[] hash)
+        private static StringBuilder CodeHeader()
         {
-            var code = new StringBuilder();
+            return new StringBuilder("// Generated by DotNet/NetworkProtocol. Do not edit.\n" +
+                "#nullable enable\nusing System;\nusing GameFrame.Network;\nusing MemoryPack;\n");
+        }
+
+        private string CatalogCode(byte[] hash)
+        {
+            var code = CodeHeader();
             void Line(string text = "") => code.Append(text).Append('\n');
-            Line("// Generated by DotNet/NetworkProtocol. Do not edit.");
-            Line("#nullable enable");
-            Line("using System;");
-            Line("using GameFrame.Network;");
-            Line("using MemoryPack;");
-            foreach (string? space in schemas.Values.Select(schema => schema.Type.Namespace)
-                .Concat(enums.Values.Select(type => type.Namespace)).Distinct().OrderBy(value => value, StringComparer.Ordinal))
-            {
-                if (space != null && space != "Game.Protocol")
-                {
-                    Line($"using {space};");
-                }
-            }
             Line();
             Line("namespace Game.Protocol");
             Line("{");
-            Line("    public static class GameNetRoutes");
+            Line("    public static class GameNetProtocol");
             Line("    {");
-            foreach (Route route in routes)
+            Line("        public static NetProtocolCatalog Catalog { get; } = new NetProtocolCatalog(");
+            Line("            new byte[] { " + string.Join(", ", hash.Select(value => "0x" + value.ToString("x2"))) + " },");
+            for (int i = 0; i < routes.Count; i++)
             {
-                string name = route.Name;
-                string request = route.Request.Type.Name;
-                string descriptor = route.Kind == "Rpc" ? $"NetRpc<{request}, {route.Response!.Type.Name}>"
-                    : route.Kind == "Push" ? $"NetPush<{request}>"
-                    : route.Delivery == NetDelivery.Reliable ? $"NetSend<{request}>" : $"NetUnreliable<{request}>";
-                string arguments = route.Kind == "Rpc"
-                    ? $"{route.Opcode}u, {route.MaxBody}, {route.ResponseMaxBody}, GameNetProtocol.Codec{request}, GameNetProtocol.Codec{route.Response!.Type.Name}"
-                    : route.Kind == "Push" ? $"{route.Opcode}u, NetDelivery.{route.Delivery}, {route.MaxBody}, GameNetProtocol.Codec{request}"
-                    : $"{route.Opcode}u, {route.MaxBody}, GameNetProtocol.Codec{request}";
-                Line($"        public static readonly {descriptor} {name} = new {descriptor}({arguments});");
+                Route route = routes[i];
+                Line($"            global::{route.Module.Namespace}.{route.Module.Name}Routes.{route.MemberName}" + (i == routes.Count - 1 ? ");" : ","));
             }
 
             Line("    }");
+            Line("}");
+            return code.ToString();
+        }
+
+        private string ModuleCode(ProtocolModuleDefinition module, IReadOnlyList<Schema> moduleSchemas, IReadOnlyList<Type> moduleEnums,
+            IReadOnlyList<Route> moduleRoutes)
+        {
+            var code = CodeHeader();
+            void Line(string text = "") => code.Append(text).Append('\n');
             Line();
-            Line("    public static class GameNetProtocol");
-            Line("    {");
-            foreach (Schema schema in schemas.Values)
+            Line("namespace " + module.Namespace);
+            Line("{");
+            if (moduleRoutes.Count != 0)
             {
-                string type = schema.Type.Name;
-                Line($"        internal static readonly NetMessageCodec<{type}> Codec{type} = new NetMessageCodec<{type}>(");
-                Line($"            (writer, value) => MemoryPackSerializer.Serialize(writer, value, MemoryPackSerializerOptions.Utf8),");
-                Line($"            bytes => MemoryPackSerializer.Deserialize<{type}>(bytes, MemoryPackSerializerOptions.Utf8)!,");
-                Line($"            value => {{ int nodes = 0; Check{type}(value, false, 1, ref nodes); }},");
-                Line($"            bytes => {{ var reader = new NetWireReader(bytes); Read{type}(ref reader, false, 1); reader.Complete(); }});");
+                Line($"    public static class {module.Name}Routes");
+                Line("    {");
+                foreach (Route route in moduleRoutes)
+                {
+                    string request = CsharpType(route.Request.Type);
+                    string descriptor = route.Kind == "Rpc" ? $"NetRpc<{request}, {CsharpType(route.Response!.Type)}>"
+                        : route.Kind == "Push" ? $"NetPush<{request}>"
+                        : route.Delivery == NetDelivery.Reliable ? $"NetSend<{request}>" : $"NetUnreliable<{request}>";
+                    string arguments = route.Kind == "Rpc"
+                        ? $"{route.Opcode}u, {route.MaxBody}, {route.ResponseMaxBody}, {CodecOwner(route.Request.Type)}.Codec{route.Request.Type.Name}, {CodecOwner(route.Response!.Type)}.Codec{route.Response!.Type.Name}"
+                        : route.Kind == "Push" ? $"{route.Opcode}u, NetDelivery.{route.Delivery}, {route.MaxBody}, {CodecOwner(route.Request.Type)}.Codec{route.Request.Type.Name}"
+                        : $"{route.Opcode}u, {route.MaxBody}, {CodecOwner(route.Request.Type)}.Codec{route.Request.Type.Name}";
+                    Line($"        public static readonly {descriptor} {route.MemberName} = new {descriptor}({arguments});");
+                }
+
+                Line("    }");
                 Line();
             }
 
-            Line("        public static NetProtocolCatalog Catalog => CatalogHolder.Value;");
-            Line("        private static class CatalogHolder");
-            Line("        {");
-            Line("            internal static readonly NetProtocolCatalog Value = new NetProtocolCatalog(");
-            Line("                new byte[] { " + string.Join(", ", hash.Select(value => "0x" + value.ToString("x2"))) + " },");
-            for (int i = 0; i < routes.Count; i++)
+            Line($"    internal static class {module.Name}Codecs");
+            Line("    {");
+            foreach (Schema schema in moduleSchemas)
             {
-                string name = routes[i].Name;
-                Line($"                GameNetRoutes.{name}" + (i == routes.Count - 1 ? ");" : ","));
+                string type = schema.Type.Name;
+                string fullType = CsharpType(schema.Type);
+                Line($"        internal static readonly NetMessageCodec<{fullType}> Codec{type} = new NetMessageCodec<{fullType}>(");
+                Line($"            (writer, value) => MemoryPackSerializer.Serialize(writer, value, MemoryPackSerializerOptions.Utf8),");
+                Line($"            bytes => MemoryPackSerializer.Deserialize<{fullType}>(bytes, MemoryPackSerializerOptions.Utf8)!,");
+                Line($"            value => {{ int nodes = 0; CheckObject{type}(value, false, 1, ref nodes); }},");
+                Line($"            bytes => {{ var reader = new NetWireReader(bytes); ReadObject{type}(ref reader, false, 1); reader.Complete(); }});");
+                Line();
             }
 
-            Line("        }");
-            Line();
-            foreach (Type type in enums.Values)
+            foreach (Type type in moduleEnums)
             {
                 string valid = string.Join(" || ", Enum.GetValues(type).Cast<object>().Select(Convert.ToInt32)
                     .OrderBy(value => value).Select(value => $"value == {value}"));
                 Line($"        private static bool IsEnum{type.Name}(int value) => {valid};");
-                Line($"        private static void ReadEnum{type.Name}(ref NetWireReader reader)");
+                Line($"        internal static void ReadEnum{type.Name}(ref NetWireReader reader)");
                 Line("        {");
                 Line($"            if (!IsEnum{type.Name}(reader.Int32()))");
                 Line("            {");
                 Line("                throw new NetworkProtocolException(\"Unknown enum value.\");");
                 Line("            }");
                 Line("        }");
-                Line($"        private static void CheckEnum{type.Name}({type.Name} value)");
+                Line($"        internal static void CheckEnum{type.Name}({CsharpType(type)} value)");
                 Line("        {");
                 Line($"            if (!IsEnum{type.Name}((int)value))");
                 Line("            {");
@@ -510,10 +616,10 @@ namespace GameFrame.ProtocolTools
                 Line();
             }
 
-            foreach (Schema schema in schemas.Values)
+            foreach (Schema schema in moduleSchemas)
             {
                 string type = schema.Type.Name;
-                Line($"        private static void Read{type}(ref NetWireReader reader, bool nullable, int depth)");
+                Line($"        internal static void ReadObject{type}(ref NetWireReader reader, bool nullable, int depth)");
                 Line("        {");
                 Line($"            if (!reader.Object({schema.Fields.Count}, nullable, depth))");
                 Line("            {");
@@ -537,7 +643,7 @@ namespace GameFrame.ProtocolTools
 
                 Line("        }");
                 Line();
-                Line($"        private static void Check{type}({type}? value, bool nullable, int depth, ref int nodes)");
+                Line($"        internal static void CheckObject{type}({CsharpType(schema.Type)}? value, bool nullable, int depth, ref int nodes)");
                 Line("        {");
                 Line("            if (value == null)");
                 Line("            {");
@@ -598,7 +704,7 @@ namespace GameFrame.ProtocolTools
             return code.ToString();
         }
 
-        private static string ReadValue(Field field, Type type, bool nullable)
+        private string ReadValue(Field field, Type type, bool nullable)
         {
             if (type == typeof(string))
             {
@@ -612,19 +718,35 @@ namespace GameFrame.ProtocolTools
 
             if (type.IsEnum)
             {
-                return $"ReadEnum{type.Name}(ref reader);";
+                return $"{CodecOwner(type)}.ReadEnum{type.Name}(ref reader);";
             }
 
             return PrimitiveBytes.TryGetValue(type, out int bytes) ? $"reader.Primitive({bytes});"
-                : $"Read{type.Name}(ref reader, {Bool(nullable)}, depth + 1);";
+                : $"{CodecOwner(type)}.ReadObject{type.Name}(ref reader, {Bool(nullable)}, depth + 1);";
         }
 
-        private static string? CheckValue(Field field, Type type, bool nullable, string access)
+        private string? CheckValue(Field field, Type type, bool nullable, string access)
         {
             return type == typeof(string) ? $"NetWireReader.ValidateString({access}, {field.StringUtf16}, {field.StringUtf8}, {Bool(nullable)});"
-                : type.IsEnum ? $"CheckEnum{type.Name}({access});"
-                : PrimitiveBytes.ContainsKey(type) ? null : $"Check{type.Name}({access}, {Bool(nullable)}, depth + 1, ref nodes);";
+                : type.IsEnum ? $"{CodecOwner(type)}.CheckEnum{type.Name}({access});"
+                : PrimitiveBytes.ContainsKey(type) ? null : $"{CodecOwner(type)}.CheckObject{type.Name}({access}, {Bool(nullable)}, depth + 1, ref nodes);";
         }
+
+        private string CodecOwner(Type type)
+        {
+            ProtocolModuleDefinition module = typeModules[type];
+            return "global::" + module.Namespace + "." + module.Name + "Codecs";
+        }
+
+        private static void RequireIdentifier(string name)
+        {
+            if (!SyntaxFacts.IsValidIdentifier(name) || SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None)
+            {
+                throw new InvalidOperationException($"Invalid generated C# identifier: {name}.");
+            }
+        }
+
+        private static string CsharpType(Type type) => "global::" + type.FullName;
 
         private static string Bool(bool value) => value ? "true" : "false";
 
@@ -649,9 +771,13 @@ namespace GameFrame.ProtocolTools
             [typeof(long)] = 8, [typeof(ulong)] = 8, [typeof(double)] = 8
         };
 
-        private sealed record Schema(Type Type, List<Field> Fields);
-        private sealed record Route(string Name, uint Opcode, string Kind, NetDelivery Delivery, Schema Request,
-            Schema? Response, int MaxBody, int ResponseMaxBody);
+        private readonly record struct EncodingBounds(long Length, long Capacity);
+        private sealed record Schema(Type Type, List<Field> Fields)
+        {
+            public EncodingBounds Bounds { get; set; }
+        }
+        private sealed record Route(ProtocolModuleDefinition Module, string Name, string MemberName, string Source,
+            uint Opcode, string Kind, NetDelivery Delivery, Schema Request, Schema? Response, int MaxBody, int ResponseMaxBody);
 
         private sealed class Field
         {

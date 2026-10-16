@@ -9,6 +9,25 @@ namespace GameFrame.ProtocolTools
     {
         public static byte[] Serialize<T>(object value) => MemoryPackSerializer.Serialize((T)value, MemoryPackSerializerOptions.Utf8);
 
+        internal static IEnumerable<string> StringBoundaries(int maxUtf16, int maxUtf8)
+        {
+            yield return string.Empty;
+            foreach (string unit in new[] { "a", "é", "界", "😀" })
+            {
+                int count = Math.Min(maxUtf16 / unit.Length, maxUtf8 / System.Text.Encoding.UTF8.GetByteCount(unit));
+                for (int length = 1; length <= count; length++)
+                {
+                    yield return string.Concat(Enumerable.Repeat(unit, length));
+                }
+            }
+
+            // Saturate both constraints using 3/2/1-byte BMP characters; one CJK-only
+            // maximum sample cannot cover ASCII-limited strings or a byte remainder.
+            int bytes = Math.Min(maxUtf8, checked(maxUtf16 * 3));
+            int triples = bytes / 3;
+            yield return new string('界', triples) + (bytes % 3 == 2 ? "é" : bytes % 3 == 1 ? "a" : "");
+        }
+
         public static object Create(Type type, string mode)
         {
             object value = Activator.CreateInstance(type)!;

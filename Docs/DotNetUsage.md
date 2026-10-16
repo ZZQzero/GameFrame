@@ -202,7 +202,7 @@ WSS 的 ReceiveQueueBytes 最小为 33,824 字节：最大帧 32,768 + 初始帧
 
 ```csharp
 var application = new ServerApplication(GameNetProtocol.Catalog);
-application.Rpc(GameNetRoutes.Echo, async (connection, request, cancellation) =>
+application.Rpc(DiagnosticsRoutes.Echo, async (connection, request, cancellation) =>
 {
     await Task.Delay((int)request.DelayMs, cancellation);
     return new EchoResponse { Text = request.Text };
@@ -214,7 +214,7 @@ application.Rpc(GameNetRoutes.Echo, async (connection, request, cancellation) =>
 ServerSession 派生类保存每连接应用状态，通过构造 ServerApplication 的 factory 创建。钩子线程、初始化阶段、权限复查、关闭重入约束见 [开发规范连接章节](DotNetDevelopment.md#3-启动连接与关闭)。context 提供 Id/Generation/GrantId/Transport/RemoteEndpoint/Cancellation/Completion，不向业务交付 native handle 或 OwnedFrame。
 
 ```csharp
-await context.PushAsync(GameNetRoutes.GomokuRoomSnapshot, snapshot);
+await context.PushAsync(GomokuRoutes.GomokuRoomSnapshot, snapshot);
 context.RequestClose(2);
 ```
 
@@ -263,11 +263,34 @@ var application = new LobbyApplication(login).Application;
 (cd DotNet && dotnet build DotNet.sln)
 ```
 
-正式 C#只生成 GameNetMessages.cs/GameNetProtocol.cs 到 `Unity/Assets/Scripts/Hotfix/Network/Generated`，.NET Game.Protocol 链接同一源码。默认 generate/check 只处理这两个文件；--artifacts 额外处理 `Protocol/Generated/protocol.manifest.json`、protocol.sha256、golden-vectors.json，仅开发/CI 使用，不进入 Unity 资产、正式资源或运行时。
+正式 C# 按业务目录生成 CommonMessages.g.cs、SessionMessages.g.cs、GomokuMessages.g.cs、DiagnosticsMessages.g.cs，并以 GameNetProtocol.cs 汇总 catalog/指纹，输出到 `Unity/Assets/Scripts/Hotfix/Network/Generated`；.NET Game.Protocol 通过既有通配引用编译同源源码。默认 generate/check 处理当前全部五个正式文件；--artifacts 额外处理 `Protocol/Generated/protocol.manifest.json`、protocol.sha256、golden-vectors.json，仅开发/CI 使用，不进入 Unity 资产、正式资源或运行时。
 
 Unity 菜单 `Tools/GameFrame/Network/Generate Messages`、`Check Messages` 从 `DotNet/` 工作目录调用同一个生成器，均包含 `--artifacts`；环境与使用步骤见 [客户端协议维护](ClientNetworkUsage.md#7-协议与依赖维护)。生成器和 Roslyn 等依赖由外部 .NET 进程加载，不安装进 Unity Assets 或 Player。测试工程仍在 `Tools/NetworkProtocol.Tests`，CI 从新工程路径执行只读检查。
 
-check 不写文件，缺失、字节差异、多余 C#返回非零。generate 不覆盖字节相同文件，也不自动删除多余 C#，移除过时 Unity 资产须同时处理.meta 并保留有效 GUID。生成 C#/辅助文件/NuGet 锁纳入版本库；CI 只 check，不自动 generate 掩盖漏生成。
+类型/枚举与模块路由分别使用 `Game.Protocol.Common`、`Game.Protocol.Session`、`Game.Protocol.Gomoku`、`Game.Protocol.Diagnostics`；路由为 SessionRoutes/GomokuRoutes/DiagnosticsRoutes，统一入口保持 Game.Protocol.GameNetProtocol。调用时导入实际使用的模块命名空间，不保留 GameNetRoutes 兼容层。
+
+check 不写文件，缺失、字节差异、生成目录及其子目录内多余 C#返回非零。generate 不覆盖字节相同文件，也不自动删除多余 C#，移除过时 Unity 资产须同时处理.meta 并保留有效 GUID。生成 C#/辅助文件/NuGet 锁纳入版本库；CI 只 check，不自动 generate 掩盖漏生成。
+
+2026-10-16 文件拆分验收：Release `NetworkProtocol.Tests` 176/176 通过、0 跳过，覆盖模块归属、跨模块引用、循环依赖、纯数据模块、无关产物字节/时间戳稳定及过时文件只读检查；`DotNet.sln` 七个工程编译 0 警告/0 错误，GomokuRoomTests、WssLifecycleTests、AccountLifecycleTests 合计 35/35 通过、0 跳过。`check --artifacts` 核验八个文件通过；manifest/hash/golden vectors 与拆分前逐字节一致，Game.Protocol 公开 API 对比 267 项一致。Unity 编译与回归证据见[客户端协议维护](ClientNetworkUsage.md#7-协议与依赖维护)。本次只验收设计第 23 节阶段 1，不表示后续命名、消息结构或预算方案已完成。
+
+2026-10-16 模块命名与路由迁移验收（阶段 2）：Release `NetworkProtocol.Tests` 183/183、服务端 GomokuRoomTests/WssLifecycleTests/AccountLifecycleTests 35/35，均 0 跳过；`DotNet.sln` Release 编译 0 警告/0 错误，`check --artifacts` 八个文件通过。新增实际生成程序集用例覆盖跨模块同名 DTO/枚举/路由、路由与 catalog 两种首次访问顺序、跨模块深度/节点累计；同模块路由成员冲突包含双方完整标识和源文件。过时 C# 检查扩展到子目录，仍只读、不自动删除。42 条黄金向量按类型名映射后编码字节全部一致；manifest 的完整类型名、完整 Proto 路由标识及相应排序变化，使 hash 从 `117aaab69976c151f23fafc46ffb73a79e08ed26a9240bc18589df292c33fa06` 更新为 `5f5e26635a17c672c4362711816dc8826ec2d14d22024ab56c4416930bf45580`。字段、opcode、枚举值与显式预算未变，双端必须同步发布，不兼容旧 hash。Unity 与 Player 证据见客户端协议维护。
+
+2026-10-16 五子棋专用请求验收（阶段 3）：七种请求已贯通 Proto、服务端与 Unity，会话业务 API、14 条路由的 opcode/名称及显式预算保持。Release `DotNet.sln` 编译 0 警告/0 错误；协议测试 198/198（增加项主要来自黄金向量）、房间/账号/WSS 生命周期组最终 36/36，均 0 跳过。WSS in-memory 组 28 项通过，覆盖六操作的有效字段映射、完整对局与取消后显式查询；该批过滤额外命中一个 PostgreSQL fixture 用例，因未配置数据库环境跳过，不能计作数据库验证。真实临时 PostgreSQL/WSS 的双人业务验证由 Unity PlayMode 和专用 Player 完成，见客户端说明。新增回执用例验证同操作的无关字段不改变身份、有效字段或操作改变则拒绝、Leave 忽略版本且容量释放。`check --artifacts` 八文件一致；向量由 42 条变为 57 条（删除旧两种请求的 6 条，新增七种请求的 21 条），36 条共同键的正文逐字节不变，Common/Session/Diagnostics 正式源码字节未变。指纹更新为 `8b03bf9272d287ac253f428f8ed0ff79924cd194f81722594cd035d2b01adde3`，双方必须同步生成、编译与发布，无旧请求或旧指纹兼容。该次验收范围为阶段 3；阶段 4、5 的后续实施与验证见下文。
+
+2026-10-16 自动正文预算与 route 选项验收（阶段 4、5）：正式 service 统一使用 `option (game.net.route) = { opcode: ... kind: ... delivery: ... };`，删除独立路由选项与手写正文预算，不兼容旧写法。生成器从真实 MemoryPack Object/Explicit 布局推导编码长度和连续写入容量上界，含字符串预申请空间、数组/嵌套、可空分支，checked 溢出与通道越界在写产物前失败。类型边界覆盖零长度、ASCII/二字节/中文/代理对各合法重复长度、混合字节余数、null/空数组、最大数组、跨模块对象及可靠/不可靠正文 32736/1118 的边界与边界+1；使用真实 FrameMemoryBudget/BoundedFrameWriter 验证编码、解码与释放。复合选项缺失/重复/未知字段、非法值、旧选项、RPC 不可靠及 Push 响应类型错误均明确失败；字段重排/注释不改变输出。
+
+Release `NetworkProtocol.Tests` 227/227，强化后的共享 NetworkMemoryPackTests 71/71 另行复验；服务端 GomokuRoomTests/WssLifecycleTests/AccountLifecycleTests/WssServerTests 合计 92/92，均 0 跳过，WSS 同时覆盖内存仓库与独立临时 PostgreSQL schema。DotNet.sln Release 编译 0 警告/0 错误，check 八文件一致，重复 generate 的内容与时间戳不变。57 条 golden vectors 与阶段 3 逐字节一致，manifest 仅路由预算变化，类型/枚举/路由标识/opcode 保持。新 hash 为 `d3fd187267c9a26b59f1554fbc92ba6f48812c2e94643cff2456c2aa08be9d2b`，双端需同步发布。
+
+| 当前生成预算 | 请求 / 响应正文上限（字节） |
+| --- | --- |
+| Login / Register | 596 / 101、596 / 5 |
+| ResumeLogin / Logout | 57 / 101、1 / 5 |
+| Echo | 397 / 396 |
+| Create / Join / Query 五子棋 | 9 / 3094、44 / 3094、9 / 3094 |
+| Ready / Start / Move / Leave 五子棋 | 各 116 / 3094 |
+| 五子棋两条快照 Push | 各 3080 |
+
+这些数值是当前字段和 writer 行为推导的保守预算，不作为吞吐/GC/生产容量提升证据。未新增运行时分配层、注册框架或订阅容器；现有显式注册和业务订阅所有权足够清楚。Unity 与 Player 脚本证据见客户端协议维护；本轮未重跑原生 IL2CPP、KCP/native、正式发布、包后热更或其他平台。
 
 <a id="原生构建与部署"></a>
 

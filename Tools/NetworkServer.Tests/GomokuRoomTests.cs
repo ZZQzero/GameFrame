@@ -1,5 +1,6 @@
 using System.Net;
 using Game.Protocol;
+using Game.Protocol.Gomoku;
 using Game.Server.Gomoku;
 using Game.Server.Login;
 using GameFrame.Network;
@@ -49,14 +50,37 @@ namespace GameFrame.Tests
             GomokuSnapshot? snapshot = null, string code = "", bool ready = false, int column = 0, int row = 0)
         {
             var peer = players[player];
-            return rooms.Execute(peer.Binding, peer.Connection, operation, new GomokuCommand
-            {
-                CommandId = id, RoomId = snapshot?.RoomId ?? "", ExpectedVersion = snapshot?.Version ?? 0,
-                RoomCode = code, Ready = ready, Column = column, Row = row
-            });
+            return rooms.Execute(peer.Binding, peer.Connection, operation, new GomokuRoomCommand(
+                id, snapshot?.RoomId ?? "", snapshot?.Version ?? 0, code, ready, column, row));
         }
 
         private GomokuSnapshot Current(int player) => rooms.Query(players[player].Binding, players[player].Connection, 0).Snapshot!;
+
+        [Test]
+        public void ReceiptIdentityUsesOnlyTheOperationsEffectiveFields()
+        {
+            Player();
+            GomokuResponse created = Command(0, GomokuOperation.Create, 1);
+            GomokuResponse repeated = Command(0, GomokuOperation.Create, 1,
+                created.Snapshot, code: "87654321", ready: true, column: 9, row: 8);
+            Assert.That(repeated.Result, Is.EqualTo(GomokuResult.Ok));
+            Assert.That(repeated.Snapshot!.Version, Is.EqualTo(created.Snapshot!.Version));
+            Assert.That(Command(0, GomokuOperation.Join, 1, code: created.Snapshot.RoomCode).Result,
+                Is.EqualTo(GomokuResult.InvalidCommand));
+
+            GomokuSnapshot baseline = Current(0);
+            Assert.That(Command(0, GomokuOperation.Ready, 2, baseline, ready: true).Result, Is.EqualTo(GomokuResult.Ok));
+            Assert.That(Command(0, GomokuOperation.Ready, 2, baseline, ready: false).Result,
+                Is.EqualTo(GomokuResult.InvalidCommand));
+            Assert.That(Command(0, GomokuOperation.Ready, 2, baseline, ready: true, column: 4, row: 5).Result,
+                Is.EqualTo(GomokuResult.Ok));
+
+            Assert.That(Command(0, GomokuOperation.Leave, 3, baseline).Result, Is.EqualTo(GomokuResult.Ok));
+            baseline.Version = ulong.MaxValue;
+            Assert.That(Command(0, GomokuOperation.Leave, 3, baseline).Result, Is.EqualTo(GomokuResult.Ok));
+            Assert.That(rooms.Query(players[0].Binding, players[0].Connection, 3).CommandKnown, Is.True);
+            Assert.That(rooms.RoomCount, Is.Zero);
+        }
 
         [Test]
         public async Task LastSeatHasOneWinnerAndAccountCannotOccupyTwoRooms()
@@ -229,12 +253,12 @@ namespace GameFrame.Tests
                 Members = new[] { new GomokuMember(), new GomokuMember() },
                 Moves = Enumerable.Range(0, 225).Select(i => new GomokuMoveData { Column = i % 15, Row = i / 15, Stone = 1 }).ToArray()
             };
-            using var frame = memory.Allocate(32 + GameNetRoutes.GomokuRoomSnapshot.MaxBodyBytes);
+            using var frame = memory.Allocate(32 + GomokuRoutes.GomokuRoomSnapshot.MaxBodyBytes);
             var writer = new BoundedFrameWriter(frame);
-            GameNetRoutes.GomokuRoomSnapshot.Codec.Encode(writer, snapshot);
-            writer.Complete(FrameKind.Push, GameNetRoutes.GomokuRoomSnapshot.Opcode, 0);
-            Assert.That(frame.Length - 32, Is.LessThanOrEqualTo(4096));
-            Assert.That(GameNetRoutes.GomokuRoomSnapshot.Codec.Decode(frame.Body).Moves.Length, Is.EqualTo(225));
+            GomokuRoutes.GomokuRoomSnapshot.Codec.Encode(writer, snapshot);
+            writer.Complete(FrameKind.Push, GomokuRoutes.GomokuRoomSnapshot.Opcode, 0);
+            Assert.That(frame.Length - 32, Is.LessThanOrEqualTo(GomokuRoutes.GomokuRoomSnapshot.MaxBodyBytes));
+            Assert.That(GomokuRoutes.GomokuRoomSnapshot.Codec.Decode(frame.Body).Moves.Length, Is.EqualTo(225));
         }
     }
 }

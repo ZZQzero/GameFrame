@@ -4,6 +4,8 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using Game.Protocol;
+using Game.Protocol.Diagnostics;
+using Game.Protocol.Gomoku;
 using GameFrame.Network;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -69,7 +71,7 @@ namespace GameFrame.Tests
             {
                 Column = i % 15, Row = i / 15, Stone = i % 2 + 1
             }).ToArray();
-            application.Rpc(GameNetRoutes.Echo, async (connection, request, cancellation) =>
+            application.Rpc(DiagnosticsRoutes.Echo, async (connection, request, cancellation) =>
             {
                 Interlocked.Increment(ref calls);
                 if (request.DelayMs != 0)
@@ -78,7 +80,7 @@ namespace GameFrame.Tests
                 }
                 if (settings.Push)
                 {
-                    await connection.PushAsync(GameNetRoutes.GomokuRoomSnapshot, new GomokuSnapshot
+                    await connection.PushAsync(GomokuRoutes.GomokuRoomSnapshot, new GomokuSnapshot
                     {
                         Version = ++((Session)connection.Session).Sequence, Moves = moves
                     });
@@ -88,7 +90,7 @@ namespace GameFrame.Tests
             });
             foreach (NetRoute route in GameNetProtocol.Catalog.Routes)
             {
-                if (route.Kind != NetRouteKind.Push && route != GameNetRoutes.Echo)
+                if (route.Kind != NetRouteKind.Push && route != DiagnosticsRoutes.Echo)
                 {
                     application.Reject(route);
                 }

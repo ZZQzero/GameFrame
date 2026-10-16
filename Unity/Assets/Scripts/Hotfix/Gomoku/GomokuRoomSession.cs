@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
-using Game.Protocol;
+using Game.Protocol.Gomoku;
 using GameFrame.Network;
 
 namespace Game.Hotfix
@@ -51,10 +51,10 @@ namespace Game.Hotfix
             if (snapshots == null)
             {
                 NetworkClient client = login.LobbyClient;
-                snapshots = client.Subscribe(GameNetRoutes.GomokuRoomSnapshot, OnSnapshot);
+                snapshots = client.Subscribe(GomokuRoutes.GomokuRoomSnapshot, OnSnapshot);
                 try
                 {
-                    closed = client.Subscribe(GameNetRoutes.GomokuRoomClosed, OnSnapshot);
+                    closed = client.Subscribe(GomokuRoutes.GomokuRoomClosed, OnSnapshot);
                 }
                 catch
                 {
@@ -66,7 +66,7 @@ namespace Game.Hotfix
         }
 
         public UniTask<GomokuResult> CreateAsync(CancellationToken token = default) =>
-            CommandAsync(GameNetRoutes.CreateGomokuRoom, new GomokuCommand(), true, token);
+            CommandAsync(GomokuRoutes.CreateGomokuRoom, id => new CreateRoomRequest { CommandId = id }, true, token);
         public UniTask<GomokuResult> JoinAsync(string code, CancellationToken token = default)
         {
             if (code == null || code.Length != 8)
@@ -82,25 +82,45 @@ namespace Game.Hotfix
                 }
             }
 
-            return CommandAsync(GameNetRoutes.JoinGomokuRoom, new GomokuCommand { RoomCode = code }, true, token);
+            return CommandAsync(GomokuRoutes.JoinGomokuRoom,
+                id => new JoinRoomRequest { CommandId = id, RoomCode = code }, true, token);
         }
 
-        public UniTask<GomokuResult> ReadyAsync(bool ready, CancellationToken token = default) =>
-            CommandAsync(GameNetRoutes.SetGomokuReady, RoomCommand(ready), false, token);
-        public UniTask<GomokuResult> StartAsync(CancellationToken token = default) =>
-            CommandAsync(GameNetRoutes.StartGomokuGame, RoomCommand(), false, token);
+        public UniTask<GomokuResult> ReadyAsync(bool ready, CancellationToken token = default)
+        {
+            GomokuRoomView room = RequireRoom();
+            return CommandAsync(GomokuRoutes.SetGomokuReady, id => new SetReadyRequest
+            {
+                CommandId = id, RoomId = room.RoomId, ExpectedVersion = room.Version, Ready = ready
+            }, false, token);
+        }
+
+        public UniTask<GomokuResult> StartAsync(CancellationToken token = default)
+        {
+            GomokuRoomView room = RequireRoom();
+            return CommandAsync(GomokuRoutes.StartGomokuGame, id => new StartGameRequest
+            {
+                CommandId = id, RoomId = room.RoomId, ExpectedVersion = room.Version
+            }, false, token);
+        }
+
         public UniTask<GomokuResult> MoveAsync(int column, int row, CancellationToken token = default)
         {
-            GomokuCommand command = RoomCommand();
-            command.Column = column;
-            command.Row = row;
-            return CommandAsync(GameNetRoutes.PlaceGomokuMove, command, false, token);
+            GomokuRoomView room = RequireRoom();
+            return CommandAsync(GomokuRoutes.PlaceGomokuMove, id => new PlaceMoveRequest
+            {
+                CommandId = id, RoomId = room.RoomId, ExpectedVersion = room.Version, Column = column, Row = row
+            }, false, token);
         }
 
-        public UniTask<GomokuResult> LeaveAsync(CancellationToken token = default) =>
-            CommandAsync(GameNetRoutes.LeaveGomokuRoom, RoomCommand(), false, token);
+        public UniTask<GomokuResult> LeaveAsync(CancellationToken token = default)
+        {
+            GomokuRoomView room = RequireRoom();
+            return CommandAsync(GomokuRoutes.LeaveGomokuRoom,
+                id => new LeaveRoomRequest { CommandId = id, RoomId = room.RoomId }, false, token);
+        }
 
-        GomokuCommand RoomCommand(bool ready = false)
+        GomokuRoomView RequireRoom()
         {
             RequireMainThread();
             if (Snapshot == null)
@@ -108,11 +128,11 @@ namespace Game.Hotfix
                 throw new InvalidOperationException("当前未加入房间。");
             }
 
-            return new GomokuCommand { RoomId = Snapshot.RoomId, ExpectedVersion = Snapshot.Version, Ready = ready };
+            return Snapshot;
         }
 
-        async UniTask<GomokuResult> CommandAsync(NetRpc<GomokuCommand, GomokuResponse> route,
-            GomokuCommand command, bool entering, CancellationToken token)
+        async UniTask<GomokuResult> CommandAsync<TRequest>(NetRpc<TRequest, GomokuResponse> route,
+            Func<ulong, TRequest> createRequest, bool entering, CancellationToken token) where TRequest : class
         {
             Activate();
             if (NeedsQuery)
@@ -127,13 +147,15 @@ namespace Game.Hotfix
             }
 
             token.ThrowIfCancellationRequested();
-            command.CommandId = checked(++nextCommand);
+            ulong commandId = checked(nextCommand + 1);
+            TRequest command = createRequest(commandId);
             TaskCompletionSource<bool> completed = BeginOperation();
-            uncertainCommand = command.CommandId;
+            nextCommand = commandId;
+            uncertainCommand = commandId;
             Notice = string.Empty;
             if (entering)
             {
-                BeginBaseline(command.CommandId);
+                BeginBaseline(commandId);
             }
 
             try
@@ -146,13 +168,13 @@ namespace Game.Hotfix
                     return response.Result;
                 }
 
-                if (response.CommandId != command.CommandId)
+                if (response.CommandId != commandId)
                 {
                     throw new NetworkProtocolException("房间响应命令标识不匹配。");
                 }
 
                 if (entering && response.Result == GomokuResult.Ok &&
-                    (response.Snapshot == null || response.Snapshot.AdmissionCommandId != command.CommandId))
+                    (response.Snapshot == null || response.Snapshot.AdmissionCommandId != commandId))
                 {
                     throw new NetworkProtocolException("入房响应未提供匹配的成员基线。");
                 }
@@ -168,7 +190,7 @@ namespace Game.Hotfix
                         Apply(response.Snapshot, user, baseline: false);
                     }
                 }
-                else if (route == GameNetRoutes.LeaveGomokuRoom && response.Result == GomokuResult.Ok)
+                else if (ReferenceEquals(route, GomokuRoutes.LeaveGomokuRoom) && response.Result == GomokuResult.Ok)
                 {
                     ClearRoom("已退出房间");
                 }
@@ -211,8 +233,8 @@ namespace Game.Hotfix
             {
                 Changed?.Invoke();
                 using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
-                GomokuResponse response = await login.LobbyClient.RequestAsync(GameNetRoutes.QueryMyGomokuRoom,
-                    new GomokuQuery { CommandId = uncertainCommand }, TimeSpan.FromSeconds(5), cancellation.Token);
+                GomokuResponse response = await login.LobbyClient.RequestAsync(GomokuRoutes.QueryMyGomokuRoom,
+                    new QueryRoomRequest { CommandId = uncertainCommand }, TimeSpan.FromSeconds(5), cancellation.Token);
                 if (!ReferenceEquals(user, login.CurrentUser) || disposal != null)
                 {
                     return;

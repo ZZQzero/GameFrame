@@ -13,12 +13,18 @@ namespace GameFrame.ProtocolToolTests
         [Test]
         public void GenerationIsDeterministicAcrossTypeInputOrder()
         {
-            Type[] types = typeof(Game.Protocol.LoginRequest).Assembly.GetTypes()
-                .Where(type => type.Namespace == "Game.Protocol" &&
-                    (type.IsEnum || Attribute.IsDefined(type, typeof(MemoryPackableAttribute)))).ToArray();
+            var modules = typeof(Game.Protocol.Session.LoginRequest).Assembly.GetTypes()
+                .Where(type => type.Namespace != null && type.Namespace.StartsWith("Game.Protocol.", StringComparison.Ordinal) &&
+                    (type.IsEnum || Attribute.IsDefined(type, typeof(MemoryPackableAttribute))))
+                .GroupBy(type => type.Namespace!)
+                .Select(group => new ProtocolModuleDefinition(group.Key.Split('.').Last(), group.Key,
+                    group.ToArray(), group.Key == "Game.Protocol.Session" ? Routes() : Array.Empty<ProtocolRouteDefinition>())).ToArray();
             var generator = new MemoryPackProtocolGenerator();
-            var first = generator.Generate(types, Routes(), includeArtifacts: true);
-            var second = generator.Generate(types.Reverse(), Routes().Reverse(), includeArtifacts: true);
+            var first = generator.Generate(modules, includeArtifacts: true);
+            var second = generator.Generate(modules.Reverse().Select(module => module with
+            {
+                Types = module.Types.Reverse().ToArray(), Routes = module.Routes.Reverse().ToArray()
+            }), includeArtifacts: true);
             foreach (var item in first)
             {
                 CollectionAssert.AreEqual(item.Value, second[item.Key]);
@@ -31,35 +37,40 @@ namespace GameFrame.ProtocolToolTests
         [TestCase(typeof(RecursiveRequest), "Recursive DTO")]
         public void InvalidSchemasFailWithExplicitReason(Type type, string reason)
         {
-            var exception = Assert.Throws<InvalidOperationException>(() => new MemoryPackProtocolGenerator().Generate(new[] { type }, new[] { Route(type) }));
+            var exception = Assert.Throws<InvalidOperationException>(() => new MemoryPackProtocolGenerator().Generate(new[] { Module(new[] { type, typeof(ValidResponse) }, new[] { Route(type) }) }));
             StringAssert.Contains(reason, exception!.Message);
         }
 
         [Test]
         public void DuplicateOpcodesAreRejected()
         {
-            Assert.Throws<InvalidOperationException>(() => new MemoryPackProtocolGenerator().Generate(new[] { typeof(ValidRequest), typeof(DuplicateRequest) }, new[] { Route(typeof(ValidRequest)), Route(typeof(DuplicateRequest)) }));
+            Assert.Throws<InvalidOperationException>(() => new MemoryPackProtocolGenerator().Generate(new[] { Module(new[] { typeof(ValidRequest), typeof(DuplicateRequest), typeof(ValidResponse) }, new[] { Route(typeof(ValidRequest)), Route(typeof(DuplicateRequest)) }) }));
         }
 
         [Test]
         public void ValidSchemaGeneratesManifestAndCode()
         {
-            var outputs = new MemoryPackProtocolGenerator().Generate(new[] { typeof(ValidRequest) }, new[] { Route(typeof(ValidRequest)) });
-            Assert.AreEqual(1, outputs.Count);
+            var outputs = new MemoryPackProtocolGenerator().Generate(new[] { Module(new[] { typeof(ValidRequest), typeof(ValidResponse) }, new[] { Route(typeof(ValidRequest)) }) });
+            Assert.AreEqual(2, outputs.Count);
+        }
+
+        private static ProtocolModuleDefinition Module(Type[] types, ProtocolRouteDefinition[] routes)
+        {
+            return new ProtocolModuleDefinition("Test", "GameFrame.ProtocolToolTests", types, routes);
         }
 
         private static ProtocolRouteDefinition Route(Type request)
         {
-            return new ProtocolRouteDefinition(request.Name, 3000, "Rpc", NetDelivery.Reliable,
-                request, typeof(ValidResponse), 64, 64);
+            return new ProtocolRouteDefinition("test.Service." + request.Name, request.Name, "fixture", 3000, "Rpc", NetDelivery.Reliable,
+                request, typeof(ValidResponse));
         }
 
         private static ProtocolRouteDefinition[] Routes()
         {
             return new[]
             {
-                new ProtocolRouteDefinition("Login", 1000, "Rpc", NetDelivery.Reliable,
-                    typeof(Game.Protocol.LoginRequest), typeof(Game.Protocol.LoginResponse), 2048, 256)
+                new ProtocolRouteDefinition("game.protocol.session.SessionService.Login", "Login", "fixture", 1000, "Rpc", NetDelivery.Reliable,
+                    typeof(Game.Protocol.Session.LoginRequest), typeof(Game.Protocol.Session.LoginResponse))
             };
         }
 

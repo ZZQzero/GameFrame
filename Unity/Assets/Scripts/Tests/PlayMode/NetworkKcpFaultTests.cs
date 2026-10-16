@@ -10,6 +10,8 @@ using System.Threading.Tasks;
 using System.Xml;
 using Cysharp.Threading.Tasks;
 using Game.Protocol;
+using Game.Protocol.Diagnostics;
+using Game.Protocol.Gomoku;
 using GameFrame.Network;
 using NUnit.Framework;
 using UnityEngine;
@@ -176,7 +178,7 @@ namespace GameFrame.Tests
                 while (true)
                 {
                     cancellation.ThrowIfCancellationRequested();
-                    EchoResponse echo = await control.RequestAsync(GameNetRoutes.Echo, new EchoRequest { Text = "control" },
+                    EchoResponse echo = await control.RequestAsync(DiagnosticsRoutes.Echo, new EchoRequest { Text = "control" },
                         TimeSpan.FromSeconds(3), cancellation);
                     Assert.AreEqual("control", echo.Text);
                     Assert.IsTrue(PlayerLoopHelper.IsMainThread);
@@ -276,7 +278,7 @@ namespace GameFrame.Tests
 
         private Task<EchoResponse> Echo(NetworkClient client, string text, int seconds = 3, CancellationToken cancellation = default)
         {
-            Task<EchoResponse> request = client.RequestAsync(GameNetRoutes.Echo, new EchoRequest { Text = text },
+            Task<EchoResponse> request = client.RequestAsync(DiagnosticsRoutes.Echo, new EchoRequest { Text = text },
                 TimeSpan.FromSeconds(seconds), cancellation).AsTask();
             operations.Add(request);
             return request;
@@ -544,7 +546,7 @@ namespace GameFrame.Tests
 
             Task<EchoResponse> nested = null;
             bool insidePump = false;
-            using (client.Subscribe(GameNetRoutes.GomokuRoomSnapshot, _ =>
+            using (client.Subscribe(GomokuRoutes.GomokuRoomSnapshot, _ =>
             {
                 NetworkRuntimeMetricsSnapshot before = runtime.GetMetrics();
                 nested = Echo(client, "from-push");
@@ -571,7 +573,7 @@ namespace GameFrame.Tests
             Assert.GreaterOrEqual(metrics.Pump.MaximumMilliseconds, metrics.PushHandlers.MaximumMilliseconds);
             Assert.Greater(metrics.Dispatch.Count, 0);
 
-            subscriptions.Add(client.Subscribe(GameNetRoutes.GomokuRoomSnapshot, _ => throw new InvalidOperationException("Injected Push failure.")));
+            subscriptions.Add(client.Subscribe(GomokuRoutes.GomokuRoomSnapshot, _ => throw new InvalidOperationException("Injected Push failure.")));
             await CommandAsync("push");
             await WaitAsync(() => client.State == NetworkClientState.Faulted);
             Assert.AreEqual(1, runtime.GetMetrics().PushHandlerFailures);

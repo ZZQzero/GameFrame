@@ -4,6 +4,10 @@ using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Game.Protocol;
+using Game.Protocol.Common;
+using Game.Protocol.Diagnostics;
+using Game.Protocol.Gomoku;
+using Game.Protocol.Session;
 using GameFrame.Network;
 using Game.Server;
 using Game.Server.Login;
@@ -201,7 +205,7 @@ namespace GameFrame.Tests
             return route.ResponseCodec.Decode(frame.Body);
         }
 
-        private Task<LoginResponse> Login(ClientWebSocket socket) => Rpc(socket, GameNetRoutes.Login,
+        private Task<LoginResponse> Login(ClientWebSocket socket) => Rpc(socket, SessionRoutes.Login,
             new LoginRequest { Account = "local-test", Password = "local-secret" });
 
         private async Task AssertClose(ClientWebSocket socket, ushort reason)
@@ -219,13 +223,13 @@ namespace GameFrame.Tests
         {
             using ClientWebSocket socket = await Connect();
             await Hello(socket);
-            LoginResponse login = await Rpc(socket, GameNetRoutes.Login,
+            LoginResponse login = await Rpc(socket, SessionRoutes.Login,
                 new LoginRequest { Account = "one-click", Password = "new-password" });
             Assert.That(login.ResultCode, Is.EqualTo(ResultCode.Success));
             Assert.That(login.AccountId, Is.GreaterThan(1));
             Assert.That(login.AccountSessionId.Length, Is.EqualTo(16));
             Assert.That(login.ResumeToken.Length, Is.EqualTo(32));
-            Assert.That((await Rpc(socket, GameNetRoutes.Echo, new EchoRequest { Text = "authenticated" })).Text,
+            Assert.That((await Rpc(socket, DiagnosticsRoutes.Echo, new EchoRequest { Text = "authenticated" })).Text,
                 Is.EqualTo("authenticated"));
             LoginHandlers.ClearResponse(login);
         }
@@ -235,17 +239,17 @@ namespace GameFrame.Tests
         {
             using ClientWebSocket socket = await Connect();
             await Hello(socket);
-            OperationResponse registered = await Rpc(socket, GameNetRoutes.Register,
+            OperationResponse registered = await Rpc(socket, SessionRoutes.Register,
                 new RegisterRequest { Account = "new-player", Password = "new-password" });
             Assert.That(registered.ResultCode, Is.EqualTo(ResultCode.Success));
-            OperationResponse duplicate = await Rpc(socket, GameNetRoutes.Register,
+            OperationResponse duplicate = await Rpc(socket, SessionRoutes.Register,
                 new RegisterRequest { Account = "new-player", Password = "different-password" });
             Assert.That(duplicate.ResultCode, Is.EqualTo(ResultCode.AccountAlreadyExists));
-            LoginResponse login = await Rpc(socket, GameNetRoutes.Login,
+            LoginResponse login = await Rpc(socket, SessionRoutes.Login,
                 new LoginRequest { Account = "new-player", Password = "new-password" });
             Assert.That(login.ResultCode, Is.EqualTo(ResultCode.Success));
             Assert.That(login.AccountId, Is.GreaterThan(1));
-            Assert.That((await Rpc(socket, GameNetRoutes.Echo, new EchoRequest { Text = "registered" })).Text, Is.EqualTo("registered"));
+            Assert.That((await Rpc(socket, DiagnosticsRoutes.Echo, new EchoRequest { Text = "registered" })).Text, Is.EqualTo("registered"));
         }
 
         [Test]
@@ -253,9 +257,9 @@ namespace GameFrame.Tests
         {
             using ClientWebSocket socket = await Connect();
             await Hello(socket);
-            Assert.That((await Rpc(socket, GameNetRoutes.Register,
+            Assert.That((await Rpc(socket, SessionRoutes.Register,
                 new RegisterRequest { Account = "unbound", Password = "new-password" })).ResultCode, Is.EqualTo(ResultCode.Success));
-            await Send(socket, GameNetRoutes.Echo, new EchoRequest());
+            await Send(socket, DiagnosticsRoutes.Echo, new EchoRequest());
             using OwnedFrame denied = (await Receive(socket))!;
             Assert.That(denied.Header.StatusCode, Is.EqualTo(2));
         }
@@ -271,16 +275,16 @@ namespace GameFrame.Tests
             Assert.That(login.ResumeToken.Length, Is.EqualTo(32));
             Assert.That(login.AuthEpoch, Is.GreaterThan(0));
             Assert.That(login.AccountRemainingTtlMs, Is.InRange(1, 86400000));
-            EchoResponse echo = await Rpc(socket, GameNetRoutes.Echo, new EchoRequest { Text = "你好 WSS" });
+            EchoResponse echo = await Rpc(socket, DiagnosticsRoutes.Echo, new EchoRequest { Text = "你好 WSS" });
             Assert.That(echo.Text, Is.EqualTo("你好 WSS"));
-            OperationResponse logout = await Rpc(socket, GameNetRoutes.Logout, new LogoutRequest());
+            OperationResponse logout = await Rpc(socket, SessionRoutes.Logout, new LogoutRequest());
             Assert.That(logout.ResultCode, Is.EqualTo(ResultCode.Success));
             using OwnedFrame close = (await Receive(socket))!;
             Assert.That(close.Header.Opcode, Is.EqualTo(6));
             Assert.That(ControlCodec.ReadClose(close.Body), Is.EqualTo(1));
             using ClientWebSocket resume = await Connect();
             await Hello(resume);
-            LoginResponse refused = await Rpc(resume, GameNetRoutes.ResumeLogin,
+            LoginResponse refused = await Rpc(resume, SessionRoutes.ResumeLogin,
                 new ResumeLoginRequest { AccountSessionId = login.AccountSessionId, ResumeToken = login.ResumeToken });
             Assert.That(refused.ResultCode, Is.EqualTo(ResultCode.InvalidCredentials));
         }
@@ -293,7 +297,7 @@ namespace GameFrame.Tests
             LoginResponse login = await Login(first);
             using ClientWebSocket second = await Connect();
             await Hello(second);
-            LoginResponse resumed = await Rpc(second, GameNetRoutes.ResumeLogin,
+            LoginResponse resumed = await Rpc(second, SessionRoutes.ResumeLogin,
                 new ResumeLoginRequest { AccountSessionId = login.AccountSessionId, ResumeToken = login.ResumeToken });
             Assert.That(resumed.AuthEpoch, Is.EqualTo(login.AuthEpoch));
             Assert.That(resumed.AccountSessionId, Is.EqualTo(login.AccountSessionId));
@@ -301,10 +305,10 @@ namespace GameFrame.Tests
             await AssertClose(first, 2);
             using ClientWebSocket third = await Connect();
             await Hello(third);
-            LoginResponse reused = await Rpc(third, GameNetRoutes.ResumeLogin,
+            LoginResponse reused = await Rpc(third, SessionRoutes.ResumeLogin,
                 new ResumeLoginRequest { AccountSessionId = login.AccountSessionId, ResumeToken = login.ResumeToken });
             Assert.That(reused.ResultCode, Is.EqualTo(ResultCode.InvalidCredentials));
-            Assert.That((await Rpc(second, GameNetRoutes.Echo, new EchoRequest { Text = "still alive" })).Text,
+            Assert.That((await Rpc(second, DiagnosticsRoutes.Echo, new EchoRequest { Text = "still alive" })).Text,
                 Is.EqualTo("still alive"));
         }
 
@@ -322,7 +326,7 @@ namespace GameFrame.Tests
             await AssertClose(first, 2);
             using ClientWebSocket third = await Connect();
             await Hello(third);
-            LoginResponse refused = await Rpc(third, GameNetRoutes.ResumeLogin,
+            LoginResponse refused = await Rpc(third, SessionRoutes.ResumeLogin,
                 new ResumeLoginRequest { AccountSessionId = old.AccountSessionId, ResumeToken = old.ResumeToken });
             Assert.That(refused.ResultCode, Is.EqualTo(ResultCode.InvalidCredentials));
         }
@@ -332,7 +336,7 @@ namespace GameFrame.Tests
         {
             using ClientWebSocket socket = await Connect();
             await Hello(socket);
-            LoginResponse response = await Rpc(socket, GameNetRoutes.Login,
+            LoginResponse response = await Rpc(socket, SessionRoutes.Login,
                 new LoginRequest { Account = "unknown", Password = "wrong" });
             Assert.That(response.ResultCode, Is.EqualTo(ResultCode.InvalidCredentials));
             Assert.That(response.ResumeToken, Is.Empty);
@@ -346,7 +350,7 @@ namespace GameFrame.Tests
             using ClientWebSocket socket = await Connect();
             await Hello(socket);
             byte[] frame = new byte[33];
-            FrameCodec.WriteHeader(frame, new FrameHeader(FrameKind.Request, GameNetRoutes.Echo.Opcode, 1, 1));
+            FrameCodec.WriteHeader(frame, new FrameHeader(FrameKind.Request, DiagnosticsRoutes.Echo.Opcode, 1, 1));
             frame[32] = 255;
             await socket.SendAsync(new ArraySegment<byte>(frame), WebSocketMessageType.Binary, true, timeout.Token);
             using OwnedFrame response = (await Receive(socket))!;
@@ -391,8 +395,8 @@ namespace GameFrame.Tests
             await Login(socket);
             using OwnedFrame echo = memory.Allocate(1056);
             var writer = new BoundedFrameWriter(echo);
-            GameNetRoutes.Echo.RequestCodec.Encode(writer, new EchoRequest { Text = "fragmented" });
-            writer.Complete(FrameKind.Request, GameNetRoutes.Echo.Opcode, ++correlation);
+            DiagnosticsRoutes.Echo.RequestCodec.Encode(writer, new EchoRequest { Text = "fragmented" });
+            writer.Complete(FrameKind.Request, DiagnosticsRoutes.Echo.Opcode, ++correlation);
             for (int i = 0; i < echo.Length; i++)
             {
                 await socket.SendAsync(new ArraySegment<byte>(echo.Bytes, i, 1), WebSocketMessageType.Binary,
@@ -400,7 +404,7 @@ namespace GameFrame.Tests
             }
 
             using OwnedFrame response = (await Receive(socket))!;
-            Assert.That(GameNetRoutes.Echo.ResponseCodec.Decode(response.Body).Text, Is.EqualTo("fragmented"));
+            Assert.That(DiagnosticsRoutes.Echo.ResponseCodec.Decode(response.Body).Text, Is.EqualTo("fragmented"));
         }
 
         [TestCase(true)]
@@ -481,7 +485,7 @@ namespace GameFrame.Tests
 
         private async Task LoginClient(ConnectionContext client)
         {
-            Task<LoginResponse> login = client.Request(GameNetRoutes.Login,
+            Task<LoginResponse> login = client.Request(SessionRoutes.Login,
                 new LoginRequest { Account = "local-test", Password = "local-secret" }, TimeSpan.FromSeconds(1), default);
             await PumpUntil(client, login);
             Assert.That(login.Result.ResultCode, Is.EqualTo(ResultCode.Success));
@@ -493,13 +497,13 @@ namespace GameFrame.Tests
             ConnectionContext client = await StartClient();
             await LoginClient(client);
             using var cancellation = new CancellationTokenSource();
-            var create = client.Request(GameNetRoutes.CreateGomokuRoom, new GomokuCommand { CommandId = 1 },
+            var create = client.Request(GomokuRoutes.CreateGomokuRoom, new CreateRoomRequest { CommandId = 1 },
                 TimeSpan.FromSeconds(5), cancellation.Token);
             // IO has received/reserved the reply, so server submission is already certain.
             await WaitFor(() => client.Metrics().DeadlineCount == 0 && client.Metrics().PendingCount == 1);
             cancellation.Cancel();
             Assert.CatchAsync<OperationCanceledException>(async () => await PumpUntil(client, create));
-            var query = client.Request(GameNetRoutes.QueryMyGomokuRoom, new GomokuQuery { CommandId = 1 },
+            var query = client.Request(GomokuRoutes.QueryMyGomokuRoom, new QueryRoomRequest { CommandId = 1 },
                 TimeSpan.FromSeconds(5), default);
             await PumpUntil(client, query);
             Assert.That(query.Result.CommandKnown, Is.True);
@@ -515,7 +519,7 @@ namespace GameFrame.Tests
             ConnectionContext b = await StartClient();
             async Task Authenticate(ConnectionContext client, string account)
             {
-                var task = client.Request(GameNetRoutes.Login, new LoginRequest
+                var task = client.Request(SessionRoutes.Login, new LoginRequest
                 {
                     Account = account, Password = "gomoku-password"
                 }, TimeSpan.FromSeconds(5), default);
@@ -527,41 +531,61 @@ namespace GameFrame.Tests
             await Authenticate(b, "gomoku-b");
             GomokuSnapshot? pushedA = null;
             GomokuSnapshot? pushedB = null;
-            a.Push = (_, frame) => pushedA = GameNetRoutes.GomokuRoomSnapshot.Codec.Decode(frame.Body);
-            b.Push = (_, frame) => pushedB = GameNetRoutes.GomokuRoomSnapshot.Codec.Decode(frame.Body);
+            a.Push = (_, frame) => pushedA = GomokuRoutes.GomokuRoomSnapshot.Codec.Decode(frame.Body);
+            b.Push = (_, frame) => pushedB = GomokuRoutes.GomokuRoomSnapshot.Codec.Decode(frame.Body);
             ulong idA = 0;
             ulong idB = 0;
             async Task<GomokuSnapshot> QueryRoom(ConnectionContext client)
             {
-                var task = client.Request(GameNetRoutes.QueryMyGomokuRoom, new GomokuQuery(), TimeSpan.FromSeconds(5), default);
+                var task = client.Request(GomokuRoutes.QueryMyGomokuRoom, new QueryRoomRequest(), TimeSpan.FromSeconds(5), default);
                 await PumpUntil(client, task);
                 return task.Result.Snapshot!;
             }
 
-            async Task<GomokuResponse> SendRoom(ConnectionContext client, NetRpc<GomokuCommand, GomokuResponse> route,
-                ulong id, GomokuSnapshot? baseline = null, string code = "", bool ready = false, int column = 0, int row = 0)
+            async Task<GomokuResponse> SendRoom<TRequest>(ConnectionContext client, NetRpc<TRequest, GomokuResponse> route,
+                TRequest request) where TRequest : class
             {
-                var task = client.Request(route, new GomokuCommand
-                {
-                    CommandId = id, RoomId = baseline?.RoomId ?? "", ExpectedVersion = baseline?.Version ?? 0,
-                    RoomCode = code, Ready = ready, Column = column, Row = row
-                }, TimeSpan.FromSeconds(5), default);
+                var task = client.Request(route, request, TimeSpan.FromSeconds(5), default);
                 await PumpUntil(client, task);
                 Assert.That(task.Result.Result, Is.EqualTo(GomokuResult.Ok));
                 return task.Result;
             }
 
-            GomokuSnapshot created = (await SendRoom(a, GameNetRoutes.CreateGomokuRoom, ++idA)).Snapshot!;
-            await SendRoom(b, GameNetRoutes.JoinGomokuRoom, ++idB, code: created.RoomCode);
-            await SendRoom(a, GameNetRoutes.SetGomokuReady, ++idA, await QueryRoom(a), ready: true);
-            await SendRoom(b, GameNetRoutes.SetGomokuReady, ++idB, await QueryRoom(b), ready: true);
-            await SendRoom(a, GameNetRoutes.StartGomokuGame, ++idA, await QueryRoom(a));
+            async Task Ready(ConnectionContext client, ulong id)
+            {
+                GomokuSnapshot room = await QueryRoom(client);
+                await SendRoom(client, GomokuRoutes.SetGomokuReady, new SetReadyRequest
+                {
+                    CommandId = id, RoomId = room.RoomId, ExpectedVersion = room.Version, Ready = true
+                });
+            }
+
+            async Task Move(ConnectionContext client, ulong id, int column, int row)
+            {
+                GomokuSnapshot room = await QueryRoom(client);
+                await SendRoom(client, GomokuRoutes.PlaceGomokuMove, new PlaceMoveRequest
+                {
+                    CommandId = id, RoomId = room.RoomId, ExpectedVersion = room.Version, Column = column, Row = row
+                });
+            }
+
+            GomokuSnapshot created = (await SendRoom(a, GomokuRoutes.CreateGomokuRoom,
+                new CreateRoomRequest { CommandId = ++idA })).Snapshot!;
+            await SendRoom(b, GomokuRoutes.JoinGomokuRoom,
+                new JoinRoomRequest { CommandId = ++idB, RoomCode = created.RoomCode });
+            await Ready(a, ++idA);
+            await Ready(b, ++idB);
+            GomokuSnapshot ready = await QueryRoom(a);
+            await SendRoom(a, GomokuRoutes.StartGomokuGame, new StartGameRequest
+            {
+                CommandId = ++idA, RoomId = ready.RoomId, ExpectedVersion = ready.Version
+            });
             for (int i = 0; i < 5; i++)
             {
-                await SendRoom(a, GameNetRoutes.PlaceGomokuMove, ++idA, await QueryRoom(a), column: i, row: 0);
+                await Move(a, ++idA, i, 0);
                 if (i < 4)
                 {
-                    await SendRoom(b, GameNetRoutes.PlaceGomokuMove, ++idB, await QueryRoom(b), column: i, row: 2);
+                    await Move(b, ++idB, i, 2);
                 }
             }
 
@@ -579,8 +603,8 @@ namespace GameFrame.Tests
             }
 
             Assert.That(pushedA!.Outcome, Is.EqualTo(pushedB!.Outcome));
-            await SendRoom(a, GameNetRoutes.LeaveGomokuRoom, ++idA, stateA);
-            await SendRoom(b, GameNetRoutes.LeaveGomokuRoom, ++idB, stateB);
+            await SendRoom(a, GomokuRoutes.LeaveGomokuRoom, new LeaveRoomRequest { CommandId = ++idA, RoomId = stateA.RoomId });
+            await SendRoom(b, GomokuRoutes.LeaveGomokuRoom, new LeaveRoomRequest { CommandId = ++idB, RoomId = stateB.RoomId });
             Assert.That(rooms.RoomCount, Is.Zero);
         }
 
@@ -589,7 +613,7 @@ namespace GameFrame.Tests
         {
             ConnectionContext client = await StartClient();
             await LoginClient(client);
-            Task<EchoResponse> echo = client.Request(GameNetRoutes.Echo, new EchoRequest { Text = "main pump" },
+            Task<EchoResponse> echo = client.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "main pump" },
                 TimeSpan.FromSeconds(1), default);
             await WaitFor(() => client.Metrics().ReliableReceiveCount == 1);
             Assert.That(echo.IsCompleted, Is.False);
@@ -604,7 +628,7 @@ namespace GameFrame.Tests
         {
             ConnectionContext client = await StartClient();
             await LoginClient(client);
-            Task<EchoResponse> echo = client.Request(GameNetRoutes.Echo, new EchoRequest { Text = "late", DelayMs = 150 },
+            Task<EchoResponse> echo = client.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "late", DelayMs = 150 },
                 TimeSpan.FromMilliseconds(20), default);
             await WaitFor(() => client.Metrics().RequestTimeouts == 1);
             Assert.That(echo.IsCompleted, Is.False);
@@ -622,7 +646,7 @@ namespace GameFrame.Tests
             ConnectionContext client = await StartClient();
             await LoginClient(client);
             using var cancellation = new CancellationTokenSource();
-            Task<EchoResponse> echo = client.Request(GameNetRoutes.Echo, new EchoRequest { Text = "reserved" },
+            Task<EchoResponse> echo = client.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "reserved" },
                 TimeSpan.FromSeconds(1), cancellation.Token);
             await WaitFor(() => client.Metrics().ReliableReceiveCount == 1);
             cancellation.Cancel();
@@ -641,12 +665,12 @@ namespace GameFrame.Tests
         {
             ConnectionContext client = await StartClient(new NetworkClientOptions { PendingCount = 1 });
             await LoginClient(client);
-            Task<EchoResponse> first = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
+            Task<EchoResponse> first = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
             await WaitFor(() => client.Metrics().ReliableReceiveCount == 1);
-            Assert.Throws<NetworkBackpressureException>(() => client.Request(GameNetRoutes.Echo,
+            Assert.Throws<NetworkBackpressureException>(() => client.Request(DiagnosticsRoutes.Echo,
                 new EchoRequest(), TimeSpan.FromSeconds(1), default));
             await PumpUntil(client, first);
-            Task<EchoResponse> second = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
+            Task<EchoResponse> second = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
             await PumpUntil(client, second);
         }
 
@@ -654,7 +678,7 @@ namespace GameFrame.Tests
         public async Task OrderedAuthenticationFailureResponsePrecedesRemoteClose()
         {
             ConnectionContext client = await StartClient();
-            Task<LoginResponse> login = client.Request(GameNetRoutes.Login,
+            Task<LoginResponse> login = client.Request(SessionRoutes.Login,
                 new LoginRequest { Account = "wrong", Password = "wrong" }, TimeSpan.FromSeconds(1), default);
             await WaitFor(() => client.Metrics().ReliableReceiveCount == 1);
             await PumpUntil(client, login);
@@ -672,7 +696,7 @@ namespace GameFrame.Tests
         {
             ConnectionContext client = await StartClient();
             await LoginClient(client);
-            Task<EchoResponse> echo = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
+            Task<EchoResponse> echo = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
             await WaitFor(() => client.Metrics().ReliableReceiveCount == 1);
             var states = new List<NetworkClientState>();
             client.StateChanged = (state, _) => states.Add(state);
@@ -690,7 +714,7 @@ namespace GameFrame.Tests
         {
             using ClientWebSocket socket = await Connect();
             await Hello(socket);
-            LoginResponse failure = await Rpc(socket, GameNetRoutes.Login,
+            LoginResponse failure = await Rpc(socket, SessionRoutes.Login,
                 new LoginRequest { Account = "wrong", Password = "wrong" });
             Assert.That(failure.ResultCode, Is.EqualTo(ResultCode.InvalidCredentials));
             using OwnedFrame close = (await Receive(socket))!;
@@ -707,7 +731,7 @@ namespace GameFrame.Tests
         {
             ConnectionContext client = await StartClient();
             await LoginClient(client);
-            Task<EchoResponse> echo = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
+            Task<EchoResponse> echo = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(1), default);
             await WaitFor(() => client.Metrics().ReliableReceiveCount == 1);
             var failure = new InvalidOperationException("Injected host invariant failure.");
             client.FailHost(failure);
@@ -733,7 +757,7 @@ namespace GameFrame.Tests
         public async Task HostFailureSupersedesOrderlyCloseWithoutDecodingReservedResponse()
         {
             ConnectionContext client = await StartClient();
-            Task<LoginResponse> login = client.Request(GameNetRoutes.Login,
+            Task<LoginResponse> login = client.Request(SessionRoutes.Login,
                 new LoginRequest { Account = "wrong", Password = "wrong" }, TimeSpan.FromSeconds(1), default);
             await WaitFor(() => client.Metrics().ReliableReceiveCount == 1 && client.IoTask.IsCompleted);
             var failure = new InvalidOperationException("Host failed before reliable delivery.");

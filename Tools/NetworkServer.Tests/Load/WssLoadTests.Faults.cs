@@ -5,6 +5,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Game.Protocol;
+using Game.Protocol.Diagnostics;
 using GameFrame.Network;
 using NUnit.Framework;
 
@@ -205,7 +206,7 @@ namespace GameFrame.Tests
 
                 return new FaultSession(info => closeResults[connection.GrantId] = info);
             });
-            application.Rpc(GameNetRoutes.Echo, async (connection, request, token) =>
+            application.Rpc(DiagnosticsRoutes.Echo, async (connection, request, token) =>
             {
                 handlerCalls.AddOrUpdate((connection.GrantId, request.Text), 1, (_, count) => count + 1);
                 if (connection.GrantId == targetGrant && Volatile.Read(ref holdHandler))
@@ -218,7 +219,7 @@ namespace GameFrame.Tests
             });
             foreach (NetRoute route in GameNetProtocol.Catalog.Routes)
             {
-                if (route.Kind != NetRouteKind.Push && route != GameNetRoutes.Echo)
+                if (route.Kind != NetRouteKind.Push && route != DiagnosticsRoutes.Echo)
                 {
                     application.Reject(route);
                 }
@@ -254,7 +255,7 @@ namespace GameFrame.Tests
 
                 if (controlRequest == null && NetworkClock.GetMilliseconds() >= nextControl)
                 {
-                    controlRequest = control.Context.Request(GameNetRoutes.Echo, new EchoRequest { Text = "control" },
+                    controlRequest = control.Context.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "control" },
                         TimeSpan.FromSeconds(3), default);
                     nextControl = NetworkClock.GetMilliseconds() + 500;
                 }
@@ -347,7 +348,7 @@ namespace GameFrame.Tests
 
             Task<EchoResponse> Request(Client client, string text, int seconds = 30)
             {
-                Task<EchoResponse> request = client.Context.Request(GameNetRoutes.Echo, new EchoRequest { Text = text },
+                Task<EchoResponse> request = client.Context.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = text },
                     TimeSpan.FromSeconds(seconds), default);
                 requests.Add(request);
                 return request;

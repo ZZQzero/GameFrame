@@ -1,3 +1,4 @@
+using Game.Protocol.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -97,7 +98,7 @@ namespace GameFrame.Tests
                 Version = "1"
             }, new NLogOutputOptions(), target);
             await using (WebApplication app = LocalWssService.CreateHost(
-                ServerCloseTests.Application((_, _, _) => Task.FromResult(new Game.Protocol.EchoResponse())), new WssServerOptions(), certificate,
+                ServerCloseTests.Application((_, _, _) => Task.FromResult(new Game.Protocol.Diagnostics.EchoResponse())), new WssServerOptions(), certificate,
                 port, TableConfigLoader.Load(null), output.Factory))
             {
                 Assert.That(app.Services.GetRequiredService<ILoggerFactory>(), Is.SameAs(output.Factory));

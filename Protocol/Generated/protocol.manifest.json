@@ -3,7 +3,37 @@
   "endianness": "little",
   "enums": [
     {
-      "name": "Game.Protocol.GomokuEndReason",
+      "name": "Game.Protocol.Common.ResultCode",
+      "underlyingType": "System.Int32",
+      "values": [
+        {
+          "name": "Success",
+          "value": 0
+        },
+        {
+          "name": "InvalidCredentials",
+          "value": 1
+        },
+        {
+          "name": "SessionExpired",
+          "value": 2
+        },
+        {
+          "name": "SessionRevoked",
+          "value": 3
+        },
+        {
+          "name": "InvalidInput",
+          "value": 11
+        },
+        {
+          "name": "AccountAlreadyExists",
+          "value": 12
+        }
+      ]
+    },
+    {
+      "name": "Game.Protocol.Gomoku.GomokuEndReason",
       "underlyingType": "System.Int32",
       "values": [
         {
@@ -37,7 +67,7 @@
       ]
     },
     {
-      "name": "Game.Protocol.GomokuOutcome",
+      "name": "Game.Protocol.Gomoku.GomokuOutcome",
       "underlyingType": "System.Int32",
       "values": [
         {
@@ -63,7 +93,7 @@
       ]
     },
     {
-      "name": "Game.Protocol.GomokuResult",
+      "name": "Game.Protocol.Gomoku.GomokuResult",
       "underlyingType": "System.Int32",
       "values": [
         {
@@ -121,7 +151,7 @@
       ]
     },
     {
-      "name": "Game.Protocol.GomokuRoomState",
+      "name": "Game.Protocol.Gomoku.GomokuRoomState",
       "underlyingType": "System.Int32",
       "values": [
         {
@@ -141,36 +171,6 @@
           "value": 3
         }
       ]
-    },
-    {
-      "name": "Game.Protocol.ResultCode",
-      "underlyingType": "System.Int32",
-      "values": [
-        {
-          "name": "Success",
-          "value": 0
-        },
-        {
-          "name": "InvalidCredentials",
-          "value": 1
-        },
-        {
-          "name": "SessionExpired",
-          "value": 2
-        },
-        {
-          "name": "SessionRevoked",
-          "value": 3
-        },
-        {
-          "name": "InvalidInput",
-          "value": 11
-        },
-        {
-          "name": "AccountAlreadyExists",
-          "value": 12
-        }
-      ]
     }
   ],
   "limits": {
@@ -185,156 +185,167 @@
     {
       "delivery": "Reliable",
       "kind": "Rpc",
-      "maxBodyBytes": 2048,
+      "maxBodyBytes": 596,
       "opcode": 1000,
-      "name": "Login",
-      "responseMaxBodyBytes": 256,
-      "responseType": "Game.Protocol.LoginResponse",
+      "name": "game.protocol.session.SessionService.Login",
+      "responseMaxBodyBytes": 101,
+      "responseType": "Game.Protocol.Session.LoginResponse",
       "rootNullable": false,
-      "type": "Game.Protocol.LoginRequest"
+      "type": "Game.Protocol.Session.LoginRequest"
     },
     {
       "delivery": "Reliable",
       "kind": "Rpc",
-      "maxBodyBytes": 128,
+      "maxBodyBytes": 57,
       "opcode": 1001,
-      "name": "ResumeLogin",
-      "responseMaxBodyBytes": 256,
-      "responseType": "Game.Protocol.LoginResponse",
+      "name": "game.protocol.session.SessionService.ResumeLogin",
+      "responseMaxBodyBytes": 101,
+      "responseType": "Game.Protocol.Session.LoginResponse",
       "rootNullable": false,
-      "type": "Game.Protocol.ResumeLoginRequest"
+      "type": "Game.Protocol.Session.ResumeLoginRequest"
     },
     {
       "delivery": "Reliable",
       "kind": "Rpc",
-      "maxBodyBytes": 64,
+      "maxBodyBytes": 1,
       "opcode": 1003,
-      "name": "Logout",
-      "responseMaxBodyBytes": 64,
-      "responseType": "Game.Protocol.OperationResponse",
+      "name": "game.protocol.session.SessionService.Logout",
+      "responseMaxBodyBytes": 5,
+      "responseType": "Game.Protocol.Common.OperationResponse",
       "rootNullable": false,
-      "type": "Game.Protocol.LogoutRequest"
+      "type": "Game.Protocol.Session.LogoutRequest"
     },
     {
       "delivery": "Reliable",
       "kind": "Rpc",
-      "maxBodyBytes": 2048,
+      "maxBodyBytes": 596,
       "opcode": 1004,
-      "name": "Register",
-      "responseMaxBodyBytes": 64,
-      "responseType": "Game.Protocol.OperationResponse",
+      "name": "game.protocol.session.SessionService.Register",
+      "responseMaxBodyBytes": 5,
+      "responseType": "Game.Protocol.Common.OperationResponse",
       "rootNullable": false,
-      "type": "Game.Protocol.RegisterRequest"
+      "type": "Game.Protocol.Session.RegisterRequest"
     },
     {
       "delivery": "Reliable",
       "kind": "Rpc",
-      "maxBodyBytes": 1024,
+      "maxBodyBytes": 397,
       "opcode": 1900,
-      "name": "Echo",
-      "responseMaxBodyBytes": 1024,
-      "responseType": "Game.Protocol.EchoResponse",
+      "name": "game.protocol.diagnostics.DiagnosticsService.Echo",
+      "responseMaxBodyBytes": 396,
+      "responseType": "Game.Protocol.Diagnostics.EchoResponse",
       "rootNullable": false,
-      "type": "Game.Protocol.EchoRequest"
+      "type": "Game.Protocol.Diagnostics.EchoRequest"
     },
     {
       "delivery": "Reliable",
       "kind": "Rpc",
-      "maxBodyBytes": 128,
+      "maxBodyBytes": 9,
       "opcode": 3000,
-      "name": "CreateGomokuRoom",
-      "responseMaxBodyBytes": 4096,
-      "responseType": "Game.Protocol.GomokuResponse",
+      "name": "game.protocol.gomoku.GomokuService.CreateGomokuRoom",
+      "responseMaxBodyBytes": 3094,
+      "responseType": "Game.Protocol.Gomoku.GomokuResponse",
       "rootNullable": false,
-      "type": "Game.Protocol.GomokuCommand"
+      "type": "Game.Protocol.Gomoku.CreateRoomRequest"
     },
     {
       "delivery": "Reliable",
       "kind": "Rpc",
-      "maxBodyBytes": 128,
+      "maxBodyBytes": 44,
       "opcode": 3001,
-      "name": "JoinGomokuRoom",
-      "responseMaxBodyBytes": 4096,
-      "responseType": "Game.Protocol.GomokuResponse",
+      "name": "game.protocol.gomoku.GomokuService.JoinGomokuRoom",
+      "responseMaxBodyBytes": 3094,
+      "responseType": "Game.Protocol.Gomoku.GomokuResponse",
       "rootNullable": false,
-      "type": "Game.Protocol.GomokuCommand"
+      "type": "Game.Protocol.Gomoku.JoinRoomRequest"
     },
     {
       "delivery": "Reliable",
       "kind": "Rpc",
-      "maxBodyBytes": 128,
+      "maxBodyBytes": 9,
       "opcode": 3002,
-      "name": "QueryMyGomokuRoom",
-      "responseMaxBodyBytes": 4096,
-      "responseType": "Game.Protocol.GomokuResponse",
+      "name": "game.protocol.gomoku.GomokuService.QueryMyGomokuRoom",
+      "responseMaxBodyBytes": 3094,
+      "responseType": "Game.Protocol.Gomoku.GomokuResponse",
       "rootNullable": false,
-      "type": "Game.Protocol.GomokuQuery"
+      "type": "Game.Protocol.Gomoku.QueryRoomRequest"
     },
     {
       "delivery": "Reliable",
       "kind": "Rpc",
-      "maxBodyBytes": 128,
+      "maxBodyBytes": 116,
       "opcode": 3003,
-      "name": "SetGomokuReady",
-      "responseMaxBodyBytes": 4096,
-      "responseType": "Game.Protocol.GomokuResponse",
+      "name": "game.protocol.gomoku.GomokuService.SetGomokuReady",
+      "responseMaxBodyBytes": 3094,
+      "responseType": "Game.Protocol.Gomoku.GomokuResponse",
       "rootNullable": false,
-      "type": "Game.Protocol.GomokuCommand"
+      "type": "Game.Protocol.Gomoku.SetReadyRequest"
     },
     {
       "delivery": "Reliable",
       "kind": "Rpc",
-      "maxBodyBytes": 128,
+      "maxBodyBytes": 116,
       "opcode": 3004,
-      "name": "StartGomokuGame",
-      "responseMaxBodyBytes": 4096,
-      "responseType": "Game.Protocol.GomokuResponse",
+      "name": "game.protocol.gomoku.GomokuService.StartGomokuGame",
+      "responseMaxBodyBytes": 3094,
+      "responseType": "Game.Protocol.Gomoku.GomokuResponse",
       "rootNullable": false,
-      "type": "Game.Protocol.GomokuCommand"
+      "type": "Game.Protocol.Gomoku.StartGameRequest"
     },
     {
       "delivery": "Reliable",
       "kind": "Rpc",
-      "maxBodyBytes": 128,
+      "maxBodyBytes": 116,
       "opcode": 3005,
-      "name": "PlaceGomokuMove",
-      "responseMaxBodyBytes": 4096,
-      "responseType": "Game.Protocol.GomokuResponse",
+      "name": "game.protocol.gomoku.GomokuService.PlaceGomokuMove",
+      "responseMaxBodyBytes": 3094,
+      "responseType": "Game.Protocol.Gomoku.GomokuResponse",
       "rootNullable": false,
-      "type": "Game.Protocol.GomokuCommand"
+      "type": "Game.Protocol.Gomoku.PlaceMoveRequest"
     },
     {
       "delivery": "Reliable",
       "kind": "Rpc",
-      "maxBodyBytes": 128,
+      "maxBodyBytes": 116,
       "opcode": 3006,
-      "name": "LeaveGomokuRoom",
-      "responseMaxBodyBytes": 4096,
-      "responseType": "Game.Protocol.GomokuResponse",
+      "name": "game.protocol.gomoku.GomokuService.LeaveGomokuRoom",
+      "responseMaxBodyBytes": 3094,
+      "responseType": "Game.Protocol.Gomoku.GomokuResponse",
       "rootNullable": false,
-      "type": "Game.Protocol.GomokuCommand"
+      "type": "Game.Protocol.Gomoku.LeaveRoomRequest"
     },
     {
       "delivery": "Reliable",
       "kind": "Push",
-      "maxBodyBytes": 4096,
+      "maxBodyBytes": 3080,
       "opcode": 3010,
-      "name": "GomokuRoomSnapshot",
+      "name": "game.protocol.gomoku.GomokuService.GomokuRoomSnapshot",
       "rootNullable": false,
-      "type": "Game.Protocol.GomokuSnapshot"
+      "type": "Game.Protocol.Gomoku.GomokuSnapshot"
     },
     {
       "delivery": "Reliable",
       "kind": "Push",
-      "maxBodyBytes": 4096,
+      "maxBodyBytes": 3080,
       "opcode": 3011,
-      "name": "GomokuRoomClosed",
+      "name": "game.protocol.gomoku.GomokuService.GomokuRoomClosed",
       "rootNullable": false,
-      "type": "Game.Protocol.GomokuSnapshot"
+      "type": "Game.Protocol.Gomoku.GomokuSnapshot"
     }
   ],
   "stringEncoding": "utf8",
   "types": [
+    {
+      "fields": [
+        {
+          "name": "ResultCode",
+          "nullable": false,
+          "order": 0,
+          "type": "Game.Protocol.Common.ResultCode"
+        }
+      ],
+      "name": "Game.Protocol.Common.OperationResponse"
+    },
     {
       "fields": [
         {
@@ -352,7 +363,7 @@
           "type": "System.UInt32"
         }
       ],
-      "name": "Game.Protocol.EchoRequest"
+      "name": "Game.Protocol.Diagnostics.EchoRequest"
     },
     {
       "fields": [
@@ -365,7 +376,7 @@
           "type": "System.String"
         }
       ],
-      "name": "Game.Protocol.EchoResponse"
+      "name": "Game.Protocol.Diagnostics.EchoResponse"
     },
     {
       "fields": [
@@ -374,49 +385,9 @@
           "nullable": false,
           "order": 0,
           "type": "System.UInt64"
-        },
-        {
-          "name": "RoomId",
-          "nullable": false,
-          "order": 1,
-          "stringUtf16Units": 32,
-          "stringUtf8Bytes": 32,
-          "type": "System.String"
-        },
-        {
-          "name": "ExpectedVersion",
-          "nullable": false,
-          "order": 2,
-          "type": "System.UInt64"
-        },
-        {
-          "name": "RoomCode",
-          "nullable": false,
-          "order": 3,
-          "stringUtf16Units": 8,
-          "stringUtf8Bytes": 8,
-          "type": "System.String"
-        },
-        {
-          "name": "Ready",
-          "nullable": false,
-          "order": 4,
-          "type": "System.Boolean"
-        },
-        {
-          "name": "Column",
-          "nullable": false,
-          "order": 5,
-          "type": "System.Int32"
-        },
-        {
-          "name": "Row",
-          "nullable": false,
-          "order": 6,
-          "type": "System.Int32"
         }
       ],
-      "name": "Game.Protocol.GomokuCommand"
+      "name": "Game.Protocol.Gomoku.CreateRoomRequest"
     },
     {
       "fields": [
@@ -445,7 +416,7 @@
           "type": "System.Boolean"
         }
       ],
-      "name": "Game.Protocol.GomokuMember"
+      "name": "Game.Protocol.Gomoku.GomokuMember"
     },
     {
       "fields": [
@@ -468,18 +439,7 @@
           "type": "System.Int32"
         }
       ],
-      "name": "Game.Protocol.GomokuMoveData"
-    },
-    {
-      "fields": [
-        {
-          "name": "CommandId",
-          "nullable": false,
-          "order": 0,
-          "type": "System.UInt64"
-        }
-      ],
-      "name": "Game.Protocol.GomokuQuery"
+      "name": "Game.Protocol.Gomoku.GomokuMoveData"
     },
     {
       "fields": [
@@ -487,7 +447,7 @@
           "name": "Result",
           "nullable": false,
           "order": 0,
-          "type": "Game.Protocol.GomokuResult"
+          "type": "Game.Protocol.Gomoku.GomokuResult"
         },
         {
           "name": "CommandId",
@@ -505,10 +465,10 @@
           "name": "Snapshot",
           "nullable": true,
           "order": 3,
-          "type": "Game.Protocol.GomokuSnapshot"
+          "type": "Game.Protocol.Gomoku.GomokuSnapshot"
         }
       ],
-      "name": "Game.Protocol.GomokuResponse"
+      "name": "Game.Protocol.Gomoku.GomokuResponse"
     },
     {
       "fields": [
@@ -538,19 +498,19 @@
           "name": "State",
           "nullable": false,
           "order": 3,
-          "type": "Game.Protocol.GomokuRoomState"
+          "type": "Game.Protocol.Gomoku.GomokuRoomState"
         },
         {
           "name": "Outcome",
           "nullable": false,
           "order": 4,
-          "type": "Game.Protocol.GomokuOutcome"
+          "type": "Game.Protocol.Gomoku.GomokuOutcome"
         },
         {
           "name": "EndReason",
           "nullable": false,
           "order": 5,
-          "type": "Game.Protocol.GomokuEndReason"
+          "type": "Game.Protocol.Gomoku.GomokuEndReason"
         },
         {
           "arrayLimit": 2,
@@ -558,7 +518,7 @@
           "name": "Members",
           "nullable": false,
           "order": 6,
-          "type": "Game.Protocol.GomokuMember[]"
+          "type": "Game.Protocol.Gomoku.GomokuMember[]"
         },
         {
           "arrayLimit": 225,
@@ -566,7 +526,7 @@
           "name": "Moves",
           "nullable": false,
           "order": 7,
-          "type": "Game.Protocol.GomokuMoveData[]"
+          "type": "Game.Protocol.Gomoku.GomokuMoveData[]"
         },
         {
           "name": "RecipientAccountId",
@@ -593,7 +553,149 @@
           "type": "System.UInt64"
         }
       ],
-      "name": "Game.Protocol.GomokuSnapshot"
+      "name": "Game.Protocol.Gomoku.GomokuSnapshot"
+    },
+    {
+      "fields": [
+        {
+          "name": "CommandId",
+          "nullable": false,
+          "order": 0,
+          "type": "System.UInt64"
+        },
+        {
+          "name": "RoomCode",
+          "nullable": false,
+          "order": 1,
+          "stringUtf16Units": 8,
+          "stringUtf8Bytes": 8,
+          "type": "System.String"
+        }
+      ],
+      "name": "Game.Protocol.Gomoku.JoinRoomRequest"
+    },
+    {
+      "fields": [
+        {
+          "name": "CommandId",
+          "nullable": false,
+          "order": 0,
+          "type": "System.UInt64"
+        },
+        {
+          "name": "RoomId",
+          "nullable": false,
+          "order": 1,
+          "stringUtf16Units": 32,
+          "stringUtf8Bytes": 32,
+          "type": "System.String"
+        }
+      ],
+      "name": "Game.Protocol.Gomoku.LeaveRoomRequest"
+    },
+    {
+      "fields": [
+        {
+          "name": "CommandId",
+          "nullable": false,
+          "order": 0,
+          "type": "System.UInt64"
+        },
+        {
+          "name": "RoomId",
+          "nullable": false,
+          "order": 1,
+          "stringUtf16Units": 32,
+          "stringUtf8Bytes": 32,
+          "type": "System.String"
+        },
+        {
+          "name": "ExpectedVersion",
+          "nullable": false,
+          "order": 2,
+          "type": "System.UInt64"
+        },
+        {
+          "name": "Column",
+          "nullable": false,
+          "order": 3,
+          "type": "System.Int32"
+        },
+        {
+          "name": "Row",
+          "nullable": false,
+          "order": 4,
+          "type": "System.Int32"
+        }
+      ],
+      "name": "Game.Protocol.Gomoku.PlaceMoveRequest"
+    },
+    {
+      "fields": [
+        {
+          "name": "CommandId",
+          "nullable": false,
+          "order": 0,
+          "type": "System.UInt64"
+        }
+      ],
+      "name": "Game.Protocol.Gomoku.QueryRoomRequest"
+    },
+    {
+      "fields": [
+        {
+          "name": "CommandId",
+          "nullable": false,
+          "order": 0,
+          "type": "System.UInt64"
+        },
+        {
+          "name": "RoomId",
+          "nullable": false,
+          "order": 1,
+          "stringUtf16Units": 32,
+          "stringUtf8Bytes": 32,
+          "type": "System.String"
+        },
+        {
+          "name": "ExpectedVersion",
+          "nullable": false,
+          "order": 2,
+          "type": "System.UInt64"
+        },
+        {
+          "name": "Ready",
+          "nullable": false,
+          "order": 3,
+          "type": "System.Boolean"
+        }
+      ],
+      "name": "Game.Protocol.Gomoku.SetReadyRequest"
+    },
+    {
+      "fields": [
+        {
+          "name": "CommandId",
+          "nullable": false,
+          "order": 0,
+          "type": "System.UInt64"
+        },
+        {
+          "name": "RoomId",
+          "nullable": false,
+          "order": 1,
+          "stringUtf16Units": 32,
+          "stringUtf8Bytes": 32,
+          "type": "System.String"
+        },
+        {
+          "name": "ExpectedVersion",
+          "nullable": false,
+          "order": 2,
+          "type": "System.UInt64"
+        }
+      ],
+      "name": "Game.Protocol.Gomoku.StartGameRequest"
     },
     {
       "fields": [
@@ -614,7 +716,7 @@
           "type": "System.String"
         }
       ],
-      "name": "Game.Protocol.LoginRequest"
+      "name": "Game.Protocol.Session.LoginRequest"
     },
     {
       "fields": [
@@ -622,7 +724,7 @@
           "name": "ResultCode",
           "nullable": false,
           "order": 0,
-          "type": "Game.Protocol.ResultCode"
+          "type": "Game.Protocol.Common.ResultCode"
         },
         {
           "name": "AccountId",
@@ -677,22 +779,11 @@
           "type": "System.UInt32"
         }
       ],
-      "name": "Game.Protocol.LoginResponse"
+      "name": "Game.Protocol.Session.LoginResponse"
     },
     {
       "fields": [],
-      "name": "Game.Protocol.LogoutRequest"
-    },
-    {
-      "fields": [
-        {
-          "name": "ResultCode",
-          "nullable": false,
-          "order": 0,
-          "type": "Game.Protocol.ResultCode"
-        }
-      ],
-      "name": "Game.Protocol.OperationResponse"
+      "name": "Game.Protocol.Session.LogoutRequest"
     },
     {
       "fields": [
@@ -713,7 +804,7 @@
           "type": "System.String"
         }
       ],
-      "name": "Game.Protocol.RegisterRequest"
+      "name": "Game.Protocol.Session.RegisterRequest"
     },
     {
       "fields": [
@@ -734,7 +825,7 @@
           "type": "System.Byte[]"
         }
       ],
-      "name": "Game.Protocol.ResumeLoginRequest"
+      "name": "Game.Protocol.Session.ResumeLoginRequest"
     }
   ],
   "wireVersion": 1

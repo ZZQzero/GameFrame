@@ -7,6 +7,9 @@ using System.IO;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using Game.Protocol;
+using Game.Protocol.Common;
+using Game.Protocol.Gomoku;
+using Game.Protocol.Session;
 using GameFrame.Network;
 using MemoryPack;
 using NUnit.Framework;
@@ -59,11 +62,11 @@ namespace GameFrame.Tests
         [Test]
         public void RouteFirstInitializationDoesNotCreateNullCatalogEntries()
         {
-            Assert.AreEqual(1000u, GameNetRoutes.Login.Opcode);
+            Assert.AreEqual(1000u, SessionRoutes.Login.Opcode);
             Assert.AreEqual(14, GameNetProtocol.Catalog.RouteCount);
-            Assert.AreEqual(4096, GameNetProtocol.Catalog.MaxReliableBodyBytes);
+            Assert.AreEqual(3094, GameNetProtocol.Catalog.MaxReliableBodyBytes);
             Assert.AreEqual(0, GameNetProtocol.Catalog.MaxUnreliableBodyBytes);
-            GameNetProtocol.Catalog.RequireRegistered(GameNetRoutes.Login);
+            GameNetProtocol.Catalog.RequireRegistered(SessionRoutes.Login);
         }
 
         [Test]
@@ -71,14 +74,14 @@ namespace GameFrame.Tests
         {
             var login = new LoginRequest { Account = "中文😀", Password = "密码" };
             var writer = new ArrayBufferWriter<byte>();
-            GameNetRoutes.Login.RequestCodec.Encode(writer, login);
-            LoginRequest decoded = GameNetRoutes.Login.RequestCodec.Decode(writer.WrittenSpan);
+            SessionRoutes.Login.RequestCodec.Encode(writer, login);
+            LoginRequest decoded = SessionRoutes.Login.RequestCodec.Decode(writer.WrittenSpan);
             Assert.AreEqual(login.Account, decoded.Account);
             Assert.AreEqual(login.Password, decoded.Password);
             var snapshot = new GomokuSnapshot { Members = new[] { new GomokuMember { AccountId = 42, MemberId = 1250 } } };
             writer.Clear();
-            GameNetRoutes.GomokuRoomSnapshot.Codec.Encode(writer, snapshot);
-            Assert.AreEqual(1250, GameNetRoutes.GomokuRoomSnapshot.Codec.Decode(writer.WrittenSpan).Members[0].MemberId);
+            GomokuRoutes.GomokuRoomSnapshot.Codec.Encode(writer, snapshot);
+            Assert.AreEqual(1250, GomokuRoutes.GomokuRoomSnapshot.Codec.Decode(writer.WrittenSpan).Members[0].MemberId);
         }
 
         [Test]
@@ -88,7 +91,7 @@ namespace GameFrame.Tests
             bytes[0] = 2;
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(1), ~int.MaxValue);
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(5), int.MaxValue);
-            Assert.Throws<NetworkProtocolException>(() => GameNetRoutes.Login.RequestCodec.Decode(bytes));
+            Assert.Throws<NetworkProtocolException>(() => SessionRoutes.Login.RequestCodec.Decode(bytes));
         }
 
         [Test]
@@ -97,7 +100,7 @@ namespace GameFrame.Tests
             byte[] bytes = MemoryPackSerializer.Serialize(new GomokuSnapshot(), MemoryPackSerializerOptions.Utf8);
             // Empty Moves count precedes the four recipient/admission uint64 fields.
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(bytes.Length - 36), int.MaxValue);
-            Assert.Throws<NetworkProtocolException>(() => GameNetRoutes.GomokuRoomSnapshot.Codec.Decode(bytes));
+            Assert.Throws<NetworkProtocolException>(() => GomokuRoutes.GomokuRoomSnapshot.Codec.Decode(bytes));
         }
 
         [Test]
@@ -105,21 +108,21 @@ namespace GameFrame.Tests
         {
             byte[] bytes = MemoryPackSerializer.Serialize(new LoginRequest { Account = "a" }, MemoryPackSerializerOptions.Utf8);
             bytes[9] = 0xff;
-            Assert.Throws<NetworkProtocolException>(() => GameNetRoutes.Login.RequestCodec.Decode(bytes));
+            Assert.Throws<NetworkProtocolException>(() => SessionRoutes.Login.RequestCodec.Decode(bytes));
             bytes[9] = (byte)'a';
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(5), 2);
-            Assert.Throws<NetworkProtocolException>(() => GameNetRoutes.Login.RequestCodec.Decode(bytes));
+            Assert.Throws<NetworkProtocolException>(() => SessionRoutes.Login.RequestCodec.Decode(bytes));
         }
 
         [Test]
         public void NullRootNullElementsAndTrailingBytesAreRejected()
         {
-            Assert.Throws<NetworkProtocolException>(() => GameNetRoutes.Login.RequestCodec.Decode(new byte[] { 255 }));
+            Assert.Throws<NetworkProtocolException>(() => SessionRoutes.Login.RequestCodec.Decode(new byte[] { 255 }));
             byte[] snapshot = MemoryPackSerializer.Serialize(new GomokuSnapshot { Members = new GomokuMember[] { null } }, MemoryPackSerializerOptions.Utf8);
-            Assert.Throws<NetworkProtocolException>(() => GameNetRoutes.GomokuRoomSnapshot.Codec.Decode(snapshot));
+            Assert.Throws<NetworkProtocolException>(() => GomokuRoutes.GomokuRoomSnapshot.Codec.Decode(snapshot));
             byte[] bytes = MemoryPackSerializer.Serialize(new LoginRequest(), MemoryPackSerializerOptions.Utf8);
             Array.Resize(ref bytes, bytes.Length + 1);
-            Assert.Throws<NetworkProtocolException>(() => GameNetRoutes.Login.RequestCodec.Decode(bytes));
+            Assert.Throws<NetworkProtocolException>(() => SessionRoutes.Login.RequestCodec.Decode(bytes));
         }
 
         [Test]
@@ -127,7 +130,7 @@ namespace GameFrame.Tests
         {
             var request = new LoginRequest { Account = new string('x', 65), Password = "secret" };
             var writer = new ArrayBufferWriter<byte>();
-            Assert.Throws<ArgumentException>(() => GameNetRoutes.Login.RequestCodec.Encode(writer, request));
+            Assert.Throws<ArgumentException>(() => SessionRoutes.Login.RequestCodec.Encode(writer, request));
             Assert.AreEqual(0, writer.WrittenCount);
             Assert.AreEqual(65, request.Account.Length);
             Assert.AreEqual("secret", request.Password);
@@ -137,12 +140,12 @@ namespace GameFrame.Tests
         public void CatalogCopiesHashAndRejectsDuplicateOpcodes()
         {
             var hash = new byte[32];
-            var catalog = new NetProtocolCatalog(hash, GameNetRoutes.Login);
+            var catalog = new NetProtocolCatalog(hash, SessionRoutes.Login);
             hash[0] = 99;
             var copy = new byte[32];
             catalog.CopyHashTo(copy);
             Assert.AreEqual(0, copy[0]);
-            Assert.Throws<ArgumentException>(() => new NetProtocolCatalog(hash, GameNetRoutes.Login, GameNetRoutes.Login));
+            Assert.Throws<ArgumentException>(() => new NetProtocolCatalog(hash, SessionRoutes.Login, SessionRoutes.Login));
         }
 
         [Test]
@@ -150,9 +153,9 @@ namespace GameFrame.Tests
         {
             var response = new OperationResponse { ResultCode = (ResultCode)999 };
             byte[] bytes = MemoryPackSerializer.Serialize(response, MemoryPackSerializerOptions.Utf8);
-            Assert.Throws<NetworkProtocolException>(() => GameNetRoutes.Logout.ResponseCodec.Decode(bytes));
+            Assert.Throws<NetworkProtocolException>(() => SessionRoutes.Logout.ResponseCodec.Decode(bytes));
             var writer = new ArrayBufferWriter<byte>();
-            Assert.Throws<ArgumentException>(() => GameNetRoutes.Logout.ResponseCodec.Encode(writer, response));
+            Assert.Throws<ArgumentException>(() => SessionRoutes.Logout.ResponseCodec.Encode(writer, response));
             Assert.AreEqual(0, writer.WrittenCount);
         }
 
@@ -162,21 +165,21 @@ namespace GameFrame.Tests
         public void DeclaredBusinessResultUsesFourByteLittleEndianValue(ResultCode code)
         {
             var writer = new ArrayBufferWriter<byte>();
-            GameNetRoutes.Logout.ResponseCodec.Encode(writer, new OperationResponse { ResultCode = code });
+            SessionRoutes.Logout.ResponseCodec.Encode(writer, new OperationResponse { ResultCode = code });
             Assert.AreEqual(5, writer.WrittenCount);
             Assert.AreEqual((int)code, BinaryPrimitives.ReadInt32LittleEndian(writer.WrittenSpan.Slice(1)));
-            Assert.AreEqual(code, GameNetRoutes.Logout.ResponseCodec.Decode(writer.WrittenSpan).ResultCode);
+            Assert.AreEqual(code, SessionRoutes.Logout.ResponseCodec.Decode(writer.WrittenSpan).ResultCode);
         }
 
         [Test]
         public void RoomPushesUseDistinctRoutesWithSharedCodecs()
         {
-            Assert.AreEqual(NetDelivery.Reliable, GameNetRoutes.GomokuRoomSnapshot.Delivery);
-            Assert.AreEqual(NetDelivery.Reliable, GameNetRoutes.GomokuRoomClosed.Delivery);
-            Assert.AreNotEqual(GameNetRoutes.GomokuRoomSnapshot.Opcode, GameNetRoutes.GomokuRoomClosed.Opcode);
-            Assert.AreSame(GameNetRoutes.GomokuRoomSnapshot.Codec, GameNetRoutes.GomokuRoomClosed.Codec);
+            Assert.AreEqual(NetDelivery.Reliable, GomokuRoutes.GomokuRoomSnapshot.Delivery);
+            Assert.AreEqual(NetDelivery.Reliable, GomokuRoutes.GomokuRoomClosed.Delivery);
+            Assert.AreNotEqual(GomokuRoutes.GomokuRoomSnapshot.Opcode, GomokuRoutes.GomokuRoomClosed.Opcode);
+            Assert.AreSame(GomokuRoutes.GomokuRoomSnapshot.Codec, GomokuRoutes.GomokuRoomClosed.Codec);
             Assert.AreEqual(0, GameNetProtocol.Catalog.MaxUnreliableBodyBytes);
-            GameNetProtocol.Catalog.RequireRegistered(GameNetRoutes.GomokuRoomClosed);
+            GameNetProtocol.Catalog.RequireRegistered(GomokuRoutes.GomokuRoomClosed);
         }
 
         private static IEnumerable<TestCaseData> GoldenVectors()
@@ -201,9 +204,34 @@ namespace GameFrame.Tests
             }
         }
 
-        private static byte[] Serialize<T>(object value)
+        private static byte[] Serialize<T>(object value) where T : class
         {
-            return MemoryPackSerializer.Serialize((T)value, MemoryPackSerializerOptions.Utf8);
+            byte[] bytes = MemoryPackSerializer.Serialize((T)value, MemoryPackSerializerOptions.Utf8);
+            foreach (NetRoute route in GameNetProtocol.Catalog.Routes)
+            {
+                foreach (PropertyInfo property in route.GetType().GetProperties(BindingFlags.Instance | BindingFlags.NonPublic))
+                {
+                    if (property.PropertyType != typeof(NetMessageCodec<T>))
+                    {
+                        continue;
+                    }
+
+                    int limit = property.Name == "ResponseCodec" ? route.ResponseMaxBodyBytes : route.MaxBodyBytes;
+                    var memory = new FrameMemoryBudget(32 + limit + FrameMemoryBudget.FrameRecordReservation);
+                    using (OwnedFrame frame = memory.Allocate(32 + limit))
+                    {
+                        var writer = new BoundedFrameWriter(frame);
+                        ((NetMessageCodec<T>)property.GetValue(route)).Encode(writer, (T)value);
+                        writer.Complete(FrameKind.Request, route.Opcode, 1);
+                        Assert.LessOrEqual(writer.BodyLength, limit);
+                        CollectionAssert.AreEqual(bytes, frame.Body.ToArray());
+                    }
+
+                    Assert.AreEqual(0, memory.OwnedBytes);
+                }
+            }
+
+            return bytes;
         }
 
         private static object CreateSample(Type type, string mode)

@@ -1,3 +1,4 @@
+using Game.Protocol.Diagnostics;
 using System.Net;
 using GameFrame.Network;
 using NUnit.Framework;
@@ -18,7 +19,7 @@ namespace GameFrame.Tests
         {
             var options = new KcpServerOptions();
             typeof(KcpServerOptions).GetProperty(property)!.SetValue(options, value);
-            var application = ServerCloseTests.Application((_, _, _) => Task.FromResult(new Game.Protocol.EchoResponse()));
+            var application = ServerCloseTests.Application((_, _, _) => Task.FromResult(new Game.Protocol.Diagnostics.EchoResponse()));
             ArgumentOutOfRangeException error = Assert.Throws<ArgumentOutOfRangeException>(() =>
                 new KcpListenerHost(new IPEndPoint(IPAddress.Loopback, 0), application, options))!;
             Assert.That(error.ParamName, Is.EqualTo(property));

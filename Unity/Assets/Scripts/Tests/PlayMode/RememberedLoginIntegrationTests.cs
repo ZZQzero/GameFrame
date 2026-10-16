@@ -7,7 +7,8 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using Game.Hotfix;
-using Game.Protocol;
+using Game.Protocol.Common;
+using Game.Protocol.Diagnostics;
 using GameFrame.Network;
 using NUnit.Framework;
 using TMPro;
@@ -119,7 +120,7 @@ namespace GameFrame.Tests
             Assert.IsInstanceOf<IOException>(result.RememberedLoginError);
             Assert.AreEqual(id, resumed.CurrentUser.AccountId);
             Assert.IsFalse((await store.ReadAsync()).CanResume);
-            EchoResponse echo = await resumed.LobbyClient.RequestAsync(GameNetRoutes.Echo,
+            EchoResponse echo = await resumed.LobbyClient.RequestAsync(DiagnosticsRoutes.Echo,
                 new EchoRequest { Text = "authenticated-without-persistence" }, TimeSpan.FromSeconds(5));
             Assert.AreEqual("authenticated-without-persistence", echo.Text);
         });

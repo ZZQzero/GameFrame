@@ -4,6 +4,7 @@ using System.Diagnostics.Metrics;
 using System.Security.Cryptography;
 using System.Threading.Channels;
 using Game.Protocol;
+using Game.Protocol.Diagnostics;
 using GameFrame.Network;
 using Microsoft.Extensions.Logging;
 using NUnit.Framework;
@@ -31,12 +32,12 @@ namespace GameFrame.Tests
             Func<ServerConnectionContext, ServerSession>? session = null)
         {
             var application = new ServerApplication(TransportTestProtocol.Catalog, session);
-            application.Rpc(GameNetRoutes.Echo, echo ?? Echo);
+            application.Rpc(DiagnosticsRoutes.Echo, echo ?? Echo);
             application.Notify(TransportTestProtocol.UnreliableSend, move ?? ((_, _, _) => Task.CompletedTask));
             application.Notify(TransportTestProtocol.ReliableSend, move ?? ((_, _, _) => Task.CompletedTask));
             foreach (NetRoute route in GameNetProtocol.Catalog.Routes)
             {
-                if (route.Kind != NetRouteKind.Push && route != GameNetRoutes.Echo)
+                if (route.Kind != NetRouteKind.Push && route != DiagnosticsRoutes.Echo)
                 {
                     application.Reject(route);
                 }
@@ -172,7 +173,7 @@ namespace GameFrame.Tests
                     release.Task.GetAwaiter().GetResult();
                 });
                 await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-                pending = client.Request(GameNetRoutes.Echo, new EchoRequest { Text = "unacknowledged" },
+                pending = client.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "unacknowledged" },
                     TimeSpan.FromSeconds(10), default);
                 long deadline = NetworkClock.GetMilliseconds() + 5000;
                 while (client.Metrics().Kcp.Waitsnd == 0 && NetworkClock.GetMilliseconds() < deadline)
@@ -288,8 +289,8 @@ namespace GameFrame.Tests
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(35));
                 await PumpUntil(client, client.ConnectTask);
                 ServerConnectionContext server = await session.Entered.Task.WaitAsync(timeout.Token);
-                Task<EchoResponse> first = client.Request(GameNetRoutes.Echo, new EchoRequest { Text = "first" }, TimeSpan.FromSeconds(30), default);
-                Task<EchoResponse> second = client.Request(GameNetRoutes.Echo, new EchoRequest { Text = "second" }, TimeSpan.FromSeconds(30), default);
+                Task<EchoResponse> first = client.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "first" }, TimeSpan.FromSeconds(30), default);
+                Task<EchoResponse> second = client.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "second" }, TimeSpan.FromSeconds(30), default);
                 ServerMessageHeader one = await session.Admissions.Reader.ReadAsync(timeout.Token);
                 ServerMessageHeader two = await session.Admissions.Reader.ReadAsync(timeout.Token);
                 Assert.That(two.CorrelationId, Is.GreaterThan(one.CorrelationId));
@@ -344,7 +345,7 @@ namespace GameFrame.Tests
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                 await PumpUntil(client, client.ConnectTask);
                 ServerConnectionContext server = await session.Entered.Task.WaitAsync(timeout.Token);
-                Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(5), default);
+                Task<EchoResponse> request = client.Request(DiagnosticsRoutes.Echo, new EchoRequest(), TimeSpan.FromSeconds(5), default);
                 await session.Admissions.Reader.ReadAsync(timeout.Token);
                 var failure = new InvalidOperationException("Initialization failed.");
                 if (shutdown == "failure")
@@ -413,7 +414,7 @@ namespace GameFrame.Tests
                 {
                     long start = System.Diagnostics.Stopwatch.GetTimestamp();
                     string text = $"sample-{i}";
-                    Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest { Text = text }, TimeSpan.FromSeconds(2), default);
+                    Task<EchoResponse> request = client.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = text }, TimeSpan.FromSeconds(2), default);
                     await PumpUntil(client, request);
                     Assert.That(request.Result.Text, Is.EqualTo(text));
                     if (i == 15)
@@ -477,7 +478,7 @@ namespace GameFrame.Tests
                 Assert.That(client.ConnectTask.IsCompleted, Is.False);
                 release.Set();
                 await PumpUntil(client, client.ConnectTask);
-                Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest { Text = "published" }, TimeSpan.FromSeconds(2), default);
+                Task<EchoResponse> request = client.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "published" }, TimeSpan.FromSeconds(2), default);
                 await PumpUntil(client, request);
                 Assert.That(request.Result.Text, Is.EqualTo("published"));
                 await Close(client);
@@ -533,7 +534,7 @@ namespace GameFrame.Tests
                 Assert.Throws<ArgumentException>(() => secondServer.TryPushUnreliable(TransportTestProtocol.ReliablePush, new EchoRequest()));
                 await firstServer.CloseAsync().WaitAsync(timeout.Token);
                 await firstServer.CloseAsync().WaitAsync(timeout.Token);
-                Task<EchoResponse> rpc = second.Request(GameNetRoutes.Echo, new EchoRequest { Text = "isolated" }, TimeSpan.FromSeconds(2), default);
+                Task<EchoResponse> rpc = second.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "isolated" }, TimeSpan.FromSeconds(2), default);
                 await PumpUntil(second, rpc);
                 Assert.That(rpc.Result.Text, Is.EqualTo("isolated"));
                 Assert.Throws<OperationCanceledException>(() => firstServer.PushAsync(TransportTestProtocol.ReliablePush, new EchoRequest()));
@@ -599,10 +600,10 @@ namespace GameFrame.Tests
                 ServerConnectionContext one = await connected.Reader.ReadAsync(timeout.Token);
                 ServerConnectionContext two = await connected.Reader.ReadAsync(timeout.Token);
                 ServerConnectionContext server = one.GrantId == firstGrant.Grant ? one : two;
-                Task<EchoResponse> blocked = first.Request(GameNetRoutes.Echo, new EchoRequest { Text = "blocked" },
+                Task<EchoResponse> blocked = first.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "blocked" },
                     TimeSpan.FromSeconds(4), default);
                 await entered.Task.WaitAsync(timeout.Token);
-                Task<EchoResponse> queued = first.Request(GameNetRoutes.Echo, new EchoRequest { Text = "blocked" },
+                Task<EchoResponse> queued = first.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "blocked" },
                     TimeSpan.FromSeconds(4), default);
                 Exception? remoteError = null;
                 first.StateChanged = (_, error) => remoteError ??= error;
@@ -625,7 +626,7 @@ namespace GameFrame.Tests
                 Assert.CatchAsync<NetworkException>(async () => await blocked);
                 Assert.CatchAsync<NetworkException>(async () => await queued);
                 Assert.That(oldCalls, Is.EqualTo(1));
-                Task<EchoResponse> healthy = second.Request(GameNetRoutes.Echo, new EchoRequest { Text = "healthy" },
+                Task<EchoResponse> healthy = second.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "healthy" },
                     TimeSpan.FromSeconds(2), default);
                 await PumpUntil(second, healthy);
                 Assert.That(healthy.Result.Text, Is.EqualTo("healthy"));
@@ -664,7 +665,7 @@ namespace GameFrame.Tests
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                 await PumpUntil(client, client.ConnectTask);
                 ServerConnectionContext server = await connected.Reader.ReadAsync(timeout.Token);
-                Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest { Text = "private-message" },
+                Task<EchoResponse> request = client.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "private-message" },
                     TimeSpan.FromSeconds(3), default);
                 Assert.CatchAsync<NetworkException>(async () => await PumpUntil(client, request));
                 ServerCloseInfo closed = await server.Completion.WaitAsync(timeout.Token);
@@ -677,7 +678,7 @@ namespace GameFrame.Tests
                 Assert.That(entry.Fields["Generation"], Is.EqualTo(server.Generation));
                 Assert.That(entry.Fields["Transport"], Is.EqualTo(NetworkTransportKind.Kcp));
                 Assert.That(entry.Fields["Stage"], Is.EqualTo("Dispatch"));
-                Assert.That(entry.Fields["Opcode"], Is.EqualTo(GameNetRoutes.Echo.Opcode));
+                Assert.That(entry.Fields["Opcode"], Is.EqualTo(DiagnosticsRoutes.Echo.Opcode));
                 Assert.That(entry.Fields["CorrelationId"], Is.Not.EqualTo(0UL));
                 Assert.That(entry.Fields["ExceptionStack"], Is.Not.Empty);
                 Assert.That(logs.Entries.All(entry => entry.Error == null &&
@@ -713,7 +714,7 @@ namespace GameFrame.Tests
             try
             {
                 await PumpUntil(client, client.ConnectTask);
-                Task<EchoResponse> request = client.Request(GameNetRoutes.Echo, new EchoRequest { Text = "last reply" },
+                Task<EchoResponse> request = client.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "last reply" },
                     TimeSpan.FromSeconds(2), default);
                 await PumpUntil(client, request);
                 Assert.That(request.Result.Text, Is.EqualTo("last reply"));
@@ -774,7 +775,7 @@ namespace GameFrame.Tests
                 await PumpUntil(context, context.ConnectTask);
                 for (int i = 0; i < 3; i++)
                 {
-                    requests.Add(context.Request(GameNetRoutes.Echo, new EchoRequest { Text = (i + 1).ToString() }, TimeSpan.FromSeconds(5), default));
+                    requests.Add(context.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = (i + 1).ToString() }, TimeSpan.FromSeconds(5), default));
                 }
                 await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
                 bool queued = false;
@@ -841,7 +842,7 @@ namespace GameFrame.Tests
                     int pending = context.Metrics().PendingCount;
                     try
                     {
-                        requests.Add(context.Request(GameNetRoutes.Echo, new EchoRequest { Text = new string('界', 128) },
+                        requests.Add(context.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = new string('界', 128) },
                             TimeSpan.FromSeconds(5), default));
                     }
                     catch (NetworkBackpressureException)
@@ -905,7 +906,7 @@ namespace GameFrame.Tests
                     Assert.That(blocked, Is.True);
                 }
                 Assert.That(context.TrySendUnreliable(TransportTestProtocol.UnreliableSend, new EchoRequest()), Is.True);
-                Task<EchoResponse> reliable = context.Request(GameNetRoutes.Echo, new EchoRequest { Text = "priority" },
+                Task<EchoResponse> reliable = context.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "priority" },
                     TimeSpan.FromSeconds(2), default);
                 await PumpUntil(context, reliable);
                 Assert.That(reliable.Result.Text, Is.EqualTo("priority"));
@@ -941,7 +942,7 @@ namespace GameFrame.Tests
                 await PumpUntil(context, context.ConnectTask);
                 Assert.That(context.State, Is.EqualTo(NetworkClientState.Connected));
                 Assert.That(memory.OwnedBytes, Is.GreaterThanOrEqualTo(4 * 1024 * 1024));
-                Task<EchoResponse> request = context.Request(GameNetRoutes.Echo, new EchoRequest { Text = "native UDP" }, TimeSpan.FromSeconds(2), default);
+                Task<EchoResponse> request = context.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "native UDP" }, TimeSpan.FromSeconds(2), default);
                 await PumpUntil(context, request);
                 Assert.That(request.Result.Text, Is.EqualTo("native UDP"));
                 await Close(context);
@@ -981,7 +982,7 @@ namespace GameFrame.Tests
                 var memory = new FrameMemoryBudget(64 * 1024 * 1024);
                 context = Context(grant.Connect, memory, worker);
                 await PumpUntil(context, context.ConnectTask);
-                Task<EchoResponse> request = context.Request(GameNetRoutes.Echo, new EchoRequest { Text = "cancel" },
+                Task<EchoResponse> request = context.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "cancel" },
                     TimeSpan.FromSeconds(5), default);
                 await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
@@ -1024,7 +1025,7 @@ namespace GameFrame.Tests
                 await PumpUntil(first, first.ConnectTask);
                 await PumpUntil(second, second.ConnectTask);
                 await Close(first);
-                Task<EchoResponse> request = second.Request(GameNetRoutes.Echo, new EchoRequest { Text = "still alive" }, TimeSpan.FromSeconds(2), default);
+                Task<EchoResponse> request = second.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "still alive" }, TimeSpan.FromSeconds(2), default);
                 await PumpUntil(second, request);
                 Assert.That(request.Result.Text, Is.EqualTo("still alive"));
                 await Close(second);
@@ -1056,7 +1057,7 @@ namespace GameFrame.Tests
                 Assert.ThrowsAsync<NetworkException>(async () => await PumpUntil(rejected, rejected.ConnectTask));
                 await Close(rejected);
 
-                Task<EchoResponse> reply = healthy.Request(GameNetRoutes.Echo, new EchoRequest { Text = "handshake isolated" },
+                Task<EchoResponse> reply = healthy.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "handshake isolated" },
                     TimeSpan.FromSeconds(2), default);
                 await PumpUntil(healthy, reply);
                 Assert.That(reply.Result.Text, Is.EqualTo("handshake isolated"));
@@ -1091,11 +1092,11 @@ namespace GameFrame.Tests
             try
             {
                 await PumpUntil(context, context.ConnectTask);
-                Task<EchoResponse> slow = context.Request(GameNetRoutes.Echo, new EchoRequest { Text = "late", DelayMs = 100 }, TimeSpan.FromMilliseconds(30), default);
+                Task<EchoResponse> slow = context.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "late", DelayMs = 100 }, TimeSpan.FromMilliseconds(30), default);
                 // Cross a heartbeat interval while application Pump is paused; both IO owners keep responding.
                 await Task.Delay(6000);
                 Assert.ThrowsAsync<NetworkRequestTimeoutException>(async () => await PumpUntil(context, slow));
-                Task<EchoResponse> next = context.Request(GameNetRoutes.Echo, new EchoRequest { Text = "continued" }, TimeSpan.FromSeconds(2), default);
+                Task<EchoResponse> next = context.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "continued" }, TimeSpan.FromSeconds(2), default);
                 await PumpUntil(context, next);
                 Assert.That(next.Result.Text, Is.EqualTo("continued"));
                 await Close(context);
@@ -1120,7 +1121,7 @@ namespace GameFrame.Tests
             {
                 await PumpUntil(context, context.ConnectTask);
                 await host.RevokeGrantAsync(grant.Grant);
-                Task<EchoResponse> request = context.Request(GameNetRoutes.Echo, new EchoRequest { Text = "revoked" }, TimeSpan.FromMilliseconds(150), default);
+                Task<EchoResponse> request = context.Request(DiagnosticsRoutes.Echo, new EchoRequest { Text = "revoked" }, TimeSpan.FromMilliseconds(150), default);
                 Assert.ThrowsAsync<NetworkRequestTimeoutException>(async () => await PumpUntil(context, request));
                 await Close(context);
                 var nextGrant = await Grant(host, 402);

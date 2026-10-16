@@ -1,6 +1,6 @@
 syntax = "proto3";
 package game.protocol.gomoku;
-option csharp_namespace = "Game.Protocol";
+option csharp_namespace = "Game.Protocol.Gomoku";
 import "Common/net_options.proto";
 
 enum GomokuRoomState { Waiting = 0; Playing = 1; Finished = 2; Closed = 3; }
@@ -14,16 +14,37 @@ enum GomokuResult {
 
 // Command IDs strictly increase for one authenticated binding. Old IDs are never
 // executed after cache eviction. Only Query is used to resolve uncertain outcomes.
-message GomokuCommand {
+message CreateRoomRequest {
+  uint64 command_id = 1;
+}
+message JoinRoomRequest {
+  uint64 command_id = 1;
+  string room_code = 2 [(game.net.max_utf16) = 8, (game.net.max_utf8) = 8];
+}
+message SetReadyRequest {
   uint64 command_id = 1;
   string room_id = 2 [(game.net.max_utf16) = 32, (game.net.max_utf8) = 32];
   uint64 expected_version = 3;
-  string room_code = 4 [(game.net.max_utf16) = 8, (game.net.max_utf8) = 8];
-  bool ready = 5;
-  int32 column = 6;
-  int32 row = 7;
+  bool ready = 4;
 }
-message GomokuQuery {
+message StartGameRequest {
+  uint64 command_id = 1;
+  string room_id = 2 [(game.net.max_utf16) = 32, (game.net.max_utf8) = 32];
+  uint64 expected_version = 3;
+}
+message PlaceMoveRequest {
+  uint64 command_id = 1;
+  string room_id = 2 [(game.net.max_utf16) = 32, (game.net.max_utf8) = 32];
+  uint64 expected_version = 3;
+  int32 column = 4;
+  int32 row = 5;
+}
+// Leave remains valid even when the local board version is stale.
+message LeaveRoomRequest {
+  uint64 command_id = 1;
+  string room_id = 2 [(game.net.max_utf16) = 32, (game.net.max_utf8) = 32];
+}
+message QueryRoomRequest {
   uint64 command_id = 1;
 }
 message GomokuMember {

@@ -5,7 +5,7 @@ using System.Runtime.Serialization;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using Game.Hotfix;
-using Game.Protocol;
+using Game.Protocol.Gomoku;
 using GameFrame.Network;
 using GameFrame.UI;
 using NUnit.Framework;
@@ -46,33 +46,36 @@ namespace GameFrame.Tests
         }
 
         [UnityTearDown]
-        public IEnumerator TearDown() => UniTask.ToCoroutine(async () =>
+        public IEnumerator TearDown()
         {
-            if (panelObject != null)
+            yield return UniTask.ToCoroutine(async () =>
             {
-                panelObject.GetComponent<UIPanel>().DispatchDestroy();
-                UnityEngine.Object.Destroy(panelObject);
-            }
+                if (panelObject != null)
+                {
+                    panelObject.GetComponent<UIPanel>().DispatchDestroy();
+                    UnityEngine.Object.Destroy(panelObject);
+                }
 
-            if (client != null)
-            {
-                typeof(NetworkClient).GetField("context", Private).SetValue(client, null);
-            }
+                if (client != null)
+                {
+                    typeof(NetworkClient).GetField("context", Private).SetValue(client, null);
+                }
 
-            if (room != null)
-            {
-                await room.DisposeAsync();
-            }
+                if (room != null)
+                {
+                    await room.DisposeAsync();
+                }
 
-            if (login != null)
-            {
-                await login.DisposeAsync();
-            }
+                if (login != null)
+                {
+                    await login.DisposeAsync();
+                }
 
-            await runtime.ShutdownAsync();
-            UnityEngine.Object.Destroy(root);
-            await UniTask.NextFrame();
-        });
+                await runtime.ShutdownAsync();
+                UnityEngine.Object.Destroy(root);
+                await UniTask.NextFrame();
+            });
+        }
 
         sealed class AuthenticationScope : IDisposable
         {

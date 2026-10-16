@@ -5,6 +5,9 @@ using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Game.Protocol;
+using Game.Protocol.Common;
+using Game.Protocol.Diagnostics;
+using Game.Protocol.Session;
 using Game.Server;
 using Game.Server.Configuration;
 using Game.Server.Login;
@@ -152,10 +155,10 @@ namespace GameFrame.Tests
             using var service = new AuthenticationService(repository, sessions, new LoginOptions());
             await service.RegisterAsync("player", "valid-password", guard.Token);
             await Start(new LobbyApplication(new LoginModule(sessions, service, options)).Application);
-            await Send(GameNetRoutes.Login, new LoginRequest { Account = "player", Password = "valid-password" });
+            await Send(SessionRoutes.Login, new LoginRequest { Account = "player", Password = "valid-password" });
             using (OwnedFrame response = (await Receive())!)
             {
-                Assert.That(GameNetRoutes.Login.ResponseCodec.Decode(response.Body).ResultCode, Is.EqualTo(ResultCode.Success));
+                Assert.That(SessionRoutes.Login.ResponseCodec.Decode(response.Body).ResultCode, Is.EqualTo(ResultCode.Success));
             }
 
             if (revoke)
@@ -180,11 +183,11 @@ namespace GameFrame.Tests
                 await Start(new LobbyApplication(new LoginModule(sessions, service, new LoginOptions())).Application);
                 if (register)
                 {
-                    await Send(GameNetRoutes.Register, new RegisterRequest { Account = "player", Password = "valid-password" });
+                    await Send(SessionRoutes.Register, new RegisterRequest { Account = "player", Password = "valid-password" });
                 }
                 else
                 {
-                    await Send(GameNetRoutes.Login, new LoginRequest { Account = "player", Password = "valid-password" });
+                    await Send(SessionRoutes.Login, new LoginRequest { Account = "player", Password = "valid-password" });
                 }
 
                 using (OwnedFrame response = (await Receive())!)
@@ -201,10 +204,10 @@ namespace GameFrame.Tests
 
                 if (register)
                 {
-                    await Send(GameNetRoutes.Register, new RegisterRequest { Account = "player", Password = "valid-password" }, 2);
+                    await Send(SessionRoutes.Register, new RegisterRequest { Account = "player", Password = "valid-password" }, 2);
                     using OwnedFrame response = (await Receive())!;
                     Assert.That(response.Header.StatusCode, Is.Zero);
-                    Assert.That(GameNetRoutes.Register.ResponseCodec.Decode(response.Body).ResultCode, Is.EqualTo(ResultCode.Success));
+                    Assert.That(SessionRoutes.Register.ResponseCodec.Decode(response.Body).ResultCode, Is.EqualTo(ResultCode.Success));
                 }
                 else
                 {
@@ -239,7 +242,7 @@ namespace GameFrame.Tests
                 context = connection;
                 throw failure;
             }));
-            await Send(GameNetRoutes.Echo, new EchoRequest { Text = secret }, 42);
+            await Send(DiagnosticsRoutes.Echo, new EchoRequest { Text = secret }, 42);
             using (OwnedFrame response = (await Receive())!)
             {
                 Assert.That(response.Header.StatusCode, Is.EqualTo(3));
@@ -253,7 +256,7 @@ namespace GameFrame.Tests
             Assert.That(entry.Fields["ConnectionId"], Is.EqualTo(context!.Id));
             Assert.That(entry.Fields["Generation"], Is.EqualTo(context.Generation));
             Assert.That(entry.Fields["Transport"], Is.EqualTo(NetworkTransportKind.WebSocket));
-            Assert.That(entry.Fields["Opcode"], Is.EqualTo(GameNetRoutes.Echo.Opcode));
+            Assert.That(entry.Fields["Opcode"], Is.EqualTo(DiagnosticsRoutes.Echo.Opcode));
             Assert.That(entry.Fields["CorrelationId"], Is.EqualTo(42UL));
             Assert.That(entry.Fields["Stage"], Is.EqualTo("Dispatch"));
             Assert.That(entry.Fields["ExceptionStack"], Is.Not.Empty);
@@ -291,7 +294,7 @@ namespace GameFrame.Tests
                 connection.RequestClose(1);
                 return Task.FromResult(new EchoResponse());
             }, _ => session));
-            await Send(GameNetRoutes.Echo, new EchoRequest());
+            await Send(DiagnosticsRoutes.Echo, new EchoRequest());
             if (failHandler)
             {
                 using OwnedFrame response = (await Receive())!;

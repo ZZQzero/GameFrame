@@ -15,12 +15,14 @@ enum Delivery {
   DELIVERY_UNRELIABLE = 2;
 }
 
+message Route {
+  uint32 opcode = 1;
+  RouteKind kind = 2;
+  Delivery delivery = 3;
+}
+
 extend google.protobuf.MethodOptions {
-  uint32 opcode = 51001;
-  RouteKind route_kind = 51002;
-  Delivery delivery = 51003;
-  uint32 max_body = 51004;
-  uint32 response_max_body = 51005;
+  Route route = 51006;
 }
 
 extend google.protobuf.FieldOptions {

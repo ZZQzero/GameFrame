@@ -33,7 +33,7 @@ SDK 由 `DotNet/global.json`、`Tools/global.json` 锁定为 10.0.401，工程�
 
 `DotNet/NetworkProtocol` 加入服务端解决方案，提供 Generate/Check IDE 启动项；Unity Editor 菜单通过外部 .NET 进程调用同一工具。生成器只依赖 Core 和生成/编译库，不引用 Game.Protocol，保持缺失既有生成文件时仍能运行。协议源、正式生成文件与共享源码引用位置保持一致，详见双方使用说明。
 
-Core、客户端 Runtime 网络和 Server 网络统一使用 `GameFrame.Network`，目录分类不对应独立子命名空间。程序集名称、共享源码链接与依赖边界保持独立；同名空间不代表业务可以访问内部类型。双端生成 DTO、枚举、GameNetRoutes 和 GameNetProtocol 统一使用 `Game.Protocol`；生成器与游戏业务保留各自命名空间。协议完整类型名参与 manifest 和指纹，命名空间变更后必须重新生成并同步更新两端。
+Core、客户端 Runtime 网络和 Server 网络统一使用 `GameFrame.Network`，目录分类不对应独立子命名空间。程序集名称、共享源码链接与依赖边界保持独立；同名空间不代表业务可以访问内部类型。双端生成 DTO、枚举和 `<Module>Routes` 使用 `Game.Protocol.<Module>`，统一 catalog 入口仍为 `Game.Protocol.GameNetProtocol`；生成器与游戏业务保留各自命名空间。协议完整类型名参与 manifest 和指纹，命名空间变更后必须重新生成并同步更新两端。
 
 诊断 meter 的 `GameFrame.Server.Network.Kcp` 是独立指标标识，不是 C# 命名空间；本次保留该标识及既有采集配置。
 
@@ -180,12 +180,16 @@ Hello 前只允许所需控制包。当前 WSS 示例在 Hello 后仍未登录�
 
 唯一手写源是 `Protocol/**/*.proto`，Proto 只是 IDL；线上正文是 MemoryPack 1.21.4 UTF-8 Object/Explicit 布局，不使用 Protobuf Binary、MessagePack 或 VersionTolerant。正式产物、生成命令见 [服务端使用说明](DotNetUsage.md#协议生成与验证)。
 
+正式产物按 Protocol 下一级业务目录归属，Common/Session/Gomoku/Diagnostics 分别生成 `<Module>Messages.g.cs`，统一 `GameNetProtocol.cs` 只汇总 catalog 和 hash。模块类型进入 `Game.Protocol.<Module>`，各模块生成独立 `<Module>Routes` 和内部 `<Module>Codecs`；不保留 GameNetRoutes、GameNetMessages.cs 或旧聚合生成模式。模块目录须为有效 C# 标识符且大小写不敏感也唯一；同模块 Proto 的 package/namespace 一致，真实字段/请求/响应引用形成无环模块依赖；开发 Generated 目录和选项定义不生成业务类型。同一模块的 C# namespace 必须与目录一致，不同模块使用不同 Proto package；路由预算已按字段约束和 MemoryPack 1.21.4 布局自动计算，见 6.2。
+
+五子棋六条命令与查询分别使用 `CreateRoomRequest`、`JoinRoomRequest`、`SetReadyRequest`、`StartGameRequest`、`PlaceMoveRequest`、`LeaveRoomRequest`、`QueryRoomRequest`，响应继续共用 `GomokuResponse`。`GomokuModule` 将专用 DTO 转为 Game.Server 内部不可变 `GomokuRoomCommand`，复用原鉴权、提交锁、command ID 高水位与回执缓存；幂等指纹只包含操作和其有效字段。Leave 不携带或检查预期版本，沿用现有离房语义。Query 的 `CommandKnown=false` 继续表示无已知回执，不自动重发命令；不恢复旧 `GomokuCommand/GomokuQuery` 或增加运行时兼容。
+
 ### 6.1 消息与字段
 
 ```proto
 syntax = "proto3";
 package game.protocol.example;
-option csharp_namespace = "Game.Protocol";
+option csharp_namespace = "Game.Protocol.Example";
 import "Common/net_options.proto";
 
 message ExampleRequest {
@@ -199,7 +203,7 @@ message ExampleResponse {
 }
 ```
 
-字段从 1 连续编号，`= n` 生成 `[MemoryPackOrder(n - 1)]`；声明顺序、注释、空白与文件遍历顺序不改变协议。字段名 snake_case 转 PascalCase，检查转换后名称冲突。每个文件显式声明 package 与 csharp_namespace；跨文件类型通过 import 和完整 Proto 类型名解析。当前 catalog 的 codec/校验器名称要求 DTO 与枚举简单类名全目录唯一，冲突时报错。
+字段从 1 连续编号，`= n` 生成 `[MemoryPackOrder(n - 1)]`；声明顺序、注释、空白与文件遍历顺序不改变协议。字段名 snake_case 转 PascalCase，检查转换后名称冲突。每个文件显式声明 package 与 csharp_namespace；跨文件类型通过 import 和完整 Proto 类型名解析。DTO/枚举按所属模块命名空间区分，同一模块内名称唯一；不同模块允许相同简单类名。跨模块类型和 codec/校验调用使用 global:: 完整限定名，节点与深度预算跨调用累计。
 
 | Proto | MemoryPack C# 类型/约束 |
 | --- | --- |
@@ -227,20 +231,22 @@ message ExampleResponse {
 ```proto
 service ExampleService {
   rpc Example(ExampleRequest) returns (ExampleResponse) {
-    option (game.net.opcode) = 3000;
-    option (game.net.route_kind) = ROUTE_KIND_RPC;
-    option (game.net.delivery) = DELIVERY_RELIABLE;
-    option (game.net.max_body) = 1024;
-    option (game.net.response_max_body) = 1024;
+    option (game.net.route) = {
+      opcode: 3000
+      kind: ROUTE_KIND_RPC
+      delivery: DELIVERY_RELIABLE
+    };
   }
 }
 ```
 
-route_kind 为 RPC、SERVER_PUSH 或 CLIENT_SEND。RPC 必须可靠且声明响应正文上限；Push/Notify 返回 google.protobuf.Empty（需 import google/protobuf/empty.proto），该类型只占位，不编码；它们不能声明非零响应正文上限。通道必须显式选择 DELIVERY_RELIABLE/DELIVERY_UNRELIABLE，不根据 opcode 数字位推断方向，不在运行时自动转换通道。
+每个 method 必须且只能声明一个 `game.net.route`，其 opcode、kind、delivery 均显式填写；kind 为 ROUTE_KIND_RPC、ROUTE_KIND_SERVER_PUSH 或 ROUTE_KIND_CLIENT_SEND。RPC 必须可靠，Push/Notify 返回 google.protobuf.Empty（需 import google/protobuf/empty.proto），该类型只占位、不编码。通道显式选择 DELIVERY_RELIABLE/DELIVERY_UNRELIABLE，不根据 opcode 数字位推断方向，不在运行时自动转换。未知/重复字段、漏字段、零或未知 kind/delivery 明确失败。原 opcode/route_kind/delivery 独立选项与 max_body/response_max_body 已删除，不提供旧写法或优先级兼容。
 
-opcode ≥1000 且在整个目录唯一，生成路由名称也全目录唯一。RPC 响应复用请求 opcode/correlationId；系统 1～999 保留在 Runtime 中，不写进业务 Proto。路由预算必须足够容纳所有声明字段的最大值，同时不超过 V1 通道预算。
+opcode ≥1000 且在整个目录唯一，生成路由成员名在所属模块内唯一，跨模块可同名。manifest 路由名称使用完整 Proto 标识（package.service.method），按 opcode 排序；冲突报告模块、完整标识和源文件。RPC 响应复用请求 opcode/correlationId；系统 1～999 保留在 Runtime 中，不写进业务 Proto。生成器同时推导最终编码长度和写入所需容量，用其保守上界生成请求/响应/Push 的路由预算，再核验 V1 通道上限（可靠正文 32736、不可靠正文 1118 字节）。对象头 1 字节、定宽标量/枚举、数组头 4 字节及元素、空引用和嵌套对象均按固定布局计算，checked 运算溢出明确失败；深度与节点上限继续独立校验。
 
-当前生产协议分为 Common、Session、Gomoku、Diagnostics，共 14 条路由，全部可靠；最大可靠正文 4096 字节、不可靠正文 0。保留 Register/Login/ResumeLogin/Logout、Echo 与五子棋命令/推送；删除尚无玩法实现的世界授权、入场/恢复/退出、移动、AOI 协议及专属结果码。删除后重新生成 DTO、catalog、manifest、hash 与 golden vectors，两端必须同步更新，不保留旧指纹兼容。
+UTF-8 非空字符串的编码上界为 `8 + min(max_utf8, 3 * max_utf16)`，空/null 为 4；MemoryPack WriteUtf8 先申请 `8 + 3 * (actualUtf16Length + 1)` 字节，容量上界中的实际 UTF-16 长度可取 `min(max_utf16, max_utf8)`。字段前缀和数组前面元素使用最终编码长度累计，峰值处加当前字段的容量上界。该规则保留精确大小 BoundedFrameWriter，不额外扩容或放宽 Advance；例如上限 8/8 的字符串单字段对象最终至多 17 字节，但连续写入容量需 36 字节。预算可保守，不能将单个 maximum 样本或最终编码长度直接当作写入容量。升级 MemoryPack 时须重新核对 writer 行为与边界用例。
+
+当前生产协议分为 Common、Session、Gomoku、Diagnostics，共 14 条路由，全部可靠；最大可靠正文预算 3094 字节、不可靠正文 0。保留 Register/Login/ResumeLogin/Logout、Echo 与五子棋命令/推送；删除尚无玩法实现的世界授权、入场/恢复/退出、移动、AOI 协议及专属结果码。删除后重新生成 DTO、catalog、manifest、hash 与 golden vectors，两端必须同步更新，不保留旧指纹兼容。
 
 底层 KCP 双通道测试使用测试专用 catalog 与独立指纹，不为测试保留生产业务占位。实时世界的字段、AOI 与输入序号是 [总体设计](NetworkDesign.md) 中的候选契约，后续随实际玩法重新定义并验证。
 

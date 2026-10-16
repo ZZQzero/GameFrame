@@ -1,5 +1,8 @@
 using System.Buffers;
 using Game.Protocol;
+using Game.Protocol.Common;
+using Game.Protocol.Diagnostics;
+using Game.Protocol.Session;
 using GameFrame.Network;
 using Game.Server;
 using Game.Server.Login;
@@ -46,14 +49,14 @@ namespace GameFrame.Tests
             await socket.NextSend(guard.Token);
             await socket.NextCompletedSend(guard.Token);
             var writer = new ArrayBufferWriter<byte>();
-            GameNetRoutes.Login.RequestCodec.Encode(writer, new LoginRequest { Account = "test", Password = "test-secret" });
+            SessionRoutes.Login.RequestCodec.Encode(writer, new LoginRequest { Account = "test", Password = "test-secret" });
             byte[] login = new byte[32 + writer.WrittenCount];
-            FrameCodec.WriteHeader(login, new FrameHeader(FrameKind.Request, GameNetRoutes.Login.Opcode, 1, writer.WrittenCount));
+            FrameCodec.WriteHeader(login, new FrameHeader(FrameKind.Request, SessionRoutes.Login.Opcode, 1, writer.WrittenCount));
             writer.WrittenSpan.CopyTo(login.AsSpan(32));
             socket.Enqueue(login);
             byte[] response = await socket.NextSend(guard.Token);
             await socket.NextCompletedSend(guard.Token);
-            Assert.That(GameNetRoutes.Login.ResponseCodec.Decode(response.AsSpan(32)).ResultCode, Is.EqualTo(ResultCode.Success));
+            Assert.That(SessionRoutes.Login.ResponseCodec.Decode(response.AsSpan(32)).ResultCode, Is.EqualTo(ResultCode.Success));
         }
 
         [TearDown]
@@ -77,15 +80,15 @@ namespace GameFrame.Tests
         {
             long binding = ((LobbySession)server.Context.Session).Binding;
             var writer = new ArrayBufferWriter<byte>();
-            GameNetRoutes.Echo.RequestCodec.Encode(writer, new EchoRequest { DelayMs = 100 });
+            DiagnosticsRoutes.Echo.RequestCodec.Encode(writer, new EchoRequest { DelayMs = 100 });
             byte[] echo = new byte[32 + writer.WrittenCount];
-            FrameCodec.WriteHeader(echo, new FrameHeader(FrameKind.Request, GameNetRoutes.Echo.Opcode, 2, writer.WrittenCount));
+            FrameCodec.WriteHeader(echo, new FrameHeader(FrameKind.Request, DiagnosticsRoutes.Echo.Opcode, 2, writer.WrittenCount));
             writer.WrittenSpan.CopyTo(echo.AsSpan(32));
             socket.Enqueue(echo);
             writer.Clear();
-            GameNetRoutes.Logout.RequestCodec.Encode(writer, new LogoutRequest());
+            SessionRoutes.Logout.RequestCodec.Encode(writer, new LogoutRequest());
             byte[] logout = new byte[32 + writer.WrittenCount];
-            FrameCodec.WriteHeader(logout, new FrameHeader(FrameKind.Request, GameNetRoutes.Logout.Opcode, 3, writer.WrittenCount));
+            FrameCodec.WriteHeader(logout, new FrameHeader(FrameKind.Request, SessionRoutes.Logout.Opcode, 3, writer.WrittenCount));
             writer.WrittenSpan.CopyTo(logout.AsSpan(32));
             socket.Enqueue(logout);
             socket.EnqueueTransportClose();
@@ -153,9 +156,9 @@ namespace GameFrame.Tests
         {
             socket.HoldBusiness = true;
             var writer = new ArrayBufferWriter<byte>();
-            GameNetRoutes.Echo.RequestCodec.Encode(writer, new EchoRequest());
+            DiagnosticsRoutes.Echo.RequestCodec.Encode(writer, new EchoRequest());
             byte[] request = new byte[32 + writer.WrittenCount];
-            FrameCodec.WriteHeader(request, new FrameHeader(FrameKind.Request, GameNetRoutes.Echo.Opcode, 2, writer.WrittenCount));
+            FrameCodec.WriteHeader(request, new FrameHeader(FrameKind.Request, DiagnosticsRoutes.Echo.Opcode, 2, writer.WrittenCount));
             writer.WrittenSpan.CopyTo(request.AsSpan(32));
             socket.Enqueue(request);
             await socket.NextSend(guard.Token);

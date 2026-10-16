@@ -5,6 +5,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using Game.Protocol;
+using Game.Protocol.Common;
+using Game.Protocol.Session;
 using GameFrame.Network;
 using UnityEngine;
 
@@ -159,8 +161,8 @@ namespace Game.Hotfix
 
                 long admission = NetworkClock.GetMilliseconds();
                 response = resume
-                    ? await client.RequestAsync(GameNetRoutes.ResumeLogin, resumeRequest, TimeSpan.FromSeconds(5), cancellation.Token)
-                    : await client.RequestAsync(GameNetRoutes.Login, request, TimeSpan.FromSeconds(5), cancellation.Token);
+                    ? await client.RequestAsync(SessionRoutes.ResumeLogin, resumeRequest, TimeSpan.FromSeconds(5), cancellation.Token)
+                    : await client.RequestAsync(SessionRoutes.Login, request, TimeSpan.FromSeconds(5), cancellation.Token);
                 cancellation.Token.ThrowIfCancellationRequested();
                 if (response.ResultCode != ResultCode.Success)
                 {
@@ -282,7 +284,7 @@ namespace Game.Hotfix
                 try
                 {
                     using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, cancellationToken);
-                    response = await client.RequestAsync(GameNetRoutes.Logout, new LogoutRequest(),
+                    response = await client.RequestAsync(SessionRoutes.Logout, new LogoutRequest(),
                         TimeSpan.FromSeconds(5), cancellation.Token);
                 }
                 catch (Exception error)

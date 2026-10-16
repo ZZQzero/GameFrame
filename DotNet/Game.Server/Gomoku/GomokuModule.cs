@@ -1,4 +1,4 @@
-using Game.Protocol;
+using Game.Protocol.Gomoku;
 using Game.Server.Sessions;
 using GameFrame.Network;
 
@@ -8,25 +8,33 @@ namespace Game.Server.Gomoku
     {
         internal static void Register(ServerApplication application, GomokuRooms? rooms)
         {
-            Register(application, rooms, GameNetRoutes.CreateGomokuRoom, GomokuOperation.Create);
-            Register(application, rooms, GameNetRoutes.JoinGomokuRoom, GomokuOperation.Join);
-            Register(application, rooms, GameNetRoutes.SetGomokuReady, GomokuOperation.Ready);
-            Register(application, rooms, GameNetRoutes.StartGomokuGame, GomokuOperation.Start);
-            Register(application, rooms, GameNetRoutes.PlaceGomokuMove, GomokuOperation.Move);
-            Register(application, rooms, GameNetRoutes.LeaveGomokuRoom, GomokuOperation.Leave);
+            Register(application, rooms, GomokuRoutes.CreateGomokuRoom, GomokuOperation.Create,
+                request => new GomokuRoomCommand(request.CommandId));
+            Register(application, rooms, GomokuRoutes.JoinGomokuRoom, GomokuOperation.Join,
+                request => new GomokuRoomCommand(request.CommandId, RoomCode: request.RoomCode));
+            Register(application, rooms, GomokuRoutes.SetGomokuReady, GomokuOperation.Ready,
+                request => new GomokuRoomCommand(request.CommandId, request.RoomId, request.ExpectedVersion, Ready: request.Ready));
+            Register(application, rooms, GomokuRoutes.StartGomokuGame, GomokuOperation.Start,
+                request => new GomokuRoomCommand(request.CommandId, request.RoomId, request.ExpectedVersion));
+            Register(application, rooms, GomokuRoutes.PlaceGomokuMove, GomokuOperation.Move,
+                request => new GomokuRoomCommand(request.CommandId, request.RoomId, request.ExpectedVersion,
+                    Column: request.Column, Row: request.Row));
+            Register(application, rooms, GomokuRoutes.LeaveGomokuRoom, GomokuOperation.Leave,
+                request => new GomokuRoomCommand(request.CommandId, request.RoomId));
             if (rooms == null)
             {
-                application.Reject(GameNetRoutes.QueryMyGomokuRoom);
+                application.Reject(GomokuRoutes.QueryMyGomokuRoom);
             }
             else
             {
-                application.Rpc(GameNetRoutes.QueryMyGomokuRoom, (connection, query, cancellation) =>
+                application.Rpc(GomokuRoutes.QueryMyGomokuRoom, (connection, query, cancellation) =>
                     Task.FromResult(rooms.Query(((LobbySession)connection.Session).RequireBinding(), connection, query.CommandId)));
             }
         }
 
-        private static void Register(ServerApplication application, GomokuRooms? rooms,
-            GameFrame.Network.NetRpc<GomokuCommand, GomokuResponse> route, GomokuOperation operation)
+        private static void Register<TRequest>(ServerApplication application, GomokuRooms? rooms,
+            NetRpc<TRequest, GomokuResponse> route, GomokuOperation operation, Func<TRequest, GomokuRoomCommand> map)
+            where TRequest : class
         {
             if (rooms == null)
             {
@@ -35,7 +43,7 @@ namespace Game.Server.Gomoku
             }
 
             application.Rpc(route, (connection, command, cancellation) =>
-                Task.FromResult(rooms.Execute(((LobbySession)connection.Session).RequireBinding(), connection, operation, command)));
+                Task.FromResult(rooms.Execute(((LobbySession)connection.Session).RequireBinding(), connection, operation, map(command))));
         }
     }
 }

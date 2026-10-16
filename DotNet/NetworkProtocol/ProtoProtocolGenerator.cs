@@ -17,28 +17,37 @@ namespace GameFrame.ProtocolTools
         public static IReadOnlyDictionary<string, byte[]> Generate(string protoRoot, bool includeArtifacts = false)
         {
             ProtoSchema schema = Load(protoRoot);
-            string messages = GenerateMessages(schema);
+            var messages = schema.Modules.Keys.ToDictionary(module => module,
+                module => GenerateMessages(schema, module), StringComparer.Ordinal);
             string scratch = Path.Combine(Path.GetTempPath(), "gameframe-protocol-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(scratch);
             try
             {
-                Assembly assembly = CompileMessages(messages, scratch);
+                Assembly assembly = CompileMessages(messages.Values.Select(source => MessageHeader + source), scratch);
                 Type Resolve(string name) => assembly.GetType(schema.Messages[name].CsharpName, true)!;
-                var definitions = schema.Routes.Select(route => new ProtocolRouteDefinition(route.Name,
-                    route.Opcode, route.Kind, route.Delivery, Resolve(route.Request),
-                    route.Response == null ? null : Resolve(route.Response), route.MaxBody, route.ResponseMaxBody));
+                var modules = schema.Modules.Keys.Select(module => new ProtocolModuleDefinition(module, schema.Modules[module].Namespace,
+                    schema.Messages.Values.Where(model => model.Module == module).Select(model => Resolve(model.Name))
+                        .Concat(schema.Enums.Values.Where(model => model.Module == module)
+                            .Select(model => assembly.GetType(model.CsharpName, true)!)).ToArray(),
+                    schema.Routes.Where(route => route.Module == module).Select(route => new ProtocolRouteDefinition(route.Name,
+                        route.MemberName, route.Source, route.Opcode, route.Kind, route.Delivery, Resolve(route.Request),
+                        route.Response == null ? null : Resolve(route.Response))).ToArray()));
                 var generator = new MemoryPackProtocolGenerator();
                 var outputs = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
-                IEnumerable<Type> types = schema.Messages.Keys.Select(Resolve)
-                    .Concat(schema.Enums.Values.Select(model => assembly.GetType(model.CsharpName, true)!));
-                foreach (var item in generator.Generate(types, definitions, includeArtifacts))
+                foreach (var item in generator.Generate(modules, includeArtifacts))
                 {
                     outputs.Add(item.Key, item.Value);
                 }
 
-                CompileMessages(messages, scratch, Encoding.UTF8.GetString(outputs[OutputDirectory + "GameNetProtocol.cs"]));
+                foreach (var module in messages)
+                {
+                    string path = OutputDirectory + module.Key + "Messages.g.cs";
+                    outputs[path] = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(outputs[path]) + "\n" + module.Value);
+                }
+
+                CompileMessages(outputs.Where(item => item.Key.EndsWith(".cs", StringComparison.Ordinal))
+                    .Select(item => Encoding.UTF8.GetString(item.Value)), scratch);
                 generator.ValidateSerializationInfo(scratch);
-                outputs.Add(OutputDirectory + "GameNetMessages.cs", Encoding.UTF8.GetBytes(messages));
                 return outputs;
             }
             finally
@@ -60,6 +69,11 @@ namespace GameFrame.ProtocolTools
                 .OrderBy(path => path, StringComparer.Ordinal))
             {
                 string relative = Path.GetRelativePath(protoRoot, path).Replace('\\', '/');
+                if (relative.StartsWith("Generated/", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 descriptors.Add(relative, true);
             }
 
@@ -83,6 +97,35 @@ namespace GameFrame.ProtocolTools
 
                 string space = file.Options?.CsharpNamespace ?? string.Empty;
                 RequireNamespace(space);
+                string module = file.Name.Split('/')[0];
+                if (!file.Name.Contains('/') || module.Equals("Generated", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException($"{file.Name}: business Proto must belong to a module directory.");
+                }
+
+                RequireIdentifier(module);
+                if (space != "Game.Protocol." + module)
+                {
+                    throw new InvalidOperationException($"{file.Name}: module {module} requires csharp_namespace Game.Protocol.{module}.");
+                }
+
+                if (result.Modules.Values.Any(value => value.Name != module && value.Package == file.Package))
+                {
+                    throw new InvalidOperationException($"{file.Name}: package {file.Package} is already owned by another module.");
+                }
+
+                if (result.Modules.TryGetValue(module, out ProtoModule? existingModule))
+                {
+                    if (existingModule.Name != module || existingModule.Package != file.Package || existingModule.Namespace != space)
+                    {
+                        throw new InvalidOperationException($"{file.Name}: conflicting module name, package or namespace for {module}.");
+                    }
+                }
+                else
+                {
+                    result.Modules.Add(module, new ProtoModule(module, file.Package, space));
+                }
+
                 if (file.Extensions.Count != 0)
                 {
                     throw new InvalidOperationException($"{file.Name}: business extensions are unsupported.");
@@ -97,7 +140,7 @@ namespace GameFrame.ProtocolTools
                     }
 
                     string fullName = "." + file.Package + "." + definition.Name;
-                    var model = new ProtoEnum(space + "." + definition.Name);
+                    var model = new ProtoEnum(space + "." + definition.Name, module);
                     var names = new HashSet<string>(StringComparer.Ordinal);
                     var numbers = new HashSet<int>();
                     foreach (EnumValueDescriptorProto value in definition.Values)
@@ -128,7 +171,7 @@ namespace GameFrame.ProtocolTools
                     }
 
                     string fullName = "." + file.Package + "." + message.Name;
-                    var model = new ProtoMessage(fullName, space + "." + message.Name);
+                    var model = new ProtoMessage(fullName, space + "." + message.Name, module);
                     if (!result.Messages.TryAdd(fullName, model) ||
                         result.Messages.Values.Count(value => value.CsharpName == model.CsharpName) != 1)
                     {
@@ -186,17 +229,22 @@ namespace GameFrame.ProtocolTools
                             throw new InvalidOperationException($"{method.Name}: streaming RPC is unsupported.");
                         }
 
-                        uint opcode = Required<uint>(method.Options, 51001, "opcode");
-                        uint kind = Required<uint>(method.Options, 51002, "route_kind");
-                        uint delivery = Required<uint>(method.Options, 51003, "delivery");
-                        int bodyLimit = checked((int)Required<uint>(method.Options, 51004, "max_body"));
-                        int responseLimit = checked((int)Get<uint>(method.Options, 51005));
+                        string name = file.Package + "." + service.Name + "." + method.Name;
+                        var options = ReadRoute(method.Options, file.Name + ": " + name);
+                        uint opcode = options.Opcode;
+                        uint kind = options.Kind;
+                        uint delivery = options.Delivery;
+                        if (opcode < 1000 || (delivery != 1 && delivery != 2))
+                        {
+                            throw new InvalidOperationException($"{file.Name}: {name}: route requires opcode >= 1000 and an explicit valid delivery.");
+                        }
+
                         string kindName = kind switch
                         {
                             1 => "Rpc",
                             2 => "Push",
                             3 => "Notify",
-                            _ => throw new InvalidOperationException($"{method.Name}: unknown route_kind {kind}.")
+                            _ => throw new InvalidOperationException($"{file.Name}: {name}: route requires an explicit valid kind, got {kind}.")
                         };
                         if (!result.Messages.ContainsKey(method.InputType) ||
                             (kind == 1 ? !result.Messages.ContainsKey(method.OutputType) : method.OutputType != ".google.protobuf.Empty"))
@@ -204,13 +252,81 @@ namespace GameFrame.ProtocolTools
                             throw new InvalidOperationException($"{method.Name}: invalid input/response type; Push/Notify returns google.protobuf.Empty.");
                         }
 
-                        result.Routes.Add(new ProtoRoute(method.Name, opcode, kindName, (NetDelivery)delivery,
-                            method.InputType, kind == 1 ? method.OutputType : null, bodyLimit, responseLimit));
+                        result.Routes.Add(new ProtoRoute(file.Name.Split('/')[0], name, method.Name, file.Name,
+                            opcode, kindName, (NetDelivery)delivery, method.InputType,
+                            kind == 1 ? method.OutputType : null));
                     }
                 }
             }
 
+            ValidateModuleDependencies(result);
             return result;
+        }
+
+        private static void ValidateModuleDependencies(ProtoSchema schema)
+        {
+            var dependencies = schema.Modules.Keys.ToDictionary(module => module,
+                _ => new HashSet<string>(StringComparer.Ordinal), StringComparer.Ordinal);
+            void Add(string owner, string target)
+            {
+                if (owner != target)
+                {
+                    dependencies[owner].Add(target);
+                }
+            }
+
+            foreach (ProtoMessage message in schema.Messages.Values)
+            {
+                foreach (ProtoField field in message.Fields)
+                {
+                    if (field.MessageType != null)
+                    {
+                        Add(message.Module, schema.Messages[field.MessageType].Module);
+                    }
+
+                    if (field.EnumType != null)
+                    {
+                        Add(message.Module, schema.Enums[field.EnumType].Module);
+                    }
+                }
+            }
+
+            foreach (ProtoRoute route in schema.Routes)
+            {
+                Add(route.Module, schema.Messages[route.Request].Module);
+                if (route.Response != null)
+                {
+                    Add(route.Module, schema.Messages[route.Response].Module);
+                }
+            }
+
+            var visiting = new HashSet<string>(StringComparer.Ordinal);
+            var visited = new HashSet<string>(StringComparer.Ordinal);
+            void Visit(string module)
+            {
+                if (visited.Contains(module))
+                {
+                    return;
+                }
+
+                if (!visiting.Add(module))
+                {
+                    throw new InvalidOperationException($"Protocol module dependency cycle at {module}.");
+                }
+
+                foreach (string target in dependencies[module].OrderBy(value => value, StringComparer.Ordinal))
+                {
+                    Visit(target);
+                }
+
+                visiting.Remove(module);
+                visited.Add(module);
+            }
+
+            foreach (string module in schema.Modules.Keys)
+            {
+                Visit(module);
+            }
         }
 
         private static ProtoField ReadField(FieldDescriptorProto field, string name)
@@ -276,24 +392,22 @@ namespace GameFrame.ProtocolTools
                 array, nullable, elementNullable, count, utf16, utf8);
         }
 
-        private static string GenerateMessages(ProtoSchema schema)
+        private const string MessageHeader = "// Generated by DotNet/NetworkProtocol. Do not edit.\n" +
+            "#nullable enable\nusing System;\nusing GameFrame.Network;\nusing MemoryPack;\n";
+
+        private static string GenerateMessages(ProtoSchema schema, string module)
         {
             var code = new StringBuilder();
             void Line(string value = "") => code.Append(value).Append('\n');
-            Line("// Generated from Protocol/*.proto by DotNet/NetworkProtocol. Do not edit.");
-            Line("#nullable enable");
-            Line("using System;");
-            Line("using GameFrame.Network;");
-            Line("using MemoryPack;");
-            IEnumerable<string> spaces = schema.Messages.Values.Select(model => model.CsharpName)
-                .Concat(schema.Enums.Values.Select(model => model.CsharpName))
+            IEnumerable<string> spaces = schema.Messages.Values.Where(model => model.Module == module).Select(model => model.CsharpName)
+                .Concat(schema.Enums.Values.Where(model => model.Module == module).Select(model => model.CsharpName))
                 .Select(name => name[..name.LastIndexOf('.')]).Distinct().OrderBy(name => name, StringComparer.Ordinal);
             foreach (string space in spaces)
             {
                 Line();
                 Line("namespace " + space);
                 Line("{");
-                foreach (ProtoEnum definition in schema.Enums.Values.Where(model => model.CsharpName[..model.CsharpName.LastIndexOf('.')] == space)
+                foreach (ProtoEnum definition in schema.Enums.Values.Where(model => model.Module == module && model.CsharpName[..model.CsharpName.LastIndexOf('.')] == space)
                     .OrderBy(model => model.CsharpName, StringComparer.Ordinal))
                 {
                     Line($"    public enum {definition.CsharpName[(definition.CsharpName.LastIndexOf('.') + 1)..]} : int");
@@ -307,7 +421,7 @@ namespace GameFrame.ProtocolTools
                     Line();
                 }
 
-                foreach (ProtoMessage message in schema.Messages.Values.Where(model => model.CsharpName[..model.CsharpName.LastIndexOf('.')] == space)
+                foreach (ProtoMessage message in schema.Messages.Values.Where(model => model.Module == module && model.CsharpName[..model.CsharpName.LastIndexOf('.')] == space)
                     .OrderBy(value => value.CsharpName, StringComparer.Ordinal))
                 {
                     string name = message.CsharpName[(message.CsharpName.LastIndexOf('.') + 1)..];
@@ -350,7 +464,7 @@ namespace GameFrame.ProtocolTools
             return code.ToString();
         }
 
-        private static Assembly CompileMessages(string code, string serializationInfoDirectory, string? codecs = null)
+        internal static Assembly CompileMessages(IEnumerable<string> sources, string serializationInfoDirectory)
         {
             var parseOptions = new CSharpParseOptions(LanguageVersion.Latest, preprocessorSymbols: new[]
             {
@@ -361,8 +475,7 @@ namespace GameFrame.ProtocolTools
                 .Append(typeof(NetProtocolCatalog).Assembly.Location).Append(typeof(MemoryPack.MemoryPackSerializer).Assembly.Location)
                 .Distinct(StringComparer.Ordinal);
             var compilation = CSharpCompilation.Create("GameFrame.Protocol.Validation." + Guid.NewGuid().ToString("N"),
-                (codecs == null ? new[] { code } : new[] { code, codecs })
-                    .Select(source => CSharpSyntaxTree.ParseText(source, parseOptions)),
+                sources.Select(source => CSharpSyntaxTree.ParseText(source, parseOptions)),
                 paths.Select(path => MetadataReference.CreateFromFile(path)),
                 new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true,
                     nullableContextOptions: NullableContextOptions.Enable));
@@ -418,17 +531,20 @@ namespace GameFrame.ProtocolTools
 
         internal sealed class ProtoSchema
         {
+            public SortedDictionary<string, ProtoModule> Modules { get; } = new(StringComparer.OrdinalIgnoreCase);
             public SortedDictionary<string, ProtoMessage> Messages { get; } = new(StringComparer.Ordinal);
             public SortedDictionary<string, ProtoEnum> Enums { get; } = new(StringComparer.Ordinal);
             public List<ProtoRoute> Routes { get; } = new();
         }
 
-        internal sealed record ProtoMessage(string Name, string CsharpName)
+        internal sealed record ProtoModule(string Name, string Package, string Namespace);
+
+        internal sealed record ProtoMessage(string Name, string CsharpName, string Module)
         {
             public List<ProtoField> Fields { get; } = new();
         }
 
-        internal sealed record ProtoEnum(string CsharpName)
+        internal sealed record ProtoEnum(string CsharpName, string Module)
         {
             public List<ProtoEnumValue> Values { get; } = new();
         }
@@ -436,8 +552,62 @@ namespace GameFrame.ProtocolTools
         internal sealed record ProtoEnumValue(string Name, int Number);
         internal sealed record ProtoField(string Name, int Order, string Core, string? MessageType, string? EnumType, bool Array,
             bool Nullable, bool ElementNullable, int? MaxCount, int? MaxUtf16, int? MaxUtf8);
-        internal sealed record ProtoRoute(string Name, uint Opcode, string Kind, NetDelivery Delivery,
-            string Request, string? Response, int MaxBody, int ResponseMaxBody);
+        internal sealed record ProtoRoute(string Module, string Name, string MemberName, string Source, uint Opcode,
+            string Kind, NetDelivery Delivery, string Request, string? Response);
+
+        private static (uint Opcode, uint Kind, uint Delivery) ReadRoute(MethodOptions? options, string source)
+        {
+            // The descriptor parser resolves the aggregate to a protobuf extension payload.
+            // Read it with protobuf-net's primitives, without another IDL parser or runtime model.
+            byte[][] values = options == null ? Array.Empty<byte[]>() : Extensible.GetValues<byte[]>(options, 51006).ToArray();
+            if (values.Length != 1)
+            {
+                throw new InvalidOperationException($"{source}: exactly one game.net.route option is required.");
+            }
+
+            uint opcode = 0;
+            uint kind = 0;
+            uint delivery = 0;
+            int seen = 0;
+            var reader = ProtoReader.State.Create(values[0].AsMemory(), null, null);
+            try
+            {
+                int field;
+                while ((field = reader.ReadFieldHeader()) != 0)
+                {
+                    if (field < 1 || field > 3 || reader.WireType != WireType.Varint || (seen & (1 << field)) != 0)
+                    {
+                        throw new InvalidOperationException($"{source}: unknown, duplicate or invalid route field {field}.");
+                    }
+
+                    seen |= 1 << field;
+                    uint value = reader.ReadUInt32();
+                    switch (field)
+                    {
+                        case 1:
+                            opcode = value;
+                            break;
+                        case 2:
+                            kind = value;
+                            break;
+                        case 3:
+                            delivery = value;
+                            break;
+                    }
+                }
+            }
+            finally
+            {
+                reader.Dispose();
+            }
+
+            if (seen != 14)
+            {
+                throw new InvalidOperationException($"{source}: route requires explicit opcode, kind and delivery.");
+            }
+
+            return (opcode, kind, delivery);
+        }
 
         private sealed class GeneratorOptions : AnalyzerConfigOptionsProvider
         {

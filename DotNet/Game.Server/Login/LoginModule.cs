@@ -1,4 +1,4 @@
-using Game.Protocol;
+using Game.Protocol.Session;
 using Game.Server.Sessions;
 using GameFrame.Network;
 
@@ -25,10 +25,10 @@ namespace Game.Server.Login
 
         internal void Register(ServerApplication application)
         {
-            application.Rpc(GameNetRoutes.Register, handlers.RegisterAsync);
-            application.Rpc(GameNetRoutes.Login, handlers.LoginAsync, LoginHandlers.ClearResponse);
-            application.Rpc(GameNetRoutes.ResumeLogin, handlers.ResumeAsync, LoginHandlers.ClearResponse);
-            application.Rpc(GameNetRoutes.Logout, handlers.LogoutAsync);
+            application.Rpc(SessionRoutes.Register, handlers.RegisterAsync);
+            application.Rpc(SessionRoutes.Login, handlers.LoginAsync, LoginHandlers.ClearResponse);
+            application.Rpc(SessionRoutes.ResumeLogin, handlers.ResumeAsync, LoginHandlers.ClearResponse);
+            application.Rpc(SessionRoutes.Logout, handlers.LogoutAsync);
         }
     }
 }
